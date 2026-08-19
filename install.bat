@@ -8,7 +8,12 @@ REM  Usage:  install.bat [path\to\Vencord]
 REM
 REM  Without an argument the script reads the patched Discord
 REM  app.asar stub to find the Vencord repo Discord actually
-REM  loads, then falls back to %USERPROFILE%\Vencord.
+REM  loads, then falls back to the Vencord folder Vesktop is
+REM  pointed at, then to %USERPROFILE%\Vencord.
+REM
+REM  Vesktop is handled too: it ships its own Vencord and only
+REM  loads another one when its "Vencord Location" points at a
+REM  dist folder, so that setting is written for it.
 REM ============================================================
 
 set "PLUGIN_NAME=Clipper"
@@ -28,7 +33,7 @@ REM ---- 1. Locate the Vencord repository -----------------------
 set "VENCORD_DIR=%~1"
 
 if not defined VENCORD_DIR (
-    echo [1/4] Looking for the Vencord install Discord is patched with...
+    echo [1/5] Looking for the Vencord install Discord is patched with...
     for /f "usebackq delims=" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\find-vencord.ps1"`) do set "VENCORD_DIR=%%A"
 )
 
@@ -51,7 +56,7 @@ echo       Found: %VENCORD_DIR%
 echo.
 
 REM ---- 2. Copy the plugin -------------------------------------
-echo [2/4] Copying the plugin into src\userplugins\%PLUGIN_NAME% ...
+echo [2/5] Copying the plugin into src\userplugins\%PLUGIN_NAME% ...
 set "DEST=%VENCORD_DIR%\src\userplugins\%PLUGIN_NAME%"
 if not exist "%VENCORD_DIR%\src\userplugins" mkdir "%VENCORD_DIR%\src\userplugins"
 xcopy "%PLUGIN_SRC%" "%DEST%\" /E /I /Y /Q >nul
@@ -69,7 +74,7 @@ if errorlevel 1 (
     goto :fail
 )
 
-echo [3/4] Building Vencord (broken third-party plugins get quarantined)...
+echo [3/5] Building Vencord (broken third-party plugins get quarantined)...
 if not exist "%VENCORD_DIR%\node_modules" (
     echo       node_modules missing, running pnpm install first...
     pushd "%VENCORD_DIR%"
@@ -85,10 +90,19 @@ if not "%BUILD_ERR%"=="0" (
 )
 echo.
 
-REM ---- 4. Done ------------------------------------------------
-echo [4/4] Done.
+REM ---- 4. Point Vesktop at this build -------------------------
+echo [4/5] Pointing Vesktop at this build (skipped when Vesktop is not installed)...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\install-vesktop.ps1" -VencordDir "%VENCORD_DIR%"
+if not "%errorlevel%"=="0" (
+    echo       [!] Vesktop was not pointed at this build. Set it by hand:
+    echo           Vesktop Settings ^> Vencord Location ^> %VENCORD_DIR%\dist
+)
 echo.
-echo Restart Discord, then enable "Clipper" in Settings ^> Vencord ^> Plugins.
+
+REM ---- 5. Done ------------------------------------------------
+echo [5/5] Done.
+echo.
+echo Restart Discord (and Vesktop), then enable "Clipper" in Settings ^> Vencord ^> Plugins.
 echo Default keybinds:  Alt+F9 start/stop buffer, Alt+F10 save clip.
 echo.
 pause

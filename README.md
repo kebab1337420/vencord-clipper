@@ -44,9 +44,15 @@ Restart Discord, then enable **Clipper** in Vencord → Plugins.
 ### Vesktop
 
 Vesktop ships its own Vencord, so it has to be pointed at the build that
-contains the plugin. Build Vencord as above (no `pnpm inject`), then in Vesktop:
-**Settings → Vencord Location → the `dist` folder of your Vencord clone**, and
-restart Vesktop. Enable **Clipper** in Vencord → Plugins as usual.
+contains the plugin. `install.bat` does that for you: it writes `vencordDir` in
+Vesktop's `state.json` (`%APPDATA%esktop`), pointing at the `dist` folder of
+the Vencord repo it just built. **Close Vesktop first** — it rewrites that file
+when it exits, which would undo the change — then run `install.bat` and start
+Vesktop again.
+
+By hand, or on Linux: build Vencord as above (no `pnpm inject`), then in
+Vesktop **Settings → Vencord Location → the `dist` folder of your Vencord
+clone**, and restart Vesktop. Enable **Clipper** in Vencord → Plugins as usual.
 
 What differs there:
 

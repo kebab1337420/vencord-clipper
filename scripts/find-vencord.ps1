@@ -31,7 +31,32 @@ function Get-PatchedVencordPath {
     return $null
 }
 
+# Vesktop is not patched: it records the Vencord build it loads in state.json,
+# as the repo's dist folder.
+function Get-VesktopVencordPath {
+    $dataDirs = @(
+        (Join-Path $env:APPDATA "vesktop"),
+        (Join-Path $env:APPDATA "Vesktop"),
+        (Join-Path $env:APPDATA "equibop"),
+        (Join-Path $env:APPDATA "Equibop")
+    ) | Where-Object { Test-Path $_ }
+
+    foreach ($dir in $dataDirs) {
+        $stateFile = Join-Path $dir "state.json"
+        if (-not (Test-Path $stateFile)) { continue }
+
+        $dist = (Get-Content $stateFile -Raw | ConvertFrom-Json).vencordDir
+        if (-not $dist) { continue }
+
+        $repo = Split-Path $dist -Parent
+        if (Test-Path (Join-Path $repo "package.json")) { return $repo }
+    }
+
+    return $null
+}
+
 $path = Get-PatchedVencordPath
+if (-not $path) { $path = Get-VesktopVencordPath }
 if (-not $path -and (Test-Path "$env:USERPROFILE\Vencord\package.json")) {
     $path = "$env:USERPROFILE\Vencord"
 }

@@ -623,7 +623,13 @@ function Picker({ onClose }: { onClose(): void; }) {
                 <div className="vc-clipper-body">
                     {error && <div className="vc-clipper-note vc-clipper-error">{error}</div>}
                     {!error && sources == null && <div className="vc-clipper-note">Loading sources…</div>}
-                    {!error && sources != null && shown.length === 0 && (
+                    {!error && sources != null && sources.length === 0 && (
+                        <div className="vc-clipper-note">
+                            No source can be listed here. On Wayland the desktop portal picks the
+                            source itself: close this and start the buffer, the system dialog will ask.
+                        </div>
+                    )}
+                    {!error && sources != null && sources.length > 0 && shown.length === 0 && (
                         <div className="vc-clipper-note">Nothing matches.</div>
                     )}
 

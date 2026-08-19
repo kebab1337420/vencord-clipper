@@ -375,8 +375,11 @@ function resolveSource(sources: CaptureSource[]): CaptureSource | null {
  * used rather than the legacy `chromeMediaSource` constraints, which crash the
  * renderer process outright on some Windows setups.
  *
- * Fallback: those legacy constraints, used only when the handler could not be
- * installed or when `getDisplayMedia` still refuses.
+ * Vesktop is the exception: it installs its own display-media handler for its
+ * picker and its Linux audio capture, Electron keeps only one, and it cannot be
+ * read back to be restored. Taking it over would break Vesktop's screen share
+ * for the rest of the session, so there the legacy constraints are used
+ * instead, with Vesktop's own picker as the last resort.
  */
 async function acquireStream(fps: number, resolution: number): Promise<MediaStream> {
     const video: MediaTrackConstraints = {
@@ -392,18 +395,31 @@ async function acquireStream(fps: number, resolution: number): Promise<MediaStre
     const source = sources.length ? resolveSource(sources) : null;
     if (source) rememberSource(source);
 
+    // Wayland returns no sources at all: the portal picks the source itself.
+    if (!source) return navigator.mediaDevices.getDisplayMedia({ video, audio: true });
+
+    if (IS_VESKTOP) {
+        try {
+            return await getDesktopStream(source.id, fps, resolution);
+        } catch (e) {
+            logger.warn("Desktop constraints failed, falling back to Vesktop's own picker", e);
+            return navigator.mediaDevices.getDisplayMedia({ video, audio: true });
+        }
+    }
+
+    let armed = false;
     try {
-        await Native.armDisplayMedia(source?.id ?? "");
+        armed = await Native.armDisplayMedia(source.id, true);
+        if (!armed) return await getDesktopStream(source.id, fps, resolution);
+
         return await navigator.mediaDevices.getDisplayMedia({ video, audio: true });
     } catch (e) {
         logger.warn("getDisplayMedia failed, falling back to the legacy desktop constraints", e);
-
-        if (!source) throw e;
         return getDesktopStream(source.id, fps, resolution);
     } finally {
         // The handler is only needed for the one call above; leaving it installed
         // would hijack any other display capture in the client.
-        Native.disarmDisplayMedia().catch(() => void 0);
+        if (armed) Native.disarmDisplayMedia().catch(() => void 0);
     }
 }
 

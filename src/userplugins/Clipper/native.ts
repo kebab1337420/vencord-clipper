@@ -15,6 +15,31 @@ import { app, desktopCapturer, dialog, globalShortcut, type IpcMainInvokeEvent, 
 import { mkdirSync, writeFileSync } from "fs";
 import { isAbsolute, join } from "path";
 
+/*
+ * Windows Graphics Capture is the only backend that reports "not capturable"
+ * per window, and loopback audio through `getDisplayMedia` is Windows-only as
+ * well, so both behaviours are gated on the platform rather than assumed.
+ */
+const IS_WINDOWS = process.platform === "win32";
+
+/**
+ * Wayland has no window list: `desktopCapturer.getSources` goes through the
+ * xdg-desktop-portal, which pops a system dialog on every single call. Listing
+ * is therefore skipped entirely there and the renderer falls back to plain
+ * `getDisplayMedia`, which is what the portal expects anyway.
+ */
+const IS_WAYLAND = process.platform === "linux"
+    && (process.env.XDG_SESSION_TYPE === "wayland" || !!process.env.WAYLAND_DISPLAY);
+
+/**
+ * Vesktop (and its forks) install their own display-media handler at startup
+ * for their picker and their Linux audio capture. Electron only keeps one, and
+ * it cannot be read back, so overwriting it would break their screen share
+ * until the app restarts. The renderer says which client it runs in; the app
+ * name is a backstop for the case it does not.
+ */
+const IS_VESKTOP_APP = /vesktop|equibop/i.test(app.getName());
+
 function resolveDirectory(dir: string): string {
     const trimmed = dir?.trim();
     if (trimmed && isAbsolute(trimmed)) return trimmed;
@@ -55,6 +80,19 @@ export function openClipDirectory(_: IpcMainInvokeEvent, dir: string): void {
     shell.openPath(target);
 }
 
+export interface PlatformInfo {
+    platform: NodeJS.Platform;
+    /** Wayland session: no window list, and OS-level keybinds do not fire. */
+    wayland: boolean;
+    /** Vesktop or a fork, which owns the display-media handler itself. */
+    vesktop: boolean;
+}
+
+/** What the renderer cannot tell about the host on its own. */
+export function getPlatformInfo(_: IpcMainInvokeEvent): PlatformInfo {
+    return { platform: process.platform, wayland: IS_WAYLAND, vesktop: IS_VESKTOP_APP };
+}
+
 export interface CaptureSource {
     id: string;
     name: string;
@@ -85,6 +123,8 @@ const uncapturable = new Set<string>();
  * listing touches no capture session at all.
  */
 export async function getCaptureSources(_: IpcMainInvokeEvent, withThumbnails = true): Promise<CaptureSource[]> {
+    if (IS_WAYLAND) return [];
+
     const sources = await desktopCapturer.getSources({
         types: ["screen", "window"],
         thumbnailSize: withThumbnails ? { width: 320, height: 180 } : { width: 0, height: 0 },
@@ -104,8 +144,10 @@ export async function getCaptureSources(_: IpcMainInvokeEvent, withThumbnails = 
 
         const empty = s.thumbnail.isEmpty();
 
-        // A screen with an empty preview is still recordable; a window is not.
-        if (!isScreen && empty) {
+        // A screen with an empty preview is still recordable; a window is not -
+        // but only Windows Graphics Capture refuses that way, so elsewhere an
+        // empty preview means nothing and the window stays in the list.
+        if (IS_WINDOWS && !isScreen && empty) {
             uncapturable.add(s.id);
             continue;
         }
@@ -134,9 +176,20 @@ export async function getCaptureSources(_: IpcMainInvokeEvent, withThumbnails = 
  */
 let armedSourceId = "";
 
-/** Points the display-media handler at a source. Empty id means the primary screen. */
-export function armDisplayMedia(_: IpcMainInvokeEvent, sourceId: string): void {
+/** True while this plugin owns the session's display-media handler. */
+let handlerInstalled = false;
+
+/**
+ * Points the display-media handler at a source. Empty id means the primary
+ * screen. `allowed` is false when the client already owns the handler (Vesktop),
+ * in which case nothing is installed and false is returned so the renderer takes
+ * another path.
+ */
+export function armDisplayMedia(_: IpcMainInvokeEvent, sourceId: string, allowed = true): boolean {
+    if (!allowed || IS_VESKTOP_APP) return false;
+
     armedSourceId = sourceId ?? "";
+    handlerInstalled = true;
 
     session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
         const sources = await desktopCapturer.getSources({
@@ -159,16 +212,26 @@ export function armDisplayMedia(_: IpcMainInvokeEvent, sourceId: string): void {
             return;
         }
 
-        // Loopback audio is only meaningful for whole screens on Windows.
-        callback(source.id.startsWith("screen:")
+        // Loopback audio only exists on Windows, and only for whole screens.
+        callback(IS_WINDOWS && source.id.startsWith("screen:")
             ? { video: source, audio: "loopback" }
             : { video: source });
     }, { useSystemPicker: false });
+
+    return true;
 }
 
-/** Removes the handler so Discord's own capture is left untouched when idle. */
-export function disarmDisplayMedia(_: IpcMainInvokeEvent): void {
+/**
+ * Removes the handler so the client's own capture is left untouched when idle.
+ *
+ * Only ever clears a handler this plugin installed: clearing one owned by
+ * Vesktop would kill its screen share for the rest of the session.
+ */
+export function disarmDisplayMedia(_?: IpcMainInvokeEvent): void {
     armedSourceId = "";
+
+    if (!handlerInstalled) return;
+    handlerInstalled = false;
     session.defaultSession.setDisplayMediaRequestHandler(null);
 }
 

@@ -41,6 +41,29 @@ Copy-Item -Recurse "<this repo>\src\userplugins\Clipper" "<Vencord>\src\userplug
 
 Restart Discord, then enable **Clipper** in Vencord → Plugins.
 
+### Vesktop
+
+Vesktop ships its own Vencord, so it has to be pointed at the build that
+contains the plugin. Build Vencord as above (no `pnpm inject`), then in Vesktop:
+**Settings → Vencord Location → the `dist` folder of your Vencord clone**, and
+restart Vesktop. Enable **Clipper** in Vencord → Plugins as usual.
+
+What differs there:
+
+- Vesktop owns Electron's display-media handler for its own picker and its Linux
+  audio capture, and Electron keeps only one. The plugin never takes it over, so
+  capture goes through the legacy desktop constraints instead, and Vesktop's own
+  picker is used as a last resort. Nothing about Vesktop's screen share changes.
+- **Wayland** has no window list: `desktopCapturer` goes through
+  xdg-desktop-portal, which pops a system dialog on every call. The plugin's own
+  picker is empty there and says so — start the buffer and pick the source in
+  the portal dialog. X11 lists screens and windows normally.
+- **System audio is Windows-only** on this capture path. On Linux the clip has
+  the microphone (enable **Include mic**) but no desktop audio.
+- **Wayland ignores application-registered hotkeys**, so the keybinds only fire
+  while Discord is focused. Bind a compositor shortcut, or use the chat bar
+  button.
+
 ## Usage
 
 | Action | Default |
@@ -92,5 +115,7 @@ firing it only while Discord is focused.
   or another overlay already registered the accelerator, Windows hands it to
   them and the bind only works while Discord is focused. Rebind to something
   free. Keys with no Electron accelerator name stay Discord-only as well.
+- **Linux system audio.** Loopback capture through `getDisplayMedia` exists only
+  on Windows, so clips recorded on Linux carry no desktop audio.
 - Encoding is software-side (Chromium's MediaRecorder), so a high bitrate at
   120 FPS costs noticeably more CPU than a native GPU encoder would.

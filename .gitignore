@@ -1,0 +1,6 @@
+# Local Vencord checkout used to build and test the plugin
+Vencord/
+
+node_modules/
+dist/
+*.log

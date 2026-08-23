@@ -12,8 +12,8 @@
  */
 
 import { app, desktopCapturer, dialog, globalShortcut, type IpcMainInvokeEvent, session, shell } from "electron";
-import { mkdirSync, writeFileSync } from "fs";
-import { isAbsolute, join } from "path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { basename, extname, isAbsolute, join } from "path";
 
 /*
  * Windows Graphics Capture is the only backend that reports "not capturable"
@@ -47,14 +47,202 @@ function resolveDirectory(dir: string): string {
     return join(app.getPath("videos"), "DiscordClips");
 }
 
-/** Writes a clip and returns the absolute path it landed on. */
-export function saveClip(_: IpcMainInvokeEvent, dir: string, name: string, data: Uint8Array): string {
+/**
+ * Reduces a clip name to a plain file name in the clip folder.
+ *
+ * The name comes from the renderer, and everything a plugin exports here is
+ * callable from there, so a name is never trusted with a directory component or
+ * an extension of its own choosing: `..\..\autorun.bat` must not escape the clip
+ * folder, and nothing but a video file may be written.
+ */
+function safeClipName(name: string): string {
+    const flat = basename(String(name ?? "").replace(/[\\/]/g, "_")).trim();
+    const cleaned = flat.replace(/[<>:"|?*\x00-\x1f]/g, "_").replace(/^\.+/, "");
+
+    // Parentheses are allowed because the de-duplicating suffix uses them, and
+    // png because the editor saves single frames next to the clips.
+    const match = /^([\w.\-+ ()[\]]{1,120})\.(webm|mp4|png)$/i.exec(cleaned);
+    if (match) return `${match[1]}.${match[2].toLowerCase()}`;
+
+    return `clip-${Date.now()}.webm`;
+}
+
+/** Appends " (2)", " (3)"... until the name is free, so nothing is overwritten. */
+function freePath(dir: string, name: string): string {
+    const ext = extname(name);
+    const stem = name.slice(0, name.length - ext.length);
+
+    let path = join(dir, name);
+    for (let i = 2; existsSync(path) && i < 1000; i++) path = join(dir, `${stem} (${i})${ext}`);
+
+    return path;
+}
+
+/**
+ * Writes a clip and returns the absolute path it landed on.
+ *
+ * `keep` never overwrites an existing file: the editor exports under a name
+ * derived from the source clip, which collides as soon as the same clip is
+ * trimmed twice.
+ */
+export function saveClip(_: IpcMainInvokeEvent, dir: string, name: string, data: Uint8Array, keep = false): string {
     const target = resolveDirectory(dir);
     mkdirSync(target, { recursive: true });
 
-    const path = join(target, name);
+    const safe = safeClipName(name);
+    const path = keep ? freePath(target, safe) : join(target, safe);
+
     writeFileSync(path, Buffer.from(data));
     return path;
+}
+
+export interface StoredClip {
+    name: string;
+    path: string;
+    size: number;
+    /** Last modification, epoch ms. */
+    modified: number;
+}
+
+/** Clips found in the folder, newest first. */
+export function listClips(_: IpcMainInvokeEvent, dir: string): StoredClip[] {
+    const target = resolveDirectory(dir);
+    if (!existsSync(target)) return [];
+
+    const clips: StoredClip[] = [];
+
+    for (const entry of readdirSync(target, { withFileTypes: true })) {
+        if (!entry.isFile() || !/\.(webm|mp4)$/i.test(entry.name)) continue;
+
+        const path = join(target, entry.name);
+        try {
+            const stat = statSync(path);
+            clips.push({ name: entry.name, path, size: stat.size, modified: stat.mtimeMs });
+        } catch {
+            // Deleted between the listing and the stat, or unreadable: skip it.
+        }
+    }
+
+    return clips.sort((a, b) => b.modified - a.modified);
+}
+
+/**
+ * Reads one clip back for the editor.
+ *
+ * The name goes through the same sanitiser as a write, so the renderer can only
+ * ever read a video file sitting directly in the clip folder.
+ */
+export function readClip(_: IpcMainInvokeEvent, dir: string, name: string): Uint8Array {
+    const path = join(resolveDirectory(dir), safeClipName(name));
+    return new Uint8Array(readFileSync(path));
+}
+
+/** Moves a clip to the trash, so a mis-click stays undoable. */
+export async function deleteClip(_: IpcMainInvokeEvent, dir: string, name: string): Promise<void> {
+    const path = join(resolveDirectory(dir), safeClipName(name));
+
+    try {
+        await shell.trashItem(path);
+    } catch {
+        // No trash available (some Linux setups, network drives): delete outright.
+        unlinkSync(path);
+    }
+}
+
+/** Renames a clip inside the folder. Returns the name it ended up with. */
+export function renameClip(_: IpcMainInvokeEvent, dir: string, name: string, next: string): string {
+    const target = resolveDirectory(dir);
+    const from = join(target, safeClipName(name));
+
+    // The extension is the source of truth for the container, so it is kept
+    // whatever the user typed.
+    const ext = extname(safeClipName(name));
+    const wanted = safeClipName(next.toLowerCase().endsWith(ext) ? next : next + ext);
+
+    const to = freePath(target, wanted);
+    renameSync(from, to);
+
+    return basename(to);
+}
+
+/*
+ * Clip metadata lives in one JSON file next to the clips rather than in the
+ * plugin settings: the folder is what the user backs up, moves or shares, and
+ * metadata that stayed behind in Vencord's settings would be lost the moment
+ * the folder moved. It is also the only place a per-clip category can survive a
+ * Vencord reinstall.
+ */
+const LIBRARY_FILE = "clipper-library.json";
+
+/** Raw metadata document, kept opaque here: the renderer owns its shape. */
+export function readLibrary(_: IpcMainInvokeEvent, dir: string): string {
+    const path = join(resolveDirectory(dir), LIBRARY_FILE);
+    if (!existsSync(path)) return "";
+
+    try {
+        return readFileSync(path, "utf8");
+    } catch {
+        // Unreadable or mid-write: the renderer treats this as an empty library
+        // rather than losing the clips it is listing.
+        return "";
+    }
+}
+
+export function writeLibrary(_: IpcMainInvokeEvent, dir: string, json: string): void {
+    const target = resolveDirectory(dir);
+    mkdirSync(target, { recursive: true });
+
+    // A metadata file is small, but it is rewritten on every tag change while
+    // clips may be recording: write beside it and rename, so a crash mid-write
+    // leaves the previous document intact instead of a truncated one.
+    const path = join(target, LIBRARY_FILE);
+    const temp = `${path}.tmp`;
+
+    writeFileSync(temp, String(json ?? ""), "utf8");
+    renameSync(temp, path);
+}
+
+/** Native picker for videos to drop on the studio timeline. */
+export async function pickVideoFiles(_: IpcMainInvokeEvent): Promise<string[]> {
+    const result = await dialog.showOpenDialog({
+        title: "Add videos to the timeline",
+        properties: ["openFile", "multiSelections"],
+        filters: [{ name: "Video", extensions: ["mp4", "webm", "mkv", "mov", "m4v"] }]
+    });
+
+    return result.canceled ? [] : result.filePaths;
+}
+
+/**
+ * Reads a video the user picked, by absolute path.
+ *
+ * Unlike `readClip` this deliberately leaves the clip folder: the point is to
+ * bring outside footage in. It is still fenced - only a video extension, only a
+ * path the user chose in the OS dialog above - and capped, because the bytes
+ * cross IPC and are held in the renderer while the timeline is open.
+ */
+const MAX_IMPORT_BYTES = 512 * 1024 * 1024;
+
+export function readVideoFile(_: IpcMainInvokeEvent, path: string): Uint8Array {
+    if (!isAbsolute(path) || !/\.(mp4|webm|mkv|mov|m4v)$/i.test(path)) {
+        throw new Error("Not a video file");
+    }
+
+    const stat = statSync(path);
+    if (stat.size > MAX_IMPORT_BYTES) {
+        // The file is read here, copied across IPC and held as a Blob in the
+        // renderer: three copies of whatever passes through. Half a gigabyte is
+        // already an uncomfortable amount to hold while the timeline is open.
+        const mb = Math.round(stat.size / (1024 * 1024));
+        throw new Error(`That video is ${mb} MB; imports are capped at 512 MB. Trim it or lower its bitrate first.`);
+    }
+
+    return new Uint8Array(readFileSync(path));
+}
+
+/** Shows the clip in the file explorer, with the file itself selected. */
+export function revealClip(_: IpcMainInvokeEvent, dir: string, name: string): void {
+    shell.showItemInFolder(join(resolveDirectory(dir), safeClipName(name)));
 }
 
 /** Absolute folder clips land in with the current setting. */
@@ -130,6 +318,13 @@ export async function getCaptureSources(_: IpcMainInvokeEvent, withThumbnails = 
         thumbnailSize: withThumbnails ? { width: 320, height: 180 } : { width: 0, height: 0 },
         fetchWindowIcons: false
     });
+
+    // Window ids die with their window; drop the ones the system no longer lists
+    // so the set cannot grow for the whole session.
+    if (uncapturable.size) {
+        const alive = new Set(sources.map(s => s.id));
+        for (const id of uncapturable) if (!alive.has(id)) uncapturable.delete(id);
+    }
 
     const listed: CaptureSource[] = [];
 
@@ -255,11 +450,13 @@ let waiters: Array<(action: ShortcutAction | null) => void> = [];
 let pending: ShortcutAction[] = [];
 
 function fire(action: ShortcutAction) {
-    const waiting = waiters;
-    waiters = [];
+    // One press, one action: only the oldest poller is woken. Waking every one
+    // of them would run the action twice whenever a stale poll is still parked,
+    // which is exactly what happens right after the client reloads.
+    const next = waiters.shift();
 
-    if (waiting.length) {
-        for (const resolve of waiting) resolve(action);
+    if (next) {
+        next(action);
         return;
     }
 

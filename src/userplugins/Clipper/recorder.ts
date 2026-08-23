@@ -15,11 +15,14 @@
 import { showNotification } from "@api/Notifications";
 import { Logger } from "@utils/Logger";
 import type { PluginNative } from "@utils/types";
-import { Toasts } from "@webpack/common";
+import { MediaEngineStore, Toasts } from "@webpack/common";
 
+import { tagSavedClip } from "./library";
+import { gainOf, MIC_CHANNEL, type MixerLevel, readMixer, SYSTEM_CHANNEL } from "./mixer";
 import type { CaptureSource } from "./native";
 import { extensionFor, mimeCandidates, settings } from "./settings";
 import { formatBytes, timestampName } from "./utils";
+import { repairClip } from "./webm";
 
 export const logger = new Logger("Clipper", "#f0b132");
 
@@ -40,12 +43,28 @@ class ClipRecorder {
     private stream: MediaStream | null = null;
     private micStream: MediaStream | null = null;
     private audioCtx: AudioContext | null = null;
+    private destination: MediaStreamAudioDestinationNode | null = null;
     private recorder: MediaRecorder | null = null;
+
+    /** Extra input devices opened for the mix, kept so they can be stopped. */
+    private extraStreams: MediaStream[] = [];
+
+    /** Live gain stage and meter of every channel in the mix, by channel id. */
+    private channels = new Map<string, { gain: GainNode; meter: AnalyserNode; factor: number; data: Uint8Array<ArrayBuffer>; }>();
 
     /** First chunk emitted by the recorder: holds the container header. */
     private header: Blob | null = null;
     private chunks: TimedChunk[] = [];
-    private startedAt = 0;
+
+    /**
+     * Bumped by every cleanup, so a `start()` still awaiting its stream knows the
+     * user stopped the buffer in the meantime and drops what it acquired instead
+     * of arming a recorder nobody asked for.
+     */
+    private generation = 0;
+
+    /** Resolved by the next chunk, used to flush the recorder before a save. */
+    private nextChunk: (() => void) | null = null;
 
     private listeners = new Set<Listener>();
 
@@ -56,10 +75,20 @@ class ClipRecorder {
         return this.state === "recording";
     }
 
-    /** Seconds currently held in the buffer. */
+    /**
+     * Seconds currently held in the buffer.
+     *
+     * Measured from the oldest kept chunk rather than from the start of the
+     * capture, so it stays honest right after a prune and while the buffer is
+     * still filling up.
+     */
     get bufferedSeconds() {
-        if (!this.chunks.length) return 0;
-        return Math.min((Date.now() - this.startedAt) / 1000, settings.store.clipLength);
+        const oldest = this.chunks[0];
+        if (!oldest) return 0;
+
+        // A chunk handed over at T covers the timeslice that ends at T.
+        const span = (Date.now() - oldest.at + TIMESLICE) / 1000;
+        return Math.min(span, settings.store.clipLength);
     }
 
     get bufferedBytes() {
@@ -80,20 +109,34 @@ class ClipRecorder {
         if (this.state !== "idle") return this.isRecording;
 
         this.setState("starting");
+        const mine = this.generation;
+
         try {
-            const { fps, resolution, videoBitrate, audioBitrate, includeMic, container } = settings.store;
+            const { fps, resolution, videoBitrate, audioBitrate, container } = settings.store;
 
-            this.stream = await acquireStream(fps, resolution);
+            const stream = await acquireStream(fps, resolution);
 
-            const [videoTrack] = this.stream.getVideoTracks();
+            // Stopped while the source was being acquired: drop what we just got.
+            if (mine !== this.generation) {
+                stream.getTracks().forEach(t => t.stop());
+                return false;
+            }
+
+            this.stream = stream;
+
+            const [videoTrack] = stream.getVideoTracks();
             if (!videoTrack) throw new Error("The picked source returned no video track");
 
             // User stopped the capture from Discord's / the OS' own UI.
-            videoTrack?.addEventListener("ended", () => this.stop());
+            videoTrack.addEventListener("ended", () => this.stop());
 
-            const audioTrack = includeMic
-                ? await this.buildMixedAudio(this.stream)
-                : this.stream.getAudioTracks()[0];
+            const audioTrack = await this.buildMixedAudio(stream);
+
+            // Same again, this time with the mic stream and the audio graph to drop.
+            if (mine !== this.generation) {
+                this.cleanup();
+                return false;
+            }
 
             const tracks = [videoTrack, audioTrack].filter(Boolean) as MediaStreamTrack[];
             const recordStream = new MediaStream(tracks);
@@ -109,7 +152,6 @@ class ClipRecorder {
 
             this.header = null;
             this.chunks = [];
-            this.startedAt = Date.now();
 
             this.recorder.ondataavailable = e => this.onChunk(e.data);
             this.recorder.onerror = e => {
@@ -125,45 +167,208 @@ class ClipRecorder {
             this.cleanup();
             this.setState("idle");
 
-            if (e instanceof CancelledError) return false;
-
             logger.error("Failed to start capture", e);
             toast(`Could not start the clip buffer: ${errorMessage(e)}`, Toasts.Type.FAILURE);
             return false;
         }
     }
 
-    /** Mixes the captured system audio with the microphone into a single track. */
+    /**
+     * Wires one gain stage per audio channel into a single track.
+     *
+     * Everything goes through the graph, even a lone system channel: the point
+     * is that the levels stay reachable while the buffer runs, so a slider moved
+     * mid-game is heard in the next chunk instead of in the next recording.
+     */
     private async buildMixedAudio(display: MediaStream): Promise<MediaStreamTrack | undefined> {
-        try {
-            this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        } catch (e) {
-            logger.warn("Microphone unavailable, falling back to system audio only", e);
-            return display.getAudioTracks()[0];
-        }
+        const mixer = readMixer();
+        const { includeMic } = settings.store;
+
+        const displayTracks = display.getAudioTracks();
+        if (!displayTracks.length && !includeMic && !mixer.extras.length) return undefined;
 
         this.audioCtx = new AudioContext();
-        const destination = this.audioCtx.createMediaStreamDestination();
+        this.destination = this.audioCtx.createMediaStreamDestination();
 
-        for (const source of [display, this.micStream]) {
-            if (!source.getAudioTracks().length) continue;
-            this.audioCtx.createMediaStreamSource(new MediaStream(source.getAudioTracks())).connect(destination);
+        if (displayTracks.length) {
+            const source = this.audioCtx.createMediaStreamSource(new MediaStream(displayTracks));
+            this.connectChannel(SYSTEM_CHANNEL, source, gainOf(mixer.system));
         }
 
-        return destination.stream.getAudioTracks()[0];
+        if (includeMic) {
+            const mic = discordMicSettings();
+
+            try {
+                this.micStream = await captureMic(mic);
+
+                if (this.micStream.getAudioTracks().length) {
+                    const source = this.audioCtx.createMediaStreamSource(this.micStream);
+
+                    // Discord's input volume slider is not part of the track, so
+                    // it is folded into the channel's own level rather than lost.
+                    const device = Math.min(2, Math.max(0, (mic?.volume ?? 100) / 100));
+                    this.connectChannel(MIC_CHANNEL, source, gainOf(mixer.mic), device);
+                }
+            } catch (e) {
+                logger.warn("Microphone unavailable, recording without it", e);
+            }
+        }
+
+        for (const extra of mixer.extras) {
+            try {
+                // Deliberately raw: an extra channel is usually a virtual cable
+                // carrying an application's output, and echo cancellation or
+                // noise suppression on music is destructive.
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        deviceId: { exact: extra.deviceId },
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                });
+
+                this.extraStreams.push(stream);
+
+                if (stream.getAudioTracks().length) {
+                    this.connectChannel(extra.id, this.audioCtx.createMediaStreamSource(stream), gainOf(extra));
+                }
+            } catch (e) {
+                logger.warn(`Could not open the audio channel "${extra.label}"`, e);
+                toast(`Audio channel "${extra.label}" is unavailable`, Toasts.Type.FAILURE);
+            }
+        }
+
+        if (!this.channels.size) {
+            this.audioCtx.close().catch(() => void 0);
+            this.audioCtx = null;
+            this.destination = null;
+
+            return displayTracks[0];
+        }
+
+        return this.destination.stream.getAudioTracks()[0];
+    }
+
+    /**
+     * Adds one source to the mix behind its own gain stage and meter.
+     *
+     * `factor` is a level that belongs to the device rather than to the slider -
+     * Discord's own input volume - so the slider keeps meaning what it says when
+     * it is moved later.
+     */
+    private connectChannel(id: string, source: AudioNode, level: number, factor = 1) {
+        const { audioCtx: ctx, destination } = this;
+        if (!ctx || !destination) return;
+
+        const gain = ctx.createGain();
+        gain.gain.value = level * factor;
+
+        // Small window: the meter is a bar in a settings panel, not an analyser.
+        const meter = ctx.createAnalyser();
+        meter.fftSize = 256;
+
+        source.connect(gain);
+        gain.connect(destination);
+        gain.connect(meter);
+
+        this.channels.set(id, { gain, meter, factor, data: new Uint8Array(meter.fftSize) });
+    }
+
+    /** Channels currently wired up, in the order they were added. */
+    get audioChannels(): string[] {
+        return [...this.channels.keys()];
+    }
+
+    /** Applies a level to a running mix. No-op when nothing is recording. */
+    setChannelLevel(id: string, level: MixerLevel) {
+        const channel = this.channels.get(id);
+        if (!channel || !this.audioCtx) return;
+
+        const target = gainOf(level) * channel.factor;
+
+        // Ramped rather than set: a gain jump on a live graph is an audible click
+        // in the clip that is being buffered right now.
+        try {
+            channel.gain.gain.setTargetAtTime(target, this.audioCtx.currentTime, 0.02);
+        } catch {
+            channel.gain.gain.value = target;
+        }
+    }
+
+    /**
+     * Rough loudness of a channel, 0 to 1, for a level meter.
+     *
+     * Read after the gain stage, so a muted channel reads zero and the bar shows
+     * what is actually going into the clip.
+     */
+    channelLevel(id: string): number {
+        const channel = this.channels.get(id);
+        if (!channel) return 0;
+
+        channel.meter.getByteTimeDomainData(channel.data);
+
+        let sum = 0;
+        for (const sample of channel.data) {
+            const centred = (sample - 128) / 128;
+            sum += centred * centred;
+        }
+
+        // A quiet voice sits near 0.05 RMS, so the bar is scaled to make the
+        // useful range visible rather than a sliver at the far left.
+        return Math.min(1, Math.sqrt(sum / channel.data.length) * 3);
     }
 
     private onChunk(blob: Blob) {
-        if (!blob.size) return;
+        const notify = this.nextChunk;
+        this.nextChunk = null;
 
-        // The very first chunk carries the container header; every later save reuses it.
-        if (!this.header) {
-            this.header = blob;
-            return;
+        if (blob.size) {
+            // The very first chunk carries the container header; every later save
+            // reuses it.
+            if (!this.header) {
+                this.header = blob;
+            } else {
+                this.chunks.push({ blob, at: Date.now() });
+                this.prune();
+            }
         }
 
-        this.chunks.push({ blob, at: Date.now() });
-        this.prune();
+        notify?.();
+    }
+
+    /**
+     * Asks the recorder for whatever it holds and waits for that chunk, so a save
+     * ends on "now" instead of on the last full timeslice. Gives up quickly: a
+     * stalled recorder must not block the save.
+     */
+    private async flush(): Promise<void> {
+        const { recorder } = this;
+        if (!recorder || recorder.state !== "recording") return;
+
+        await new Promise<void>(resolve => {
+            let done = false;
+            const settle = () => {
+                if (done) return;
+                done = true;
+                clearTimeout(timer);
+                resolve();
+            };
+
+            const timer = setTimeout(() => {
+                if (this.nextChunk === settle) this.nextChunk = null;
+                settle();
+            }, 500);
+
+            this.nextChunk = settle;
+
+            try {
+                recorder.requestData();
+            } catch (e) {
+                logger.warn("Could not flush the recorder", e);
+                settle();
+            }
+        });
     }
 
     private prune() {
@@ -181,11 +386,17 @@ class ClipRecorder {
     }
 
     private cleanup() {
+        // Any start() still waiting on a stream is now stale.
+        this.generation++;
+
         try {
             if (this.recorder && this.recorder.state !== "inactive") this.recorder.stop();
         } catch (e) {
             logger.warn("Error stopping recorder", e);
         }
+
+        this.nextChunk?.();
+        this.nextChunk = null;
 
         this.recorder = null;
         this.header = null;
@@ -193,14 +404,20 @@ class ClipRecorder {
 
         this.stream?.getTracks().forEach(t => t.stop());
         this.micStream?.getTracks().forEach(t => t.stop());
+        this.extraStreams.forEach(s => s.getTracks().forEach(t => t.stop()));
         this.audioCtx?.close().catch(() => void 0);
 
+        this.channels.clear();
+        this.extraStreams = [];
         this.stream = this.micStream = null;
         this.audioCtx = null;
+        this.destination = null;
     }
 
     /** Writes the buffered footage to disk. Capture keeps running. */
     async save(): Promise<void> {
+        if (this.state === "saving") return;
+
         if (!this.isRecording) {
             toast("Clip buffer is not running", Toasts.Type.FAILURE);
             return;
@@ -211,17 +428,37 @@ class ClipRecorder {
         }
 
         this.setState("saving");
+        const mine = this.generation;
+
         try {
             // Flush whatever the recorder holds so the clip ends on "now".
-            this.recorder?.requestData();
-            await new Promise(r => setTimeout(r, 120));
+            await this.flush();
             this.prune();
 
+            if (mine !== this.generation) {
+                toast("Clip buffer stopped before the clip could be saved", Toasts.Type.FAILURE);
+                return;
+            }
+
             const seconds = Math.round(this.bufferedSeconds);
-            const blob = new Blob([this.header, ...this.chunks.map(c => c.blob)], { type: this.mimeType });
+            const raw = new Blob([this.header, ...this.chunks.map(c => c.blob)], { type: this.mimeType });
             const name = `${timestampName()}.${extensionFor(this.mimeType)}`;
 
+            // Cluster timecodes are absolute, so the kept ones still carry the
+            // time elapsed since the buffer started: without this the clip
+            // claims to last as long as the whole session.
+            let blob = raw;
+            try {
+                blob = await repairClip(raw, this.mimeType);
+            } catch (e) {
+                logger.warn("Could not rebase the clip timeline, saving it as recorded", e);
+            }
+
             const path = await writeClip(blob, name);
+
+            // File the clip under whatever is running now: after the save, the
+            // player may already have alt-tabbed away.
+            await tagSavedClip(path);
 
             if (settings.store.notifications) {
                 showNotification({
@@ -234,9 +471,13 @@ class ClipRecorder {
             }
         } catch (e) {
             logger.error("Failed to save clip", e);
-            toast("Failed to save the clip", Toasts.Type.FAILURE);
+            toast(`Failed to save the clip: ${errorMessage(e)}`, Toasts.Type.FAILURE);
         } finally {
-            this.setState("recording");
+            // The buffer may have been stopped while the file was being written;
+            // in that case "saving" must fall back to idle, not to "recording".
+            // Cast: TS still narrows `state` from the guard at the top of save(),
+            // but setState() has moved it since.
+            if ((this.state as RecorderState) === "saving") this.setState(this.recorder ? "recording" : "idle");
         }
     }
 
@@ -245,7 +486,6 @@ class ClipRecorder {
         else await this.start();
     }
 
-    /** Opens the picker, remembers the choice and re-arms the buffer if it was running. */
     /** Asks the overlay to show the source picker. */
     chooseSource(): void {
         if (!pickerOpener) {
@@ -253,6 +493,15 @@ class ClipRecorder {
             return;
         }
         pickerOpener();
+    }
+
+    /** Asks the overlay to show the studio. */
+    openStudio(): void {
+        if (!studioOpener) {
+            toast("Clipper: the overlay is not mounted", Toasts.Type.FAILURE);
+            return;
+        }
+        studioOpener();
     }
 
     /** Re-arms the buffer so changed capture settings take effect. */
@@ -282,13 +531,85 @@ class ClipRecorder {
  * picker without importing any UI into this module.
  */
 let pickerOpener: (() => void) | null = null;
+let studioOpener: (() => void) | null = null;
 
 export function setPickerOpener(open: (() => void) | null) {
     pickerOpener = open;
 }
 
-/** Thrown when the user closes the source picker. */
-class CancelledError extends Error { }
+export function setStudioOpener(open: (() => void) | null) {
+    studioOpener = open;
+}
+
+interface MicSettings {
+    /** Discord's selected input device, empty or "default" for the system one. */
+    deviceId: string;
+    /** Input volume slider, 0-200 in Discord's UI. */
+    volume: number;
+    echoCancellation: boolean;
+    noiseSuppression: boolean;
+    autoGainControl: boolean;
+}
+
+/**
+ * Reads the voice settings the user already configured in Discord.
+ *
+ * Plain `getUserMedia({ audio: true })` grabs the system default device with the
+ * browser defaults, which is why the mic track used to sound nothing like the
+ * one in a call: wrong device when several exist, and no echo cancellation or
+ * noise suppression.
+ *
+ * Krisp ("Noise Cancellation") runs inside Discord's native voice engine and
+ * cannot be tapped from here, so it is folded into the WebRTC noise suppression
+ * flag: the intent is the same, the algorithm is weaker.
+ *
+ * Returns null when the store is not around (web build, or Discord moved it),
+ * and the caller then keeps the old behaviour.
+ */
+function discordMicSettings(): MicSettings | null {
+    const store = MediaEngineStore as any;
+    if (typeof store?.getInputDeviceId !== "function") return null;
+
+    try {
+        return {
+            deviceId: store.getInputDeviceId() ?? "",
+            volume: typeof store.getInputVolume === "function" ? store.getInputVolume() : 100,
+            echoCancellation: store.getEchoCancellation?.() ?? true,
+            noiseSuppression: (store.getNoiseSuppression?.() ?? false) || (store.getNoiseCancellation?.() ?? false),
+            autoGainControl: store.getAutomaticGainControl?.() ?? true
+        };
+    } catch (e) {
+        logger.warn("Could not read Discord's voice settings, using the browser defaults", e);
+        return null;
+    }
+}
+
+/** Opens the microphone Discord is set to use, with Discord's processing. */
+async function captureMic(mic: MicSettings | null): Promise<MediaStream> {
+    if (!mic) return navigator.mediaDevices.getUserMedia({ audio: true });
+
+    const processing: MediaTrackConstraints = {
+        echoCancellation: mic.echoCancellation,
+        noiseSuppression: mic.noiseSuppression,
+        autoGainControl: mic.autoGainControl
+    };
+
+    // "default" is Chromium's own alias for the system device; asking for it by
+    // id is both pointless and rejected by some backends.
+    const wanted = mic.deviceId && mic.deviceId !== "default"
+        ? { ...processing, deviceId: { exact: mic.deviceId } }
+        : processing;
+
+    try {
+        return await navigator.mediaDevices.getUserMedia({ audio: wanted });
+    } catch (e) {
+        if (wanted === processing) throw e;
+
+        // The device was unplugged since Discord picked it.
+        logger.warn("Discord's input device is unavailable, falling back to the default one", e);
+        return navigator.mediaDevices.getUserMedia({ audio: processing });
+    }
+}
 
 function errorMessage(e: unknown): string {
     if (e instanceof Error) return e.message || e.name;
@@ -329,11 +650,7 @@ export function openClipFolder(): void {
  * Thumbnails cost a Windows Graphics Capture session per window, so the picker
  * asks for them once and polls without.
  */
-export async function listCaptureSources(withThumbnails = true): Promise<CaptureSource[]> {
-    return listSources(withThumbnails);
-}
-
-async function listSources(withThumbnails = false): Promise<CaptureSource[]> {
+export async function listCaptureSources(withThumbnails = false): Promise<CaptureSource[]> {
     try {
         return await Native.getCaptureSources(withThumbnails);
     } catch (e) {
@@ -391,7 +708,7 @@ async function acquireStream(fps: number, resolution: number): Promise<MediaStre
         return navigator.mediaDevices.getDisplayMedia({ video, audio: true });
     }
 
-    const sources = await listSources();
+    const sources = await listCaptureSources();
     const source = sources.length ? resolveSource(sources) : null;
     if (source) rememberSource(source);
 
@@ -460,7 +777,9 @@ async function writeClip(blob: Blob, name: string): Promise<string> {
     // Desktop: write straight to the configured folder through the native module.
     if (IS_DISCORD_DESKTOP || IS_VESKTOP) {
         try {
-            return await Native.saveClip(settings.store.saveDirectory, name, data);
+            // keep = true: two saves inside the same second would otherwise land
+            // on the same timestamped name and the first one would be lost.
+            return await Native.saveClip(settings.store.saveDirectory, name, data, true);
         } catch (e) {
             logger.warn("Native save failed, falling back to a browser download", e);
         }

@@ -53,9 +53,32 @@ function onKeyDown(e: KeyboardEvent) {
 /** Keeps the OS-level binds in sync with what the settings hold. */
 const KEYBIND_SETTINGS = ["saveKeybind", "toggleKeybind", "globalKeybinds"] as const;
 
+/**
+ * Kept so the listeners can be dropped again on stop(): toggling the plugin off
+ * and on otherwise stacks a new set on every start, and each settings change
+ * then re-registers the binds once per stacked listener.
+ */
+const keybindWatchers: Array<() => void> = [];
+
 function watchKeybindSettings() {
+    unwatchKeybindSettings();
+
     for (const name of KEYBIND_SETTINGS) {
-        SettingsStore.addChangeListener(`plugins.Clipper.${name}` as any, () => void syncGlobalKeybinds());
+        const path = `plugins.Clipper.${name}` as any;
+        const listener = () => void syncGlobalKeybinds();
+
+        SettingsStore.addChangeListener(path, listener);
+        keybindWatchers.push(() => SettingsStore.removeChangeListener(path, listener));
+    }
+}
+
+function unwatchKeybindSettings() {
+    for (const drop of keybindWatchers.splice(0)) {
+        try {
+            drop();
+        } catch (e) {
+            logger.warn("Could not drop a settings listener", e);
+        }
     }
 }
 
@@ -117,7 +140,8 @@ export default definePlugin({
     toolboxActions: {
         "Start / stop clip buffer": () => recorder.toggle(),
         "Save clip": () => recorder.save(),
-        "Choose capture source": () => recorder.chooseSource()
+        "Choose capture source": () => recorder.chooseSource(),
+        "Open the clip studio": () => recorder.openStudio()
     },
 
     start() {
@@ -136,6 +160,7 @@ export default definePlugin({
 
     stop() {
         window.removeEventListener("keydown", onKeyDown, true);
+        unwatchKeybindSettings();
         stopGlobalKeybinds();
         unmountOverlay();
         recorder.stop();

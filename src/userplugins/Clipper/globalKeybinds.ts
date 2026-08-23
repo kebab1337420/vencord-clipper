@@ -54,10 +54,6 @@ export function runShortcut(action: ShortcutAction): boolean {
     return true;
 }
 
-export function isGlobalActive(): boolean {
-    return running;
-}
-
 /** Registers the current binds with the OS and starts the pump loop. */
 export async function startGlobalKeybinds(): Promise<void> {
     if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return;

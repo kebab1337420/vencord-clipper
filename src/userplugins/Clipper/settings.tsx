@@ -11,8 +11,10 @@
 import { definePluginSettings } from "@api/Settings";
 import { OptionType } from "@utils/types";
 
+import { AudioMixerSetting } from "./components/AudioMixer";
 import { KeybindInput } from "./components/KeybindInput";
 import { SaveDirectoryInput } from "./components/SaveDirectoryInput";
+import { SettingsSection } from "./components/SettingsSection";
 
 export const enum Container {
     WebmVp9 = "webm-vp9",
@@ -21,9 +23,18 @@ export const enum Container {
 }
 
 export const settings = definePluginSettings({
+    captureSection: {
+        type: OptionType.COMPONENT,
+        component: () => (
+            <SettingsSection
+                title="Capture"
+                note="What is recorded, and how much of it the buffer keeps."
+            />
+        )
+    },
     autoStart: {
         type: OptionType.BOOLEAN,
-        description: "Start the capture buffer as soon as Discord launches (asks for a source once)",
+        description: "Start the capture buffer as soon as Discord launches, on the remembered source (the primary screen when none was picked)",
         default: false
     },
     clipLength: {
@@ -62,13 +73,6 @@ export const settings = definePluginSettings({
         default: 8,
         stickToMarkers: true
     },
-    audioBitrate: {
-        type: OptionType.SLIDER,
-        description: "Audio quality in kbps",
-        markers: [64, 96, 128, 160, 192, 256, 320],
-        default: 128,
-        stickToMarkers: true
-    },
     container: {
         type: OptionType.SELECT,
         description: "Container / codec. VP9 is the safest, MP4 needs a recent Discord build",
@@ -78,10 +82,46 @@ export const settings = definePluginSettings({
             { label: "MP4 (H.264) - best compatibility", value: Container.Mp4H264 }
         ]
     },
+    audioSection: {
+        type: OptionType.COMPONENT,
+        component: () => (
+            <SettingsSection
+                title="Audio"
+                note="Every sound source that goes into a clip, and how loud each one is."
+            />
+        )
+    },
     includeMic: {
         type: OptionType.BOOLEAN,
-        description: "Mix your microphone into the clip audio",
+        description: "Mix your microphone into the clip audio, using the input device, volume, echo cancellation and noise suppression already set in Discord's voice settings",
         default: false
+    },
+    audioBitrate: {
+        type: OptionType.SLIDER,
+        description: "Audio quality in kbps",
+        markers: [64, 96, 128, 160, 192, 256, 320],
+        default: 128,
+        stickToMarkers: true
+    },
+    // Per-channel levels of the recording mix. Edited through the mixer below.
+    audioMixer: {
+        type: OptionType.CUSTOM,
+        // Left empty on purpose: `readMixer` fills in every missing level, and
+        // importing the defaults here would close a cycle with ./mixer.
+        default: {}
+    },
+    audioMixerInput: {
+        type: OptionType.COMPONENT,
+        component: AudioMixerSetting
+    },
+    clipsSection: {
+        type: OptionType.COMPONENT,
+        component: () => (
+            <SettingsSection
+                title="Clips"
+                note="Where the files land, and what happens once one is written."
+            />
+        )
     },
     saveDirectory: {
         type: OptionType.CUSTOM,
@@ -96,11 +136,16 @@ export const settings = definePluginSettings({
         description: "Show a desktop notification when a clip is saved",
         default: true
     },
+    interfaceSection: {
+        type: OptionType.COMPONENT,
+        component: () => (
+            <SettingsSection title="Interface" />
+        )
+    },
     panelButton: {
         type: OptionType.BOOLEAN,
-        description: "Show a Clipper button next to the mic / deafen buttons",
-        default: true,
-        restartNeeded: true
+        description: "Show the floating Clipper button above the account panel (left click: pick a source, right click: start / stop / save)",
+        default: true
     },
     // Remembered capture source, set from the picker. Hidden from the settings UI.
     sourceId: {
@@ -110,6 +155,15 @@ export const settings = definePluginSettings({
     sourceName: {
         type: OptionType.CUSTOM,
         default: ""
+    },
+    keybindsSection: {
+        type: OptionType.COMPONENT,
+        component: () => (
+            <SettingsSection
+                title="Keybinds"
+                note="Registered with the OS, so they fire from inside a game."
+            />
+        )
     },
     globalKeybinds: {
         type: OptionType.BOOLEAN,

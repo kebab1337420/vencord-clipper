@@ -18,9 +18,12 @@
 
 import { React, useEffect, useMemo, useRef, useState } from "@webpack/common";
 
+import { CLIPS_AVAILABLE } from "../clips";
 import type { CaptureSource } from "../native";
-import { listCaptureSources, recorder, RecorderState, setPickerOpener } from "../recorder";
+import { listCaptureSources, recorder, RecorderState, setPickerOpener, setStudioOpener } from "../recorder";
 import { Container, settings } from "../settings";
+import { formatBytes } from "../utils";
+import { ClipStudio, STUDIO_CSS } from "./ClipStudio";
 
 const STYLE_ID = "vc-clipper-style";
 
@@ -97,6 +100,12 @@ const CSS = `
 .vc-clipper-menu button:disabled {
     color: var(--text-muted, #949ba4);
     cursor: default;
+}
+.vc-clipper-menu-status {
+    padding: 4px 10px 6px;
+    color: var(--text-muted, #949ba4);
+    font-size: 12px;
+    white-space: nowrap;
 }
 
 .vc-clipper-backdrop {
@@ -381,7 +390,7 @@ const CSS = `
 @keyframes vc-clipper-rise {
     from { opacity: 0; transform: translateY(4px); }
 }
-`;
+` + STUDIO_CSS;
 
 /** Injects the stylesheet once, shared by every part of the overlay. */
 function useStyle() {
@@ -666,17 +675,34 @@ function Picker({ onClose }: { onClose(): void; }) {
     );
 }
 
-function ActionMenu({ recording, onClose }: { recording: boolean; onClose(): void; }) {
+function ActionMenu({ recording, onClose, onStudio }: { recording: boolean; onClose(): void; onStudio(): void; }) {
+    // The buffer grows while the menu is open, so the readout ticks with it.
+    const [, tick] = useState(0);
+    useEffect(() => {
+        if (!recording) return;
+
+        const id = setInterval(() => tick(n => n + 1), 500);
+        return () => clearInterval(id);
+    }, [recording]);
+
     const item = (label: string, action: () => void, disabled = false) => (
         <button disabled={disabled} onClick={() => { onClose(); setTimeout(action, 0); }}>
             {label}
         </button>
     );
 
+    const buffered = Math.floor(recorder.bufferedSeconds);
+
     return (
         <div className="vc-clipper-menu">
             {item(recording ? "Stop the clip buffer" : "Start the clip buffer", () => void recorder.toggle())}
             {item(`Save the last ${settings.store.clipLength}s`, () => void recorder.save(), !recording)}
+            {CLIPS_AVAILABLE && item("Open the clip studio", onStudio)}
+            <div className="vc-clipper-menu-status">
+                {recording
+                    ? `Buffered: ${buffered}s / ${settings.store.clipLength}s - ${formatBytes(recorder.bufferedBytes)}`
+                    : "Buffer stopped - nothing to save"}
+            </div>
         </div>
     );
 }
@@ -684,6 +710,7 @@ function ActionMenu({ recording, onClose }: { recording: boolean; onClose(): voi
 export function ClipperOverlay() {
     const [state, setState] = useState<RecorderState>(recorder.state);
     const [picker, setPicker] = useState(false);
+    const [studio, setStudio] = useState<{ initial?: string; } | null>(null);
     const [menu, setMenu] = useState(false);
 
     useStyle();
@@ -691,7 +718,12 @@ export function ClipperOverlay() {
     useEffect(() => recorder.subscribe(setState), []);
     useEffect(() => {
         setPickerOpener(() => setPicker(true));
-        return () => setPickerOpener(null);
+        setStudioOpener(() => setStudio({}));
+
+        return () => {
+            setPickerOpener(null);
+            setStudioOpener(null);
+        };
     }, []);
     useEffect(() => {
         if (!menu) return;
@@ -702,24 +734,40 @@ export function ClipperOverlay() {
     }, [menu]);
 
     const { panelButton, sourceName } = settings.use(["panelButton", "sourceName"]);
-    if (!panelButton) return null;
 
     const recording = state === "recording" || state === "saving";
 
+    /*
+     * The modals stay mounted even with the button turned off: the toolbox and
+     * the chat bar button open them too, and they are the only way in once the
+     * floating button is hidden.
+     */
     return (
-        <div className="vc-clipper-root">
-            {menu && <ActionMenu recording={recording} onClose={() => setMenu(false)} />}
-            <button
-                className={`vc-clipper-trigger${recording ? " vc-clipper-live" : ""}`}
-                title={recording
-                    ? `Clipper - recording ${sourceName || "screen"} (right click: stop / save)`
-                    : `Clipper - pick a source${sourceName ? ` (current: ${sourceName})` : ""}`}
-                onClick={e => { e.stopPropagation(); setMenu(false); setPicker(true); }}
-                onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setMenu(v => !v); }}
-            >
-                <Icon recording={recording} />
-            </button>
+        <>
+            {panelButton && (
+                <div className="vc-clipper-root">
+                    {menu && (
+                        <ActionMenu
+                            recording={recording}
+                            onClose={() => setMenu(false)}
+                            onStudio={() => setStudio({})}
+                        />
+                    )}
+                    <button
+                        className={`vc-clipper-trigger${recording ? " vc-clipper-live" : ""}`}
+                        title={recording
+                            ? `Clipper - recording ${sourceName || "screen"} (right click: stop / save / studio)`
+                            : `Clipper - pick a source${sourceName ? ` (current: ${sourceName})` : ""}`}
+                        onClick={e => { e.stopPropagation(); setMenu(false); setPicker(true); }}
+                        onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setMenu(v => !v); }}
+                    >
+                        <Icon recording={recording} />
+                    </button>
+                </div>
+            )}
+
             {picker && <Picker onClose={() => setPicker(false)} />}
-        </div>
+            {studio && <ClipStudio initial={studio.initial} onClose={() => setStudio(null)} />}
+        </>
     );
 }

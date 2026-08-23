@@ -4,3 +4,6 @@ Vencord/
 node_modules/
 dist/
 *.log
+
+# ...except the shipped bundle, which is the whole point of the prebuilt install
+!prebuilt/dist/

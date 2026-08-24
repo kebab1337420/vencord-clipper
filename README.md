@@ -1,8 +1,6 @@
 # Clipper — Vencord user plugin
 
-Shadowplay-style clipping inside Discord. A rolling buffer keeps the last *N*
-seconds of a captured source in memory; a keybind (or the chat bar button) dumps
-that buffer to a video file. Capture never stops while you save.
+Free Clipping plugin for vencord because fuck giving money to corporations
 
 ## Features
 

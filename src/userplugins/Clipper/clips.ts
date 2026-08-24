@@ -47,10 +47,61 @@ export async function listClips(): Promise<StoredClip[]> {
  */
 export async function loadClipUrl(name: string): Promise<string> {
     const data = await Native.readClip(settings.store.saveDirectory, name);
-    const type = name.toLowerCase().endsWith(".mp4") ? "video/mp4" : "video/webm";
 
     // The IPC copy is a plain Uint8Array; hand its buffer to the Blob directly.
-    return URL.createObjectURL(new Blob([data.buffer as ArrayBuffer], { type }));
+    return URL.createObjectURL(new Blob([data.buffer as ArrayBuffer], { type: typeOfClip(name) }));
+}
+
+/**
+ * A clip's raw bytes.
+ *
+ * `folder` is for the callers that wrote somewhere other than the configured
+ * directory - the native engine is handed a full path of its own - and defaults
+ * to the setting everything else reads.
+ */
+export async function loadClipBytes(name: string, folder?: string): Promise<Uint8Array> {
+    return await Native.readClip(folder || settings.store.saveDirectory, name);
+}
+
+/** Media type a clip's name implies. WebM is the fallback, as it always was. */
+export function typeOfClip(name: string): string {
+    return name.toLowerCase().endsWith(".mp4") ? "video/mp4" : "video/webm";
+}
+
+/**
+ * Loads a clip as a File, ready to be attached to a message.
+ *
+ * A File rather than a Blob because Discord's upload path reads the name off it
+ * and would otherwise attach the clip as "blob".
+ */
+export async function loadClipFile(name: string): Promise<File> {
+    const data = await Native.readClip(settings.store.saveDirectory, name);
+
+    return new File([data.buffer as ArrayBuffer], name, { type: typeOfClip(name) });
+}
+
+/**
+ * Loads a clip's thumbnail, or null when it has none.
+ *
+ * Clips saved before thumbnails existed have no sidecar, and neither do clips
+ * whose still could not be decoded, so the caller must have a placeholder.
+ * Callers must revoke the URL.
+ */
+export async function loadThumbUrl(clip: StoredClip): Promise<string | null> {
+    if (!clip.thumb) return null;
+
+    try {
+        const data = await Native.readClip(settings.store.saveDirectory, clip.thumb);
+        return URL.createObjectURL(new Blob([data.buffer as ArrayBuffer], { type: "image/jpeg" }));
+    } catch (e) {
+        logger.warn("Could not read a clip thumbnail", e);
+        return null;
+    }
+}
+
+/** One person's own audio, out of the `voices` folder beside the clips. */
+export function loadVoiceTrack(file: string): Promise<Uint8Array> {
+    return Native.readVoiceTrack(settings.store.saveDirectory, file);
 }
 
 export function deleteClip(name: string): Promise<void> {
@@ -173,6 +224,88 @@ export async function loadVideoFile(path: string): Promise<{ name: string; url: 
     const type = IMPORT_TYPES[name.split(".").pop()?.toLowerCase() ?? ""] ?? "video/mp4";
 
     return { name, url: URL.createObjectURL(new Blob([data.buffer as ArrayBuffer], { type })) };
+}
+
+/** Opens the OS picker for sounds to lay over a montage. */
+export async function pickAudioFiles(): Promise<string[]> {
+    if (!CLIPS_AVAILABLE) return [];
+
+    try {
+        return await Native.pickAudioFiles();
+    } catch (e) {
+        logger.warn("Could not open the sound picker", e);
+        return [];
+    }
+}
+
+const SOUND_TYPES: Record<string, string> = {
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+    ogg: "audio/ogg",
+    opus: "audio/ogg",
+    m4a: "audio/mp4",
+    aac: "audio/aac",
+    flac: "audio/flac",
+    webm: "audio/webm"
+};
+
+/**
+ * Loads a sound off disk, as bytes and as an object URL.
+ *
+ * Both, because they answer different questions: the bytes go to the decoder
+ * that produces the waveform and the samples the render schedules, and the URL
+ * is what lets the file be handed to an element for a quick listen without
+ * decoding it a second time. The caller revokes the URL.
+ */
+export async function loadAudioFile(path: string): Promise<{ name: string; url: string; data: ArrayBuffer; }> {
+    const bytes = await Native.readAudioFile(path);
+    const name = path.split(/[\\/]/).pop() || "sound";
+    const type = SOUND_TYPES[name.split(".").pop()?.toLowerCase() ?? ""] ?? "audio/mpeg";
+
+    // One copy, shared: the Blob keeps the bytes alive for the URL while the
+    // decoder gets the same buffer.
+    const data = bytes.buffer as ArrayBuffer;
+
+    return { name, url: URL.createObjectURL(new Blob([data], { type })), data };
+}
+
+export async function pickImageFiles(): Promise<string[]> {
+    if (!CLIPS_AVAILABLE) return [];
+
+    try {
+        return await Native.pickImageFiles();
+    } catch (e) {
+        logger.warn("Could not open the picture picker", e);
+        return [];
+    }
+}
+
+const IMAGE_TYPES: Record<string, string> = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    webp: "image/webp",
+    gif: "image/gif",
+    avif: "image/avif",
+    bmp: "image/bmp",
+    mp4: "video/mp4",
+    webm: "video/webm"
+};
+
+/**
+ * Loads a picture off disk as an object URL.
+ *
+ * Only the URL, unlike a sound: nothing here needs the bytes again once the
+ * bitmap exists, and an `<img>` fed a blob URL decodes on the compositor
+ * thread rather than blocking the one painting the preview. The caller
+ * revokes it.
+ */
+export async function loadImageFile(path: string): Promise<{ name: string; url: string; }> {
+    const bytes = await Native.readImageFile(path);
+    const name = path.split(/[\\/]/).pop() || "picture";
+    const type = IMAGE_TYPES[name.split(".").pop()?.toLowerCase() ?? ""] ?? "image/png";
+
+    return { name, url: URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type })) };
 }
 
 /** `clip-....webm` becomes `clip-....-edit.webm` for a studio render. */

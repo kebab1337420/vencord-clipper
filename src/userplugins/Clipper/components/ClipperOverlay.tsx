@@ -21,6 +21,7 @@ import { React, useEffect, useMemo, useRef, useState } from "@webpack/common";
 import { CLIPS_AVAILABLE } from "../clips";
 import type { CaptureSource } from "../native";
 import { listCaptureSources, recorder, RecorderState, setPickerOpener, setStudioOpener } from "../recorder";
+import { sendClip } from "../send";
 import { Container, settings } from "../settings";
 import { formatBytes } from "../utils";
 import { ClipStudio, STUDIO_CSS } from "./ClipStudio";
@@ -101,6 +102,16 @@ const CSS = `
     color: var(--text-muted, #949ba4);
     cursor: default;
 }
+.vc-clipper-menu-label {
+    padding: 6px 10px 2px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted, #949ba4);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .vc-clipper-menu-status {
     padding: 4px 10px 6px;
     color: var(--text-muted, #949ba4);
@@ -393,16 +404,28 @@ const CSS = `
 ` + STUDIO_CSS;
 
 /** Injects the stylesheet once, shared by every part of the overlay. */
+/**
+ * Users of the shared stylesheet.
+ *
+ * The overlay is mounted once per panel, and Discord mounts the panel more than
+ * once during a call. Without the count the second mount finds the tag already
+ * there and adopts no responsibility for it, then the first unmount removes it
+ * from under the one still on screen, which loses every style at once.
+ */
+let styleUsers = 0;
+
 function useStyle() {
     useEffect(() => {
-        if (document.getElementById(STYLE_ID)) return;
+        if (styleUsers++ === 0 && !document.getElementById(STYLE_ID)) {
+            const style = document.createElement("style");
+            style.id = STYLE_ID;
+            style.textContent = CSS;
+            document.head.appendChild(style);
+        }
 
-        const style = document.createElement("style");
-        style.id = STYLE_ID;
-        style.textContent = CSS;
-        document.head.appendChild(style);
-
-        return () => style.remove();
+        return () => {
+            if (--styleUsers === 0) document.getElementById(STYLE_ID)?.remove();
+        };
     }, []);
 }
 
@@ -468,9 +491,9 @@ function CaptureOptions() {
 
             <Field label="Encoding">
                 {select(container, v => (settings.store.container = v as Container), [
+                    [Container.Mp4H264, "MP4 H.264"],
                     [Container.WebmVp9, "WebM VP9"],
-                    [Container.WebmVp8, "WebM VP8"],
-                    [Container.Mp4H264, "MP4 H.264"]
+                    [Container.WebmVp8, "WebM VP8"]
                 ])}
             </Field>
 
@@ -692,11 +715,32 @@ function ActionMenu({ recording, onClose, onStudio }: { recording: boolean; onCl
     );
 
     const buffered = Math.floor(recorder.bufferedSeconds);
+    const last = recorder.lastClip;
+
+    // Offered lengths, shortest first, none of them longer than the buffer: a
+    // clip is trimmed down, and asking for more than was recorded does nothing.
+    const cuts = [15, 30, 60].filter(n => n < settings.store.clipLength);
 
     return (
         <div className="vc-clipper-menu">
             {item(recording ? "Stop the clip buffer" : "Start the clip buffer", () => void recorder.toggle())}
             {item(`Save the last ${settings.store.clipLength}s`, () => void recorder.save(), !recording)}
+            {item(
+                recorder.markCount ? `Drop a marker (${recorder.markCount} so far)` : "Drop a marker",
+                () => recorder.mark(),
+                !recording
+            )}
+            {last && (
+                <>
+                    <div className="vc-clipper-menu-label">{last.name}</div>
+                    {item("Send it to this channel", () => void sendClip(last.name))}
+                    {cuts.map(n => (
+                        <React.Fragment key={n}>
+                            {item(`Keep only its last ${n}s`, () => void recorder.trimLastSaved(n))}
+                        </React.Fragment>
+                    ))}
+                </>
+            )}
             {CLIPS_AVAILABLE && item("Open the clip studio", onStudio)}
             <div className="vc-clipper-menu-status">
                 {recording

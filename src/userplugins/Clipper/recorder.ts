@@ -15,14 +15,21 @@
 import { showNotification } from "@api/Notifications";
 import { Logger } from "@utils/Logger";
 import type { PluginNative } from "@utils/types";
-import { MediaEngineStore, Toasts } from "@webpack/common";
+import { MediaEngineStore, Toasts, UserStore } from "@webpack/common";
 
-import { tagSavedClip } from "./library";
+import { dropMeta, tagSavedClip } from "./library";
 import { gainOf, MIC_CHANNEL, type MixerLevel, readMixer, SYSTEM_CHANNEL } from "./mixer";
+import { probeAudioTracks } from "./mp4";
+import { muxNativeAudio } from "./mux";
 import type { CaptureSource } from "./native";
-import { extensionFor, mimeCandidates, settings } from "./settings";
+import { arm, canRecord, disarm, goLiveActive, nativeAvailability, saveNativeClip, setRecordUser, watchRecording } from "./nativeClips";
+import { hasVideoTrack } from "./nativeTracks";
+import { clipLength, repairClip, trimClip } from "./repair";
+import { extensionFor, pickMimeType, settings } from "./settings";
+import { writeThumbnail } from "./thumbnail";
 import { formatBytes, timestampName } from "./utils";
-import { repairClip } from "./webm";
+import { shiftTracks, toMeta, voiceActivity, type VoiceFileMeta, voiceParticipants,type VoiceTrack } from "./voice";
+import { voiceBuffers } from "./voiceRecord";
 
 export const logger = new Logger("Clipper", "#f0b132");
 
@@ -39,9 +46,39 @@ const TIMESLICE = 1000;
 
 type Listener = (state: RecorderState) => void;
 
+/** What the last save produced, enough to cut it down or send it somewhere. */
+export interface SavedClip {
+    name: string;
+    path: string;
+    blob: Blob;
+    mimeType: string;
+    /** Marker offsets in seconds, already relative to this clip's start. */
+    markers: number[];
+    /** Who was talking during it, on the same clock as the markers. */
+    voices: VoiceTrack[];
+}
+
 class ClipRecorder {
+    /** Whether Discord's own clip engine is armed alongside our buffer. */
+    private native = false;
+
+    /**
+     * The engine's own clip, when it came back with the call but no picture.
+     *
+     * Set by `saveNative` and consumed by the save that follows it, which is
+     * the one that has the picture: on a screen capture the engine records
+     * every voice separately and no video at all, so the two halves are muxed
+     * into one file rather than one of them being thrown away.
+     */
+    private nativeAudio: Uint8Array | null = null;
+    /** Who the native engine has already been told it may record. */
+    private consented = new Set<string>();
+    /** Poll that keeps that set level with the voice channel. */
+    private consentTicker: ReturnType<typeof setInterval> | null = null;
     private stream: MediaStream | null = null;
     private micStream: MediaStream | null = null;
+    /** Loopback opened separately when the captured source carried no sound. */
+    private systemStream: MediaStream | null = null;
     private audioCtx: AudioContext | null = null;
     private destination: MediaStreamAudioDestinationNode | null = null;
     private recorder: MediaRecorder | null = null;
@@ -55,6 +92,24 @@ class ClipRecorder {
     /** First chunk emitted by the recorder: holds the container header. */
     private header: Blob | null = null;
     private chunks: TimedChunk[] = [];
+
+    /**
+     * Moments marked by the user, as epoch ms.
+     *
+     * Kept in wall-clock rather than as offsets because the buffer's start moves
+     * with every prune; they are turned into offsets once, at save time, when
+     * the clip's own start is finally known.
+     */
+    private marks: number[] = [];
+
+    /**
+     * The clip written by the last save, kept whole.
+     *
+     * It is what "keep the last N seconds" cuts down, and reading it back off
+     * the disk to do that would be slower and could race a rename. Dropped on
+     * the next save, so at most one clip is held.
+     */
+    private lastSaved: SavedClip | null = null;
 
     /**
      * Bumped by every cleanup, so a `start()` still awaiting its stream knows the
@@ -93,6 +148,47 @@ class ClipRecorder {
 
     get bufferedBytes() {
         return this.chunks.reduce((sum, c) => sum + c.blob.size, 0) + (this.header?.size ?? 0);
+    }
+
+    /** Markers currently inside the buffer, for the overlay's counter. */
+    get markCount() {
+        return this.marks.length;
+    }
+
+    /** The clip written by the last save, or null when none was written yet. */
+    get lastClip(): SavedClip | null {
+        return this.lastSaved;
+    }
+
+    /**
+     * Instant at which the footage still in the buffer begins.
+     *
+     * A chunk handed over at T covers the timeslice that ends at T, so the
+     * oldest one starts a timeslice before it was handed over.
+     */
+    private get bufferStart() {
+        const oldest = this.chunks[0];
+        return oldest ? oldest.at - TIMESLICE : Date.now();
+    }
+
+    /**
+     * Notes the moment, without writing anything.
+     *
+     * The point is that marking is free: the player hits the key when something
+     * happens and keeps playing, and the marks that are still in the buffer when
+     * a clip is finally saved are written next to it.
+     */
+    mark(): void {
+        if (!this.isRecording) {
+            toast("Clip buffer is not running", Toasts.Type.FAILURE);
+            return;
+        }
+
+        this.marks.push(Date.now());
+        this.prune();
+
+        const at = Math.max(0, Math.round((Date.now() - this.bufferStart) / 1000));
+        toast(`Marker at ${at}s (${this.marks.length} in the buffer)`, Toasts.Type.MESSAGE);
     }
 
     subscribe(listener: Listener) {
@@ -141,14 +237,28 @@ class ClipRecorder {
             const tracks = [videoTrack, audioTrack].filter(Boolean) as MediaStreamTrack[];
             const recordStream = new MediaStream(tracks);
 
-            this.mimeType = mimeCandidates(container).find(t => MediaRecorder.isTypeSupported(t)) ?? "";
-            if (!this.mimeType) throw new Error(`No supported mime type for container "${container}"`);
+            this.mimeType = pickMimeType(container);
+            if (!this.mimeType) throw new Error("This client can encode neither MP4 nor WebM");
 
-            this.recorder = new MediaRecorder(recordStream, {
+            /*
+             * One keyframe per timeslice.
+             *
+             * Without it the encoder places keyframes where it likes, which on
+             * Chromium's H.264 is several seconds apart. A clip cut out of the
+             * buffer has to start on one - everything before the first keyframe
+             * is undecodable and gets dropped by the repair - so a buffer asked
+             * for ten seconds was handing back three. Chromium reads this option
+             * from Chrome 111; older builds ignore it and fall back on the guard
+             * in the repair.
+             */
+            const options: MediaRecorderOptions & { videoKeyFrameIntervalDuration?: number; } = {
                 mimeType: this.mimeType,
                 videoBitsPerSecond: videoBitrate * 1_000_000,
-                audioBitsPerSecond: audioBitrate * 1000
-            });
+                audioBitsPerSecond: audioBitrate * 1000,
+                videoKeyFrameIntervalDuration: TIMESLICE
+            };
+
+            this.recorder = new MediaRecorder(recordStream, options);
 
             this.header = null;
             this.chunks = [];
@@ -160,8 +270,28 @@ class ClipRecorder {
             };
 
             this.recorder.start(TIMESLICE);
+
+            // The call is followed on the same window as the footage: a clip is
+            // saved after the fact, so who was talking has to have been kept all
+            // along or the tracks stop where the save began.
+            voiceActivity.start(settings.store.clipLength);
+
+            // And the call itself, one buffer per person, on the same window.
+            // Best effort: a client with no reachable per-person audio simply
+            // records nothing here and the clip keeps its mixed soundtrack.
+            voiceBuffers.start();
+
+            // The microphone joins them, so the person recording is not the one
+            // person a mute can silence.
+            const me = UserStore.getCurrentUser();
+            if (this.micStream && me?.id) voiceBuffers.attach(this.micStream, me.id, (me as any).globalName || me.username || "You");
+
             this.setState("recording");
             toast(`Clip buffer running - last ${settings.store.clipLength}s kept`, Toasts.Type.SUCCESS);
+
+            // Last, and never awaited into the result: the native engine is a
+            // bonus track layout, not a condition for the buffer to run.
+            void this.armNative();
             return true;
         } catch (e) {
             this.cleanup();
@@ -184,7 +314,16 @@ class ClipRecorder {
         const mixer = readMixer();
         const { includeMic } = settings.store;
 
-        const displayTracks = display.getAudioTracks();
+        let displayTracks = display.getAudioTracks();
+
+        // A window capture never carries sound. Rather than record a clip whose
+        // only audio is the microphone hearing the speakers, the machine's
+        // output is opened on its own and mixed in as the system channel.
+        if (!displayTracks.length && !mixer.system.muted) {
+            this.systemStream = await captureSystemAudio();
+            if (this.systemStream) displayTracks = this.systemStream.getAudioTracks();
+        }
+
         if (!displayTracks.length && !includeMic && !mixer.extras.length) return undefined;
 
         this.audioCtx = new AudioContext();
@@ -375,6 +514,10 @@ class ClipRecorder {
         // Keep one extra timeslice so the clip is never shorter than asked for.
         const cutoff = Date.now() - (settings.store.clipLength * 1000 + TIMESLICE);
         while (this.chunks.length && this.chunks[0].at < cutoff) this.chunks.shift();
+
+        // A mark whose footage has been dropped points at nothing.
+        const start = this.bufferStart;
+        if (this.marks.length) this.marks = this.marks.filter(m => m >= start);
     }
 
     stop() {
@@ -398,18 +541,32 @@ class ClipRecorder {
         this.nextChunk?.();
         this.nextChunk = null;
 
+        voiceActivity.stop();
+        voiceBuffers.stop();
+
+        if (this.consentTicker) clearInterval(this.consentTicker);
+        this.consentTicker = null;
+        this.consented.clear();
+
+        if (this.native) {
+            disarm();
+            this.native = false;
+        }
+
         this.recorder = null;
         this.header = null;
         this.chunks = [];
+        this.marks = [];
 
         this.stream?.getTracks().forEach(t => t.stop());
         this.micStream?.getTracks().forEach(t => t.stop());
+        this.systemStream?.getTracks().forEach(t => t.stop());
         this.extraStreams.forEach(s => s.getTracks().forEach(t => t.stop()));
         this.audioCtx?.close().catch(() => void 0);
 
         this.channels.clear();
         this.extraStreams = [];
-        this.stream = this.micStream = null;
+        this.stream = this.micStream = this.systemStream = null;
         this.audioCtx = null;
         this.destination = null;
     }
@@ -431,6 +588,24 @@ class ClipRecorder {
         const mine = this.generation;
 
         try {
+            /*
+             * The native engine first, when it is running.
+             *
+             * It is the only path that can put one audio track per person in
+             * the file, which is what lets the studio drop a voice instead of
+             * ducking the whole montage. Everything below it stays as the
+             * fallback: our own buffer has been filling all along, so an engine
+             * that refuses at the last moment costs the layout, not the clip.
+             */
+            if (this.native) {
+                try {
+                    if (await this.saveNative()) return;
+                } catch (e) {
+                    logger.error("The native clip engine could not save, falling back to the plugin's own buffer", e);
+                    toast(`The native engine could not save (${errorMessage(e)}), used the plugin's buffer instead`, Toasts.Type.MESSAGE);
+                }
+            }
+
             // Flush whatever the recorder holds so the clip ends on "now".
             await this.flush();
             this.prune();
@@ -444,6 +619,11 @@ class ClipRecorder {
             const raw = new Blob([this.header, ...this.chunks.map(c => c.blob)], { type: this.mimeType });
             const name = `${timestampName()}.${extensionFor(this.mimeType)}`;
 
+            // Read before the write, because the buffer keeps moving underneath.
+            const start = this.bufferStart;
+            const markers = this.marks.map(m => Math.max(0, (m - start) / 1000));
+            const voices = voiceActivity.slice(start, Date.now());
+
             // Cluster timecodes are absolute, so the kept ones still carry the
             // time elapsed since the buffer started: without this the clip
             // claims to last as long as the whole session.
@@ -454,11 +634,42 @@ class ClipRecorder {
                 logger.warn("Could not rebase the clip timeline, saving it as recorded", e);
             }
 
+            // The repair drops everything before the first keyframe, which on a
+            // WebM is up to a few seconds. The markers were measured from the
+            // start of the buffer, so they move by exactly what it took off -
+            // otherwise every one of them points several seconds early.
+            const cutOff = blob === raw ? 0 : await dropped(raw, blob, this.mimeType);
+            const offsets = shift(markers, cutOff);
+            const lanes = shiftTracks(voices, cutOff);
+
+            /*
+             * The call, put back into the clip it belongs to.
+             *
+             * `saveNative` leaves its file here when the engine recorded the
+             * voices and no picture, which is what a screen capture always
+             * gives. Muxing them costs no re-encode - the picture and the mixed
+             * soundtrack are copied out of this clip, the per-person tracks out
+             * of the engine's - and it is the difference between a mute that
+             * drops one voice and a duck that takes the whole call with it.
+             */
+            blob = await this.muxNative(blob);
+
             const path = await writeClip(blob, name);
+            const saved = path.split(/[\\/]/).pop() || name;
+
+            this.lastSaved = { name: saved, path, blob, mimeType: this.mimeType, markers: offsets, voices: lanes };
+
+            // The call, kept apart. `cutOff` is what the repair took off the
+            // front, so this is the instant the saved footage really begins.
+            const tracks = await this.saveVoices(saved, start + cutOff * 1000);
 
             // File the clip under whatever is running now: after the save, the
             // player may already have alt-tabbed away.
-            await tagSavedClip(path);
+            await tagSavedClip(path, offsets, lanes.map(toMeta), tracks);
+
+            // Best effort and off the critical path: the library falls back to a
+            // placeholder for a clip that has no picture.
+            void writeThumbnail(blob, saved);
 
             if (settings.store.notifications) {
                 showNotification({
@@ -473,11 +684,380 @@ class ClipRecorder {
             logger.error("Failed to save clip", e);
             toast(`Failed to save the clip: ${errorMessage(e)}`, Toasts.Type.FAILURE);
         } finally {
+            // Belongs to the save that asked for it, so it never carries over
+            // into the next one - a save that gave up early leaves it behind.
+            this.nativeAudio = null;
+
             // The buffer may have been stopped while the file was being written;
             // in that case "saving" must fall back to idle, not to "recording".
             // Cast: TS still narrows `state` from the guard at the top of save(),
             // but setState() has moved it since.
             if ((this.state as RecorderState) === "saving") this.setState(this.recorder ? "recording" : "idle");
+        }
+    }
+
+    /**
+     * Writes each person's own audio next to the clip that was just saved.
+     *
+     * Never allowed to fail the save: the clip is already on disk by the time
+     * this runs, and a folder that refuses a write, a decoder that chokes on a
+     * lane or a client with no reachable per-person audio all mean the same
+     * thing here - a clip whose voices are only inside its mixed soundtrack,
+     * which is what every clip was until now.
+     */
+    private async saveVoices(clip: string, from: number): Promise<VoiceFileMeta[]> {
+        if (!voiceBuffers.active) return [];
+
+        try {
+            const harvested = await voiceBuffers.harvest(from, Date.now());
+            const written: VoiceFileMeta[] = [];
+
+            for (const lane of harvested) {
+                try {
+                    const data = new Uint8Array(await lane.blob.arrayBuffer());
+                    const path = await Native.saveVoiceTrack(settings.store.saveDirectory, clip, lane.userId, data);
+                    if (!path) continue;
+
+                    written.push({
+                        id: lane.userId,
+                        name: lane.name,
+                        file: path.split(/[\\/]/).pop() || "",
+                        offset: lane.offset
+                    });
+                } catch (e) {
+                    logger.warn(`Could not save the voice track for ${lane.name}`, e);
+                }
+            }
+
+            if (written.length) logger.info(`Saved ${written.length} voice track(s) beside ${clip}`);
+
+            return written.filter(t => t.file);
+        } catch (e) {
+            logger.warn("Could not save the per-person voice tracks", e);
+            return [];
+        }
+    }
+
+    /**
+     * Points Discord's own clip engine at the same source we are recording.
+     *
+     * Best effort throughout: the engine is an experiment, it only takes a
+     * window as a source, and none of that is worth a failed start - the
+     * plugin's own buffer is already running by the time this is called, so
+     * every branch that gives up here simply leaves the clip mixed.
+     */
+    private async armNative(): Promise<void> {
+        if (!settings.store.nativeEngine) return;
+
+        const { sourceId, sourceName, clipLength, resolution, fps } = settings.store;
+
+        /*
+         * Said out loud, every time, whichever way it goes.
+         *
+         * The two paths do not produce the same clip - one keeps a track per
+         * person and one hands back a single mixed soundtrack - and which one
+         * you got is not visible until you are in the studio wondering why a
+         * mute takes everybody with it. A line in the corner when the buffer
+         * starts is the difference between a limitation and a mystery.
+         */
+        const availability = nativeAvailability();
+        if (!availability.available) {
+            logger.info(`Not using the native clip engine: ${availability.reason}`);
+            toast(`Recording mixed sound: ${availability.reason}`, Toasts.Type.MESSAGE);
+            return;
+        }
+        if (!canRecord(sourceId)) {
+            logger.info(`Not using the native clip engine: it cannot record ${sourceId}.`);
+            toast("Recording mixed sound: the clip engine cannot record this source", Toasts.Type.MESSAGE);
+            return;
+        }
+        if (goLiveActive()) {
+            logger.info("Not using the native clip engine: a Go Live stream has the capture.");
+            toast("Recording mixed sound: the clip engine will not record while you are streaming", Toasts.Type.MESSAGE);
+            return;
+        }
+
+        // Listening from before it is armed: on a quick machine the engine
+        // reports itself ready from inside the call that arms it, and a watch
+        // opened afterwards has already missed it.
+        const watch = watchRecording();
+
+        if (!arm({ sourceId, seconds: clipLength, resolution, frameRate: fps, applicationName: sourceName || "Clipper" })) {
+            watch.stop();
+            toast("Recording mixed sound: the clip engine would not take this source", Toasts.Type.MESSAGE);
+            return;
+        }
+
+        const verdict = await watch.settled;
+        if (!verdict.recording) {
+            logger.warn(`The native clip engine would not start: ${verdict.reason}`);
+            toast(`Recording mixed sound: ${verdict.reason}`, Toasts.Type.MESSAGE);
+            disarm();
+            return;
+        }
+
+        /*
+         * The engine records nobody until it is told to.
+         *
+         * Consent, not a mixer level: somebody left out here is absent from the
+         * file and no amount of editing afterwards brings them back. Yourself
+         * included - your own microphone is a track like anybody else's, and
+         * leaving it out is how a clip comes back with everyone but you in it.
+         *
+         * And it has to be kept up, not set once. The buffer is armed when the
+         * capture starts, which is routinely before the call fills up - people
+         * join, leave, come back - and anybody who arrives after this moment
+         * would otherwise never be consented and simply not be in the clip.
+         * A poll rather than a subscription because the failure mode of a
+         * missed unsubscribe is a listener firing over a disarmed engine, and
+         * every id here is already recorded: telling the engine twice is free.
+         */
+        this.consented.clear();
+        this.grantConsent();
+
+        this.consentTicker ??= setInterval(() => this.grantConsent(), 3000);
+
+        this.native = true;
+
+        /*
+         * The same message either way, because the difference does not concern
+         * anybody watching.
+         *
+         * The engine only announces itself on the out-of-process path, which is
+         * not the one in use, so `confirmed` is false on every ordinary run -
+         * including the runs that produced clips with a track per person. What
+         * does arrive, and quickly, is `clips-init-failure`, and that is handled
+         * above. So an expired wait means nothing went wrong, and saying "it
+         * never confirmed" out loud only taught the user to distrust a buffer
+         * that was working. The count of tracks in the saved clip is the honest
+         * report, and `saveNative` gives it.
+         */
+        logger.info(`The native clip engine is recording alongside the plugin's buffer (${verdict.confirmed ? "confirmed by the engine" : "no ready event, which is normal on this path"}).`);
+        toast("Native engine on - one sound track per person in the call", Toasts.Type.SUCCESS);
+    }
+
+    /** Lets the native engine record anybody in the call it has not been told about yet. */
+    private grantConsent(): void {
+        if (!settings.store.nativeEngine) return;
+
+        for (const person of voiceParticipants()) {
+            if (this.consented.has(person.id)) continue;
+
+            setRecordUser(person.id, true);
+            this.consented.add(person.id);
+        }
+    }
+
+    /**
+     * Folds the engine's per-person tracks into the clip that has the picture.
+     *
+     * Best effort from end to end: anything unexpected in either file leaves
+     * the clip exactly as it was, with one mixed soundtrack, which is what
+     * every clip looked like before the native engine existed.
+     */
+    private async muxNative(clip: Blob): Promise<Blob> {
+        const native = this.nativeAudio;
+        this.nativeAudio = null;
+
+        if (!native) return clip;
+
+        /*
+         * Only an MP4 can hold the engine's tracks: they are AAC, and putting
+         * them in a WebM would mean re-encoding the very thing that is worth
+         * copying byte for byte.
+         */
+        if (!this.mimeType.startsWith("video/mp4")) {
+            logger.warn(`Cannot mux the call into a ${this.mimeType} clip; the container has to be MP4 for a track per person.`);
+            toast("The call was recorded one track per person, but only an MP4 clip can hold it - switch the container to MP4", Toasts.Type.MESSAGE);
+            return clip;
+        }
+
+        try {
+            const muxed = muxNativeAudio(new Uint8Array(await clip.arrayBuffer()), native);
+            if (!muxed) return clip;
+
+            return new Blob([muxed as BlobPart], { type: "video/mp4" });
+        } catch (e) {
+            logger.error("Could not mux the call into the clip", e);
+            return clip;
+        }
+    }
+
+    /**
+     * Writes the clip through the native engine instead of our own buffer.
+     *
+     * Returns false when it produced nothing usable, which leaves save() to
+     * carry on down its own path. Everything after the write - markers, who was
+     * talking, the thumbnail, the library entry - is the same work save() does,
+     * on a different clock: the engine hands back the length it managed, and
+     * the clip therefore ends now and starts that far back.
+     */
+    private async saveNative(): Promise<boolean> {
+        const name = `${timestampName()}.mp4`;
+        const path = await Native.reserveClipPath(settings.store.saveDirectory, name);
+
+        const reported = await saveNativeClip(path, settings.store.clipLength, { application: "Clipper" });
+
+        // The engine answers in milliseconds, but older builds answered in
+        // seconds and the buffer is capped well under 600s either way, so the
+        // magnitude is a safe way to tell which one this is.
+        const seconds = reported > 600 ? reported / 1000 : reported;
+
+        /*
+         * Zero means the engine had nothing buffered, and it is not a detail.
+         *
+         * The clip still comes out, on our own buffer, with one mixed
+         * soundtrack - which is exactly the file a mute cannot do anything
+         * honest with. Returning false quietly here is how a clip arrives
+         * looking like every other clip, and the only sign that the track per
+         * person went missing is a mute that takes the whole call with it, an
+         * hour later, in the studio. So it says so.
+         */
+        if (!(seconds > 0)) {
+            logger.warn(`The native clip engine had nothing buffered (it reported ${reported}); falling back to the plugin's own buffer.`);
+            toast("The native engine had no footage buffered - saved the plugin's mixed recording instead", Toasts.Type.MESSAGE);
+            return false;
+        }
+
+        const saved = path.split(/[\\/]/).pop() || name;
+        const data = await Native.readClip(settings.store.saveDirectory, saved);
+
+        /*
+         * A clip with no picture is not a clip.
+         *
+         * The engine reads the capture id as a window handle, and a screen id
+         * does not convert to one - the native log answers `creating session
+         * with (RsVideoOptions { source: Window(HWND(0x0)), ... })` and turns
+         * its own capture back off a fifth of a second later. What it saves
+         * after that is the call audio, correctly split per person, over
+         * nothing at all. It reports a healthy length for it too, so the length
+         * check above waves it through.
+         *
+         * The plugin's own buffer has the picture, so the file is dropped and
+         * save() carries on down its own path: a mixed soundtrack the studio
+         * cannot unpick is still worth more than a black clip.
+         */
+        if (!hasVideoTrack(data)) {
+            logger.info(`The native clip engine wrote ${saved} with no picture; muxing its tracks into the plugin's clip instead.`);
+
+            // Handed to save(), which has the picture and does the muxing once
+            // its own buffer has been flushed and repaired.
+            this.nativeAudio = data;
+
+            try {
+                await Native.deleteClip(settings.store.saveDirectory, saved);
+            } catch (e) {
+                logger.warn(`Could not remove the pictureless clip ${saved}`, e);
+            }
+
+            return false;
+        }
+
+        const blob = new Blob([data as BlobPart], { type: "video/mp4" });
+
+        const end = Date.now();
+        const start = end - Math.round(seconds * 1000);
+        const markers = this.marks.map(m => (m - start) / 1000).filter(m => m >= 0);
+        const voices = voiceActivity.slice(start, end);
+
+        this.lastSaved = { name: saved, path, blob, mimeType: "video/mp4", markers, voices };
+
+        await tagSavedClip(path, markers, voices.map(toMeta));
+        void writeThumbnail(blob, saved);
+
+        /*
+         * How many audio tracks came out, said out loud.
+         *
+         * This is the whole question the native path exists to answer: the
+         * recorder keeps one per person internally, and whether `saveClipEx`
+         * hands those over or mixes them down on the way out is not documented
+         * anywhere. One track means the clip is mixed like any other and a mute
+         * still has to duck; more than one means a mute can drop a voice and
+         * leave the rest of the call alone.
+         */
+        const tracks = probeAudioTracks(data);
+        const layout = tracks && tracks.length > 1
+            ? `${tracks.length} voice tracks`
+            : "one mixed track";
+
+        logger.info(`Native clip saved: ${saved} (${Math.round(seconds)}s, ${layout})`, tracks);
+
+        if (!tracks || tracks.length < 2) {
+            toast("The engine wrote one mixed track for this clip - a mute will have to duck", Toasts.Type.MESSAGE);
+        }
+
+        if (settings.store.notifications) {
+            showNotification({
+                title: "Clip saved (native engine)",
+                body: `${Math.round(seconds)}s - ${formatBytes(blob.size)} - ${layout}\n${path}`,
+                onClick: () => copy(path)
+            });
+        } else {
+            toast(`Clip saved (${Math.round(seconds)}s, ${formatBytes(blob.size)}, ${layout})`, Toasts.Type.SUCCESS);
+        }
+
+        return true;
+    }
+
+    /**
+     * Cuts the clip that was just saved down to its last `seconds`.
+     *
+     * The save takes the whole buffer because the length that was wanted is only
+     * obvious once it has been watched; this is the correction. It cuts at the
+     * container level, so it is a memory copy rather than a re-encode and the
+     * footage that is kept is the same bytes. The original goes to the trash
+     * rather than being overwritten, so a cut that took too much is undoable.
+     */
+    async trimLastSaved(seconds: number): Promise<void> {
+        const last = this.lastSaved;
+        if (!last) {
+            toast("No clip has been saved yet", Toasts.Type.FAILURE);
+            return;
+        }
+        if (!(seconds > 0)) return;
+
+        try {
+            const total = await clipLength(last.blob, last.mimeType);
+            const from = total - seconds;
+
+            // Shorter than the cut asked for: nothing to take off.
+            if (!(from > 0)) {
+                toast("That clip is already shorter than that", Toasts.Type.MESSAGE);
+                return;
+            }
+
+            const cut = await trimClip(last.blob, last.mimeType, from, total + TIMESLICE / 1000);
+            if (cut === last.blob) {
+                toast("Nothing could be cut off that clip", Toasts.Type.FAILURE);
+                return;
+            }
+
+            const base = last.name.replace(/\.[^.]+$/, "");
+            const path = await writeClip(cut, `${base}-last${Math.round(seconds)}s.${extensionFor(last.mimeType)}`);
+            const saved = path.split(/[\\/]/).pop() || base;
+
+            // The cut lands on a keyframe at or before the point asked for, so
+            // measure what was really taken off rather than assuming.
+            const gone = total - await clipLength(cut, last.mimeType);
+            const markers = shift(last.markers, gone);
+            const voices = shiftTracks(last.voices, gone);
+
+            await tagSavedClip(path, markers, voices.map(toMeta));
+            void writeThumbnail(cut, saved);
+
+            // Only once the replacement is safely on disk.
+            try {
+                await Native.deleteClip(settings.store.saveDirectory, last.name);
+                await dropMeta(last.name);
+            } catch (e) {
+                logger.warn("Could not remove the untrimmed clip", e);
+            }
+
+            this.lastSaved = { name: saved, path, blob: cut, mimeType: last.mimeType, markers, voices };
+            toast(`Kept the last ${Math.round(seconds)}s (${formatBytes(cut.size)})`, Toasts.Type.SUCCESS);
+        } catch (e) {
+            logger.error("Failed to trim the last clip", e);
+            toast(`Failed to trim the clip: ${errorMessage(e)}`, Toasts.Type.FAILURE);
         }
     }
 
@@ -611,8 +1191,53 @@ async function captureMic(mic: MicSettings | null): Promise<MediaStream> {
     }
 }
 
+/**
+ * Something readable out of anything that was thrown.
+ *
+ * `String(e)` alone is what put `[object Object]` in front of a user instead of
+ * a reason: the native voice module rejects with plain objects rather than
+ * `Error`s, and a plain object stringifies to nothing at all. Anything that
+ * came from across the IPC boundary has to be dug into by hand, including the
+ * non-enumerable properties an `Error` from another realm keeps its message in.
+ */
 function errorMessage(e: unknown): string {
     if (e instanceof Error) return e.message || e.name;
+    if (typeof e === "string") return e;
+    if (e === null || e === undefined) return "no reason given";
+
+    if (typeof e === "object") {
+        const record = e as Record<string, unknown>;
+
+        for (const key of ["message", "error", "reason", "detail", "description"]) {
+            const value = record[key];
+            if (typeof value === "string" && value) return value;
+            if (value && typeof value === "object") {
+                const nested = errorMessage(value);
+                if (nested && nested !== "[object Object]") return nested;
+            }
+        }
+
+        try {
+            const json = JSON.stringify(e);
+            if (json && json !== "{}" && json !== "null") return json;
+        } catch {
+            // Circular, or something with a throwing getter. The properties are
+            // still worth reading one at a time.
+        }
+
+        try {
+            const parts: string[] = [];
+            for (const key of Object.getOwnPropertyNames(record)) {
+                if (key === "stack") continue;
+                parts.push(`${key}: ${String(record[key])}`);
+            }
+
+            if (parts.length) return parts.join(", ");
+        } catch {
+            // Nothing readable on it at all, which String() will say as well.
+        }
+    }
+
     return String(e);
 }
 
@@ -740,6 +1365,65 @@ async function acquireStream(fps: number, resolution: number): Promise<MediaStre
     }
 }
 
+/**
+ * Opens the machine's own output as a stream, independently of the video.
+ *
+ * Chromium only hands out loopback audio for a *screen*: ask it for the sound of
+ * a window and it answers with nothing, quietly, which is how a clip of a game
+ * window ends up carrying only whatever the microphone picked up off the
+ * speakers. The screen's loopback is the whole machine's output anyway, so it is
+ * the same sound the window would have produced - it is simply the only handle
+ * Chromium offers.
+ *
+ * It is taken through the display-media handler, never through the legacy
+ * `chromeMediaSource` constraints: asking `getUserMedia` for desktop audio kills
+ * the renderer process outright on some Windows setups, and a renderer that dies
+ * while the buffer is arming at startup takes the client into a reload loop.
+ *
+ * Returns null when the client has no such handle to give - Vesktop owns its own
+ * handler, and nothing outside the desktop client has one at all - which is the
+ * caller's signal to record without system sound rather than to fail.
+ */
+async function captureSystemAudio(): Promise<MediaStream | null> {
+    if (!IS_DISCORD_DESKTOP || IS_VESKTOP) return null;
+
+    let armed = false;
+
+    try {
+        const sources = await listCaptureSources();
+        const screen = sources.find(s => s.id.startsWith("screen:"));
+        if (!screen) return null;
+
+        armed = await Native.armDisplayMedia(screen.id, true);
+        if (!armed) return null;
+
+        // The video track is the price of the audio one: `getDisplayMedia` has
+        // no audio-only form. It is asked for at the smallest size the handler
+        // will honour and stopped as soon as the stream arrives.
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+            video: { frameRate: { ideal: 1, max: 1 }, height: { ideal: 120 } },
+            audio: true
+        });
+
+        stream.getVideoTracks().forEach(t => {
+            t.stop();
+            stream.removeTrack(t);
+        });
+
+        if (!stream.getAudioTracks().length) {
+            stream.getTracks().forEach(t => t.stop());
+            return null;
+        }
+
+        return stream;
+    } catch (e) {
+        logger.warn("The system audio handle was refused; recording without it", e);
+        return null;
+    } finally {
+        if (armed) Native.disarmDisplayMedia().catch(() => void 0);
+    }
+}
+
 /** Legacy capture path, kept as a fallback only. */
 async function getDesktopStream(sourceId: string, fps: number, resolution: number): Promise<MediaStream> {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -792,6 +1476,28 @@ async function writeClip(blob: Blob, name: string): Promise<string> {
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
     return name;
+}
+
+/**
+ * Seconds the repair or the cut took off the front of a clip.
+ *
+ * Both lengths are read from the container, from its first timestamp to its
+ * last, so what changed between them is exactly the footage that was dropped.
+ */
+async function dropped(before: Blob, after: Blob, mimeType: string): Promise<number> {
+    try {
+        return Math.max(0, await clipLength(before, mimeType) - await clipLength(after, mimeType));
+    } catch (e) {
+        logger.warn("Could not measure what the repair dropped, markers may be early", e);
+        return 0;
+    }
+}
+
+/** Moves markers back by what was cut off the front, dropping those cut away. */
+function shift(markers: number[], by: number): number[] {
+    if (!by) return markers;
+
+    return markers.map(m => m - by).filter(m => m >= 0);
 }
 
 function copy(text: string) {

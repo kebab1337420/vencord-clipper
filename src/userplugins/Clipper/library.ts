@@ -24,9 +24,10 @@ import type { PluginNative } from "@utils/types";
 import { RunningGameStore } from "@webpack/common";
 
 import { settings } from "./settings";
-
 // Its own logger rather than the recorder's: the recorder tags clips through
 // this module, and borrowing its logger would close an import cycle.
+import type { VoiceFileMeta, VoiceTrackMeta } from "./voice";
+
 const logger = new Logger("Clipper", "#f0b132");
 
 const Native = VencordNative.pluginHelpers.Clipper as PluginNative<typeof import("./native")>;
@@ -38,6 +39,33 @@ export interface ClipMeta {
     tags?: string[];
     /** Epoch ms the metadata was written, so a stale entry can be spotted. */
     taggedAt?: number;
+    /**
+     * Offsets in seconds from the start of the clip, marked while recording.
+     *
+     * Sorted, and only the ones that landed inside the clip that was saved: they
+     * are what the studio timeline draws so a play can be found without scrubbing
+     * for it.
+     */
+    markers?: number[];
+    /**
+     * Who was talking during the clip, one lane per person.
+     *
+     * Not audio: the call reaches this client already mixed, so what is kept is
+     * the activity envelope Discord reports per user. It is what the studio
+     * draws under the timeline, and it is stored base64'd because a plain array
+     * of a few thousand small numbers would dwarf the rest of the document.
+     */
+    voices?: VoiceTrackMeta[];
+    /**
+     * The per-person recordings kept alongside this clip.
+     *
+     * `voices` is an envelope drawn under the timeline; this is the audio
+     * itself, one file per person, and it is what the studio's mute works on.
+     * Held here rather than read off the folder because the offset cannot be
+     * recovered from a file name: a lane starts on its own chunk boundary, a
+     * fraction of a second either side of the clip's.
+     */
+    tracks?: VoiceFileMeta[];
 }
 
 interface LibraryDocument {
@@ -64,16 +92,88 @@ let cache: LibraryDocument | null = null;
  */
 let cacheDir: string | null = null;
 
+/**
+ * One entry, with every field checked, or null when there is nothing to keep.
+ *
+ * The document is a file in a folder the user opens, moves and backs up, so it
+ * may have been edited by hand or written by an older version: a `game` that is
+ * not a string would reach the category list and the clip grid as-is.
+ */
+function entryOf(value: unknown): ClipMeta | null {
+    if (!value || typeof value !== "object") return null;
+
+    const raw = value as Partial<ClipMeta>;
+
+    const tags = Array.isArray(raw.tags)
+        ? raw.tags.filter((t): t is string => typeof t === "string" && !!t.trim()).map(t => t.trim().toLowerCase())
+        : [];
+
+    const voices = Array.isArray(raw.voices)
+        ? (raw.voices as unknown[])
+            .map(value => value as Partial<VoiceTrackMeta>)
+            .filter(v => !!v && typeof v.id === "string" && typeof v.levels === "string" && !!v.levels)
+            .slice(0, 10)
+            .map(v => ({
+                id: v.id!,
+                name: (typeof v.name === "string" && v.name.trim()) || v.id!,
+                // Only an http(s) avatar is kept: the value is fed to an <img>
+                // the render draws onto its canvas, and a javascript: or data:
+                // URL out of a hand-edited sidecar has no business going there.
+                ...(typeof v.avatar === "string" && /^https:\/\//.test(v.avatar) ? { avatar: v.avatar.slice(0, 400) } : {}),
+                levels: v.levels!.slice(0, 8000)
+            }))
+        : [];
+
+    const tracks = Array.isArray(raw.tracks)
+        ? (raw.tracks as unknown[])
+            .map(value => value as Partial<VoiceFileMeta>)
+            .filter(t => !!t && typeof t.id === "string" && typeof t.file === "string" && !!t.file)
+            // A file name out of a hand-edited sidecar is handed to the native
+            // reader, which resolves it inside the clip folder: it may name a
+            // file, never a path.
+            .filter(t => !/[\\/]/.test(t.file!) && t.file!.toLowerCase().endsWith(".webm"))
+            .slice(0, 10)
+            .map(t => ({
+                id: t.id!,
+                name: (typeof t.name === "string" && t.name.trim()) || t.id!,
+                file: t.file!.slice(0, 200),
+                offset: typeof t.offset === "number" && Number.isFinite(t.offset) ? t.offset : 0
+            }))
+        : [];
+
+    const markers = Array.isArray(raw.markers)
+        ? raw.markers
+            .filter((m): m is number => typeof m === "number" && Number.isFinite(m) && m >= 0)
+            .sort((a, b) => a - b)
+            .slice(0, 200)
+        : [];
+
+    return {
+        game: typeof raw.game === "string" ? raw.game.trim().slice(0, 60) : "",
+        ...(tags.length ? { tags } : {}),
+        ...(typeof raw.taggedAt === "number" && Number.isFinite(raw.taggedAt) ? { taggedAt: raw.taggedAt } : {}),
+        ...(markers.length ? { markers } : {}),
+        ...(voices.length ? { voices } : {}),
+        ...(tracks.length ? { tracks } : {})
+    };
+}
+
 function parse(json: string): LibraryDocument {
     if (!json) return { ...EMPTY, clips: {} };
 
     try {
         const parsed = JSON.parse(json);
-        if (!parsed || typeof parsed !== "object" || typeof parsed.clips !== "object") {
+        if (!parsed || typeof parsed !== "object" || !parsed.clips || typeof parsed.clips !== "object") {
             return { ...EMPTY, clips: {} };
         }
 
-        return { version: 1, clips: parsed.clips as Record<string, ClipMeta> };
+        const clips: Record<string, ClipMeta> = {};
+        for (const [name, value] of Object.entries(parsed.clips as Record<string, unknown>)) {
+            const entry = entryOf(value);
+            if (entry) clips[name] = entry;
+        }
+
+        return { version: 1, clips };
     } catch (e) {
         // A corrupt document must not take the clip list down with it: the clips
         // themselves are the data that matters, the metadata is recoverable.
@@ -82,20 +182,40 @@ function parse(json: string): LibraryDocument {
     }
 }
 
+/** The read currently in flight, so concurrent callers share one document. */
+let loading: Promise<LibraryDocument> | null = null;
+
+async function read(dir: string): Promise<LibraryDocument> {
+    let doc: LibraryDocument;
+
+    try {
+        doc = parse(await Native.readLibrary(dir));
+    } catch (e) {
+        logger.warn("Could not read the clip library", e);
+        doc = { ...EMPTY, clips: {} };
+    }
+
+    // The folder may have been changed again while this read was in flight, in
+    // which case the cache belongs to the newer one, not to this document.
+    if (cacheDir === dir) cache = doc;
+
+    return doc;
+}
+
 async function load(): Promise<LibraryDocument> {
     const dir = settings.store.saveDirectory ?? "";
     if (cache && cacheDir === dir) return cache;
 
+    // Two callers arriving before the first read comes back would otherwise each
+    // parse their own document, and whichever wrote first would have its change
+    // dropped by the other's copy. They share one read instead.
+    if (loading && cacheDir === dir) return loading;
+
     cacheDir = dir;
+    loading = read(dir);
+    loading.finally(() => void (loading = null)).catch(() => void 0);
 
-    try {
-        cache = parse(await Native.readLibrary(dir));
-    } catch (e) {
-        logger.warn("Could not read the clip library", e);
-        cache = { ...EMPTY, clips: {} };
-    }
-
-    return cache;
+    return loading;
 }
 
 async function flush(): Promise<void> {
@@ -198,15 +318,26 @@ export function detectGame(): string {
 }
 
 /** Tags a freshly saved clip with whatever was running when it was saved. */
-export async function tagSavedClip(path: string): Promise<void> {
+export async function tagSavedClip(path: string, markers?: number[], voices?: VoiceTrackMeta[], tracks?: VoiceFileMeta[]): Promise<void> {
     const name = path.split(/[\\/]/).pop();
     if (!name) return;
 
     const game = detectGame();
-    if (!game) return;
+    const kept = markers?.filter(m => Number.isFinite(m) && m >= 0).sort((a, b) => a - b) ?? [];
+    const lanes = voices?.filter(v => v.levels) ?? [];
+    const files = tracks?.filter(t => t.file) ?? [];
+
+    // Markers are worth writing on their own: a clip taken outside a game has no
+    // category to record but its marks are still the reason it was saved.
+    if (!game && !kept.length && !lanes.length && !files.length) return;
 
     try {
-        await setMeta(name, { game });
+        await setMeta(name, {
+            ...(game ? { game } : {}),
+            ...(kept.length ? { markers: kept } : {}),
+            ...(lanes.length ? { voices: lanes } : {}),
+            ...(files.length ? { tracks: files } : {})
+        });
     } catch (e) {
         logger.warn("Could not tag the saved clip", e);
     }

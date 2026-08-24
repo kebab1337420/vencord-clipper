@@ -8,6 +8,17 @@
  * Vencord Clipper - shared helpers
  */
 
+/**
+ * Name of the thumbnail that belongs to a clip.
+ *
+ * A sidecar rather than an entry in the library file: it is written once, it is
+ * binary, and a clip copied out of the folder by hand should take its picture
+ * with it.
+ */
+export function thumbNameFor(name: string): string {
+    return `${name.replace(/\.(webm|mp4)$/i, "")}.thumb.jpg`;
+}
+
 export interface Keybind {
     code: string;
     ctrl: boolean;
@@ -194,4 +205,13 @@ export function isTypingTarget(): boolean {
     const el = document.activeElement as HTMLElement | null;
     if (!el) return false;
     return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
+}
+
+/** A position on a timeline, e.g. "1:07.5". */
+export function formatTime(seconds: number): string {
+    const value = Math.max(0, seconds);
+    const minutes = Math.floor(value / 60);
+    const rest = value - minutes * 60;
+
+    return `${minutes}:${rest.toFixed(1).padStart(4, "0")}`;
 }

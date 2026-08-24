@@ -20,6 +20,11 @@
  * they need no change, and the rewritten integer keeps its original byte width -
  * EBML unsigned integers may be padded - which means no size or offset in the
  * file moves.
+ *
+ * The same machinery cuts a clip down to a range without going near an encoder:
+ * a cluster opening on a keyframe is a self-contained unit, so keeping a run of
+ * them and rebasing the result is a lossless trim, at the cost of landing on
+ * cluster boundaries.
  */
 
 const CLUSTER_ID = [0x1f, 0x43, 0xb6, 0x75];
@@ -80,6 +85,8 @@ function writeUint(data: Uint8Array, pos: number, length: number, value: number)
 
 interface Cluster {
     offset: number;
+    /** Absolute offset one past the cluster. */
+    end: number;
     /** Absolute position of the Timecode element's payload. */
     timecodeAt: number;
     timecodeLength: number;
@@ -109,6 +116,8 @@ function readCluster(data: Uint8Array, offset: number, videoTrack: number): Clus
     const timecodeAt = pos + 1 + timecodeSize.length;
     const cluster: Cluster = {
         offset,
+        // Filled in by the scan once the next cluster is known.
+        end: data.length,
         timecodeAt,
         timecodeLength: timecodeSize.value,
         timecode: readUint(data, timecodeAt, timecodeSize.value),
@@ -224,16 +233,135 @@ function isClusterId(data: Uint8Array, pos: number): boolean {
 const MAX_GAP = 3000;
 
 /**
+ * Fraction of a run the search for a keyframe is allowed to throw away.
+ *
+ * A clip has to start on a keyframe or its first second decodes into garbage,
+ * so the repair moves the start forward to one. When the encoder places them
+ * far apart that move is not a correction, it is the clip: a ten second buffer
+ * whose first keyframe sits six seconds in comes back as a four second file.
+ * Past this fraction the run is kept whole instead, on the grounds that a
+ * briefly blocky opening is worth more than the footage the user asked for.
+ */
+const MAX_KEYFRAME_SKIP = 0.35;
+
+/**
  * Index of the first cluster to keep: the start of the last continuous run,
  * moved forward to a keyframe so the clip can be decoded from its first frame.
  */
 function firstKeptCluster(clusters: Cluster[]): number {
-    let start = clusters.length - 1;
+    let run = clusters.length - 1;
 
-    while (start > 0 && clusters[start].timecode - clusters[start - 1].timecode <= MAX_GAP) start--;
+    while (run > 0 && clusters[run].timecode - clusters[run - 1].timecode <= MAX_GAP) run--;
+
+    let start = run;
     while (start < clusters.length - 1 && !clusters[start].keyframe) start++;
 
+    // The keyframe search only pays for itself while it stays a correction.
+    const span = clusters.length - run;
+    if (span > 1 && (start - run) / span > MAX_KEYFRAME_SKIP) return run;
+
     return start;
+}
+
+/**
+ * Walks a live WebM into its header and its clusters.
+ *
+ * Returns null for anything that does not look like one, which is the caller's
+ * signal to leave the bytes alone rather than to guess.
+ */
+function scanClusters(data: Uint8Array): Cluster[] | null {
+    const clusters: Cluster[] = [];
+    const videoTrack = findVideoTrack(data);
+
+    for (let pos = 0; pos + 8 < data.length; pos++) {
+        if (!isClusterId(data, pos)) continue;
+
+        const cluster = readCluster(data, pos, videoTrack);
+        if (!cluster) continue;
+
+        // Each cluster runs up to the next one: live clusters have no size, so
+        // this is the only thing that says where one ends.
+        const previous = clusters[clusters.length - 1];
+        if (previous) previous.end = pos;
+
+        clusters.push(cluster);
+
+        // Nothing else in this cluster can be a cluster header, but the scan
+        // still has to walk it byte by byte: live clusters have no size.
+        pos += CLUSTER_ID.length;
+    }
+
+    return clusters.length ? clusters : null;
+}
+
+/**
+ * Copies the header plus one run of clusters, rebased so the run starts at zero.
+ */
+function emit(data: Uint8Array, clusters: Cluster[], from: number, to: number): Uint8Array {
+    const head = clusters[0].offset;
+    const kept = clusters.slice(from, to + 1);
+    const base = kept[0].timecode;
+
+    const body = data.subarray(kept[0].offset, kept[kept.length - 1].end);
+    const out = new Uint8Array(head + body.length);
+    out.set(data.subarray(0, head), 0);
+    out.set(body, head);
+
+    const shift = head - kept[0].offset;
+
+    for (const cluster of kept) {
+        writeUint(out, cluster.timecodeAt + shift, cluster.timecodeLength, Math.max(0, cluster.timecode - base));
+    }
+
+    return out;
+}
+
+/**
+ * Cuts a live WebM down to a range, without re-encoding anything.
+ *
+ * The cut lands on cluster boundaries: the kept run opens on the last keyframe
+ * cluster at or before `fromMs`, so the result is never a fraction of a second
+ * shorter than asked, only a fraction longer. Nothing is decoded, so this is
+ * instant and lossless whatever the length of the clip.
+ *
+ * Returns null when the data is not a live WebM or when the range covers the
+ * whole of it, in which case the caller keeps the original bytes.
+ */
+export function trimWebm(data: Uint8Array, fromMs: number, toMs: number): Uint8Array | null {
+    const clusters = scanClusters(data);
+    if (!clusters) return null;
+
+    // Whatever the buffer left in front of the first cluster is the clip's own
+    // zero; the caller asks for a range in clip time, not in capture time.
+    const zero = clusters[0].timecode;
+
+    let start = 0;
+    for (let i = 0; i < clusters.length; i++) {
+        if (clusters[i].timecode - zero <= fromMs && clusters[i].keyframe) start = i;
+    }
+
+    let end = start;
+    for (let i = start; i < clusters.length; i++) {
+        if (clusters[i].timecode - zero <= toMs) end = i;
+    }
+
+    if (start === 0 && end === clusters.length - 1) return null;
+
+    return emit(data, clusters, start, end);
+}
+
+/**
+ * Length of a live WebM in seconds, or 0 when it cannot be read.
+ *
+ * Measured to the start of the last cluster, so it is short by whatever that one
+ * holds - a timeslice at most. Good enough to bound a trim slider, not to label
+ * the clip.
+ */
+export function lengthWebm(data: Uint8Array): number {
+    const clusters = scanClusters(data);
+    if (!clusters) return 0;
+
+    return Math.max(0, clusters[clusters.length - 1].timecode - clusters[0].timecode) / 1000;
 }
 
 /**
@@ -248,57 +376,13 @@ function firstKeptCluster(clusters: Cluster[]): number {
  * caller keeps the original bytes.
  */
 export function rebaseWebm(data: Uint8Array): Uint8Array | null {
-    const clusters: Cluster[] = [];
-    const videoTrack = findVideoTrack(data);
-
-    for (let pos = 0; pos + 8 < data.length; pos++) {
-        if (!isClusterId(data, pos)) continue;
-
-        const cluster = readCluster(data, pos, videoTrack);
-        if (!cluster) continue;
-
-        clusters.push(cluster);
-
-        // Nothing else in this cluster can be a cluster header, but the scan
-        // still has to walk it byte by byte: live clusters have no size.
-        pos += CLUSTER_ID.length;
-    }
-
-    if (!clusters.length) return null;
+    const clusters = scanClusters(data);
+    if (!clusters) return null;
 
     const start = firstKeptCluster(clusters);
 
-    const head = clusters[0].offset;
-    const base = clusters[start].timecode;
-
     // Already one contiguous run starting at zero: nothing to repair.
-    if (base === 0 && start === 0) return null;
+    if (clusters[start].timecode === 0 && start === 0) return null;
 
-    const body = data.subarray(clusters[start].offset);
-    const out = new Uint8Array(head + body.length);
-    out.set(data.subarray(0, head), 0);
-    out.set(body, head);
-
-    const shift = head - clusters[start].offset;
-
-    for (const cluster of clusters.slice(start)) {
-        writeUint(out, cluster.timecodeAt + shift, cluster.timecodeLength, Math.max(0, cluster.timecode - base));
-    }
-
-    return out;
-}
-
-/**
- * Repairs a clip assembled from the rolling buffer.
- *
- * Only WebM is handled: an MP4 recording is fragmented, its fragments carry
- * their own baseMediaDecodeTime, and rewriting those needs a different parser.
- */
-export async function repairClip(blob: Blob, mimeType: string): Promise<Blob> {
-    if (!mimeType.startsWith("video/webm")) return blob;
-
-    const data = new Uint8Array(await blob.arrayBuffer());
-    const fixed = rebaseWebm(data);
-
-    return fixed ? new Blob([fixed as any], { type: mimeType }) : blob;
+    return emit(data, clusters, start, clusters.length - 1);
 }

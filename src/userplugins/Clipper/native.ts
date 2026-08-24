@@ -15,6 +15,11 @@ import { app, desktopCapturer, dialog, globalShortcut, type IpcMainInvokeEvent, 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { basename, extname, isAbsolute, join } from "path";
 
+// From utils rather than defined here: the renderer needs the same names and
+// cannot import this module, which pulls in fs and electron. Not re-exported
+// either - every value export of a native module must be an IPC handler.
+import { thumbNameFor } from "./utils";
+
 /*
  * Windows Graphics Capture is the only backend that reports "not capturable"
  * per window, and loopback audio through `getDisplayMedia` is Windows-only as
@@ -48,23 +53,29 @@ function resolveDirectory(dir: string): string {
 }
 
 /**
- * Reduces a clip name to a plain file name in the clip folder.
+ * Reduces a clip name to a plain file name in the clip folder, or null when
+ * nothing usable is left of it.
  *
  * The name comes from the renderer, and everything a plugin exports here is
  * callable from there, so a name is never trusted with a directory component or
  * an extension of its own choosing: `..\..\autorun.bat` must not escape the clip
  * folder, and nothing but a video file may be written.
  */
-function safeClipName(name: string): string {
+function clipName(name: string): string | null {
     const flat = basename(String(name ?? "").replace(/[\\/]/g, "_")).trim();
     const cleaned = flat.replace(/[<>:"|?*\x00-\x1f]/g, "_").replace(/^\.+/, "");
 
-    // Parentheses are allowed because the de-duplicating suffix uses them, and
-    // png because the editor saves single frames next to the clips.
-    const match = /^([\w.\-+ ()[\]]{1,120})\.(webm|mp4|png)$/i.exec(cleaned);
-    if (match) return `${match[1]}.${match[2].toLowerCase()}`;
+    // Parentheses are allowed because the de-duplicating suffix uses them, png
+    // because the editor saves single frames next to the clips, and jpg because
+    // that is what the thumbnails are.
+    const match = /^([\w.\-+ ()[\]]{1,120})\.(webm|mp4|png|jpg)$/i.exec(cleaned);
 
-    return `clip-${Date.now()}.webm`;
+    return match ? `${match[1]}.${match[2].toLowerCase()}` : null;
+}
+
+/** Same, with a generated name for a write that must land somewhere. */
+function safeClipName(name: string): string {
+    return clipName(name) ?? `clip-${Date.now()}.webm`;
 }
 
 /** Appends " (2)", " (3)"... until the name is free, so nothing is overwritten. */
@@ -96,13 +107,116 @@ export function saveClip(_: IpcMainInvokeEvent, dir: string, name: string, data:
     return path;
 }
 
+/**
+ * Reserves a free path inside the clip folder without writing anything.
+ *
+ * The native clip engine writes the file itself - it is handed a path and hands
+ * back a duration - so the renderer needs the same name resolution `saveClip`
+ * does, minus the write: the folder created, the name made safe, and a " (2)"
+ * appended if something is already sitting there.
+ */
+export function reserveClipPath(_: IpcMainInvokeEvent, dir: string, name: string): string {
+    const target = resolveDirectory(dir);
+    mkdirSync(target, { recursive: true });
+
+    return freePath(target, safeClipName(name));
+}
+
+/*
+ * Where a clip's per-person voice recordings live.
+ *
+ * A subfolder rather than a suffix on the clip's own name, for the one reason
+ * that decides it: `listClips` walks the clip folder and calls every `.webm`
+ * and `.mp4` in it a clip. Eight people in a call would put eight more entries
+ * in the library for every clip taken, and no naming convention makes that
+ * safe - the folder is the user's, they rename things inside it, and a rule
+ * that reads a name to decide what a file *is* breaks the first time somebody
+ * does. `listClips` never descends into a directory, so nothing kept here can
+ * be mistaken for a clip.
+ */
+const VOICE_DIR = "voices";
+
+/** Ids come from Discord and are digits; nothing else may name a file here. */
+function voiceName(clip: string, userId: string): string | null {
+    const safe = clipName(clip);
+    if (!safe || !/^\d{1,25}$/.test(String(userId ?? ""))) return null;
+
+    return `${safe.slice(0, safe.length - extname(safe).length)}.${userId}.webm`;
+}
+
+/** The voice recordings kept for one clip, by whose voice each one is. */
+function voiceTracksIn(dir: string, clip: string): Array<{ userId: string; file: string; }> {
+    const safe = clipName(clip);
+    if (!safe) return [];
+
+    const target = join(resolveDirectory(dir), VOICE_DIR);
+    if (!existsSync(target)) return [];
+
+    // Matched whole, with the dot, so the tracks of "clip.webm" are never the
+    // tracks of "clip (2).webm".
+    const head = `${safe.slice(0, safe.length - extname(safe).length)}.`;
+    const found: Array<{ userId: string; file: string; }> = [];
+
+    for (const entry of readdirSync(target, { withFileTypes: true })) {
+        if (!entry.isFile()) continue;
+        if (!entry.name.startsWith(head) || !entry.name.toLowerCase().endsWith(".webm")) continue;
+
+        const userId = entry.name.slice(head.length, entry.name.length - ".webm".length);
+        if (/^\d{1,25}$/.test(userId)) found.push({ userId, file: entry.name });
+    }
+
+    return found;
+}
+
+/** Writes one person's own voice next to the clip it belongs to. */
+export function saveVoiceTrack(_: IpcMainInvokeEvent, dir: string, clip: string, userId: string, data: Uint8Array): string | null {
+    const name = voiceName(clip, userId);
+    if (!name) return null;
+
+    const target = join(resolveDirectory(dir), VOICE_DIR);
+    mkdirSync(target, { recursive: true });
+
+    const path = join(target, name);
+    writeFileSync(path, Buffer.from(data));
+
+    return path;
+}
+
+export function listVoiceTracks(_: IpcMainInvokeEvent, dir: string, clip: string): Array<{ userId: string; file: string; }> {
+    return voiceTracksIn(dir, clip);
+}
+
+/** Reads one of them back. */
+export function readVoiceTrack(_: IpcMainInvokeEvent, dir: string, file: string): Uint8Array {
+    const flat = basename(String(file ?? "").replace(/[\\/]/g, "_"));
+    if (!flat.toLowerCase().endsWith(".webm") || flat.includes("..")) throw new Error("not a voice track");
+
+    return new Uint8Array(readFileSync(join(resolveDirectory(dir), VOICE_DIR, flat)));
+}
+
+/** Drops everything recorded for a clip, for when the clip itself goes. */
+function dropVoiceTracks(dir: string, clip: string): void {
+    const target = join(resolveDirectory(dir), VOICE_DIR);
+
+    for (const { file } of voiceTracksIn(dir, clip)) {
+        try {
+            unlinkSync(join(target, file));
+        } catch {
+            // Already gone, or held open by a decoder: nothing to do about it.
+        }
+    }
+}
+
 export interface StoredClip {
     name: string;
     path: string;
     size: number;
     /** Last modification, epoch ms. */
     modified: number;
+    /** File name of the sidecar thumbnail, when one was written next to it. */
+    thumb?: string;
 }
+
 
 /** Clips found in the folder, newest first. */
 export function listClips(_: IpcMainInvokeEvent, dir: string): StoredClip[] {
@@ -110,14 +224,26 @@ export function listClips(_: IpcMainInvokeEvent, dir: string): StoredClip[] {
     if (!existsSync(target)) return [];
 
     const clips: StoredClip[] = [];
+    const files = new Set<string>();
+    const entries = readdirSync(target, { withFileTypes: true });
 
-    for (const entry of readdirSync(target, { withFileTypes: true })) {
+    for (const entry of entries) if (entry.isFile()) files.add(entry.name);
+
+    for (const entry of entries) {
         if (!entry.isFile() || !/\.(webm|mp4)$/i.test(entry.name)) continue;
 
         const path = join(target, entry.name);
         try {
             const stat = statSync(path);
-            clips.push({ name: entry.name, path, size: stat.size, modified: stat.mtimeMs });
+            const thumb = thumbNameFor(entry.name);
+
+            clips.push({
+                name: entry.name,
+                path,
+                size: stat.size,
+                modified: stat.mtimeMs,
+                ...(files.has(thumb) ? { thumb } : {})
+            });
         } catch {
             // Deleted between the listing and the stat, or unreadable: skip it.
         }
@@ -139,7 +265,9 @@ export function readClip(_: IpcMainInvokeEvent, dir: string, name: string): Uint
 
 /** Moves a clip to the trash, so a mis-click stays undoable. */
 export async function deleteClip(_: IpcMainInvokeEvent, dir: string, name: string): Promise<void> {
-    const path = join(resolveDirectory(dir), safeClipName(name));
+    const target = resolveDirectory(dir);
+    const clip = safeClipName(name);
+    const path = join(target, clip);
 
     try {
         await shell.trashItem(path);
@@ -147,20 +275,55 @@ export async function deleteClip(_: IpcMainInvokeEvent, dir: string, name: strin
         // No trash available (some Linux setups, network drives): delete outright.
         unlinkSync(path);
     }
+
+    // The same goes for the voices: they mean nothing without the clip they
+    // were recorded alongside.
+    dropVoiceTracks(dir, clip);
+
+    // The thumbnail is worthless without its clip, and leaving it behind would
+    // have the next clip of the same name show the wrong picture.
+    const thumb = join(target, thumbNameFor(clip));
+    if (existsSync(thumb)) {
+        try {
+            await shell.trashItem(thumb);
+        } catch {
+            try {
+                unlinkSync(thumb);
+            } catch {
+                // Locked or already gone: the listing simply keeps showing it.
+            }
+        }
+    }
 }
 
 /** Renames a clip inside the folder. Returns the name it ended up with. */
 export function renameClip(_: IpcMainInvokeEvent, dir: string, name: string, next: string): string {
     const target = resolveDirectory(dir);
-    const from = join(target, safeClipName(name));
+    const current = safeClipName(name);
+    const from = join(target, current);
 
     // The extension is the source of truth for the container, so it is kept
     // whatever the user typed.
-    const ext = extname(safeClipName(name));
-    const wanted = safeClipName(next.toLowerCase().endsWith(ext) ? next : next + ext);
+    const ext = extname(current);
+    const wanted = clipName(next.toLowerCase().endsWith(ext) ? next : next + ext);
+
+    // A rename is the one place the generated fallback would be wrong: silently
+    // filing the clip under `clip-1750000000000.webm` loses the name the user
+    // typed, which is the entire point of the operation.
+    if (!wanted) throw new Error("That name cannot be used. Keep it under 120 characters, with letters, digits, spaces or - _ . + ( ) [ ]");
 
     const to = freePath(target, wanted);
     renameSync(from, to);
+
+    // The thumbnail is found by the clip's name, so it has to follow it.
+    const thumbFrom = join(target, thumbNameFor(current));
+    if (existsSync(thumbFrom)) {
+        try {
+            renameSync(thumbFrom, join(target, thumbNameFor(basename(to))));
+        } catch {
+            // Not fatal: the clip just loses its picture until the next render.
+        }
+    }
 
     return basename(to);
 }
@@ -235,6 +398,93 @@ export function readVideoFile(_: IpcMainInvokeEvent, path: string): Uint8Array {
         // already an uncomfortable amount to hold while the timeline is open.
         const mb = Math.round(stat.size / (1024 * 1024));
         throw new Error(`That video is ${mb} MB; imports are capped at 512 MB. Trim it or lower its bitrate first.`);
+    }
+
+    return new Uint8Array(readFileSync(path));
+}
+
+/** Native picker for sounds to lay over the montage. */
+export async function pickAudioFiles(_: IpcMainInvokeEvent): Promise<string[]> {
+    const result = await dialog.showOpenDialog({
+        title: "Add sounds to the timeline",
+        properties: ["openFile", "multiSelections"],
+        filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "opus", "m4a", "aac", "flac", "webm"] }]
+    });
+
+    return result.canceled ? [] : result.filePaths;
+}
+
+/**
+ * Reads a sound the user picked, by absolute path.
+ *
+ * Capped far lower than a video import: a sound is decoded to float samples and
+ * kept that way for as long as the timeline is open, which costs roughly ten
+ * megabytes per minute of stereo whatever the file's own compression was.
+ */
+const MAX_SOUND_BYTES = 64 * 1024 * 1024;
+
+export function readAudioFile(_: IpcMainInvokeEvent, path: string): Uint8Array {
+    if (!isAbsolute(path) || !/\.(mp3|wav|ogg|opus|m4a|aac|flac|webm)$/i.test(path)) {
+        throw new Error("Not an audio file");
+    }
+
+    const stat = statSync(path);
+    if (stat.size > MAX_SOUND_BYTES) {
+        const mb = Math.round(stat.size / (1024 * 1024));
+        throw new Error(`That sound is ${mb} MB; the timeline caps them at 64 MB.`);
+    }
+
+    return new Uint8Array(readFileSync(path));
+}
+
+/**
+ * Picks the pictures and clips to lay over the montage.
+ *
+ * Animations are first-class here rather than tolerated: a GIF plays as a GIF,
+ * and a short MP4 or WebM is laid on the frame the same way a picture is. What
+ * the render captures is a canvas painted in real time, so an overlay that
+ * moves needs nothing more than to be playing while it is painted.
+ */
+export async function pickImageFiles(_: IpcMainInvokeEvent): Promise<string[]> {
+    const result = await dialog.showOpenDialog({
+        title: "Add pictures and clips to the montage",
+        properties: ["openFile", "multiSelections"],
+        filters: [
+            { name: "Pictures and clips", extensions: ["png", "jpg", "jpeg", "webp", "gif", "avif", "bmp", "mp4", "webm"] },
+            { name: "Pictures", extensions: ["png", "jpg", "jpeg", "webp", "gif", "avif", "bmp"] },
+            { name: "Clips", extensions: ["mp4", "webm"] }
+        ]
+    });
+
+    return result.canceled ? [] : result.filePaths;
+}
+
+/**
+ * Reads a picture the user picked, by absolute path.
+ *
+ * Pictures are capped well below the sound limit: one is decoded to a bitmap
+ * held for as long as the studio is open, and a 40 megapixel photo is 160 MB of
+ * RGBA whatever the file on disk weighs. A video overlay is allowed more
+ * because it is never decoded whole - it streams out of an element a frame at
+ * a time, the same as the footage underneath it.
+ */
+const MAX_IMAGE_BYTES = 24 * 1024 * 1024;
+const MAX_OVERLAY_VIDEO_BYTES = 64 * 1024 * 1024;
+
+export function readImageFile(_: IpcMainInvokeEvent, path: string): Uint8Array {
+    if (!isAbsolute(path) || !/\.(png|jpe?g|webp|gif|avif|bmp|mp4|webm)$/i.test(path)) {
+        throw new Error("Not a picture or a clip");
+    }
+
+    const moving = /\.(mp4|webm)$/i.test(path);
+    const cap = moving ? MAX_OVERLAY_VIDEO_BYTES : MAX_IMAGE_BYTES;
+
+    const stat = statSync(path);
+    if (stat.size > cap) {
+        const mb = Math.round(stat.size / (1024 * 1024));
+        const capMb = Math.round(cap / (1024 * 1024));
+
+        throw new Error(`That ${moving ? "clip" : "picture"} is ${mb} MB; the montage caps them at ${capMb} MB.`);
     }
 
     return new Uint8Array(readFileSync(path));
@@ -443,7 +693,7 @@ export function disarmDisplayMedia(_?: IpcMainInvokeEvent): void {
  * the timeout expires, which costs nothing while idle and adds no latency when
  * a key is actually pressed.
  */
-type ShortcutAction = "save" | "toggle";
+type ShortcutAction = "save" | "toggle" | "mark";
 
 const registered = new Map<ShortcutAction, string>();
 let waiters: Array<(action: ShortcutAction | null) => void> = [];

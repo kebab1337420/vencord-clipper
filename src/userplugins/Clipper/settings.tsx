@@ -11,7 +11,6 @@
 import { definePluginSettings } from "@api/Settings";
 import { OptionType } from "@utils/types";
 
-import { AudioMixerSetting } from "./components/AudioMixer";
 import { KeybindInput } from "./components/KeybindInput";
 import { SaveDirectoryInput } from "./components/SaveDirectoryInput";
 import { SettingsSection } from "./components/SettingsSection";
@@ -23,96 +22,62 @@ export const enum Container {
 }
 
 export const settings = definePluginSettings({
-    captureSection: {
-        type: OptionType.COMPONENT,
-        component: () => (
-            <SettingsSection
-                title="Capture"
-                note="What is recorded, and how much of it the buffer keeps."
-            />
-        )
-    },
+    /*
+     * Capture and audio settings live in the clip studio and in the source
+     * picker, which is where they are actually needed. Kept here as stored
+     * values only, so the panel does not show the same knobs twice.
+     */
     autoStart: {
         type: OptionType.BOOLEAN,
         description: "Start the capture buffer as soon as Discord launches, on the remembered source (the primary screen when none was picked)",
         default: false
     },
     clipLength: {
-        type: OptionType.SLIDER,
-        description: "Clip length in seconds (how far back the buffer keeps footage)",
-        markers: [10, 15, 30, 60, 90, 120, 180, 300],
-        default: 30,
-        stickToMarkers: true
+        type: OptionType.CUSTOM,
+        default: 30
     },
     fps: {
-        type: OptionType.SELECT,
-        description: "Capture frame rate",
-        options: [
-            { label: "24 FPS", value: 24 },
-            { label: "30 FPS", value: 30, default: true },
-            { label: "60 FPS", value: 60 },
-            { label: "120 FPS", value: 120 }
-        ]
+        type: OptionType.CUSTOM,
+        default: 30
     },
     resolution: {
-        type: OptionType.SELECT,
-        description: "Capture resolution (height). 'Source' keeps the native size",
-        options: [
-            { label: "Source", value: 0, default: true },
-            { label: "2160p", value: 2160 },
-            { label: "1440p", value: 1440 },
-            { label: "1080p", value: 1080 },
-            { label: "720p", value: 720 },
-            { label: "480p", value: 480 }
-        ]
+        type: OptionType.CUSTOM,
+        default: 0
     },
     videoBitrate: {
-        type: OptionType.SLIDER,
-        description: "Video quality in Mbps (higher = better image, bigger file)",
-        markers: [1, 2, 4, 6, 8, 12, 16, 24, 32, 50],
-        default: 8,
-        stickToMarkers: true
+        type: OptionType.CUSTOM,
+        default: 8
     },
     container: {
-        type: OptionType.SELECT,
-        description: "Container / codec. VP9 is the safest, MP4 needs a recent Discord build",
-        options: [
-            { label: "WebM (VP9) - recommended", value: Container.WebmVp9, default: true },
-            { label: "WebM (VP8) - fastest, larger files", value: Container.WebmVp8 },
-            { label: "MP4 (H.264) - best compatibility", value: Container.Mp4H264 }
-        ]
-    },
-    audioSection: {
-        type: OptionType.COMPONENT,
-        component: () => (
-            <SettingsSection
-                title="Audio"
-                note="Every sound source that goes into a clip, and how loud each one is."
-            />
-        )
+        type: OptionType.CUSTOM,
+        default: Container.Mp4H264
     },
     includeMic: {
-        type: OptionType.BOOLEAN,
-        description: "Mix your microphone into the clip audio, using the input device, volume, echo cancellation and noise suppression already set in Discord's voice settings",
+        type: OptionType.CUSTOM,
         default: false
     },
     audioBitrate: {
-        type: OptionType.SLIDER,
-        description: "Audio quality in kbps",
-        markers: [64, 96, 128, 160, 192, 256, 320],
-        default: 128,
-        stickToMarkers: true
+        type: OptionType.CUSTOM,
+        default: 128
     },
-    // Per-channel levels of the recording mix. Edited through the mixer below.
+    // Per-channel levels of the recording mix. Edited through the studio mixer.
     audioMixer: {
         type: OptionType.CUSTOM,
         // Left empty on purpose: `readMixer` fills in every missing level, and
         // importing the defaults here would close a cycle with ./mixer.
         default: {}
     },
-    audioMixerInput: {
-        type: OptionType.COMPONENT,
-        component: AudioMixerSetting
+    /**
+     * Sounds and pictures kept for reuse across montages.
+     *
+     * Paths, not bytes: a sound effect lives wherever the user keeps it, and
+     * copying a megabyte of samples into the settings file for every entry
+     * would be both slow to read and impossible to keep in sync with the file
+     * itself. Validated by ./assets, which is also where the shape lives.
+     */
+    assetLibrary: {
+        type: OptionType.CUSTOM,
+        default: {}
     },
     clipsSection: {
         type: OptionType.COMPONENT,
@@ -141,6 +106,11 @@ export const settings = definePluginSettings({
         component: () => (
             <SettingsSection title="Interface" />
         )
+    },
+    nativeEngine: {
+        type: OptionType.BOOLEAN,
+        description: "Record through Discord's own clip engine when it can (needs the Clips experiment and a window as the source). It keeps one audio track per person in the file instead of one mixed track, which is the only way a mute can remove somebody and leave the others talking. The plugin's own buffer keeps running underneath, so a clip is never lost if the engine refuses",
+        default: true
     },
     panelButton: {
         type: OptionType.BOOLEAN,
@@ -193,8 +163,34 @@ export const settings = definePluginSettings({
                 onChange={v => (settings.store.toggleKeybind = v)}
             />
         )
+    },
+    markKeybind: {
+        type: OptionType.COMPONENT,
+        default: "alt+F11",
+        component: () => (
+            <KeybindInput
+                title="Drop a marker keybind"
+                note="Notes the moment without saving anything. Every marker inside the clip you save afterwards shows up on the studio timeline, so you can find the play again without scrubbing for it."
+                value={settings.store.markKeybind}
+                onChange={v => (settings.store.markKeybind = v)}
+            />
+        )
     }
 });
+
+/**
+ * Mime type to record in, or an empty string when the client can encode none.
+ *
+ * The configured container comes first, then the others: MP4 recording needs a
+ * recent Chromium, and a client too old for it should still be able to clip
+ * rather than fail to arm the buffer at all.
+ */
+export function pickMimeType(container: string): string {
+    const others = [Container.Mp4H264, Container.WebmVp9, Container.WebmVp8].filter(c => c !== container);
+    const candidates = [container, ...others].flatMap(mimeCandidates);
+
+    return candidates.find(t => MediaRecorder.isTypeSupported(t)) ?? "";
+}
 
 /** Resolves the configured container to a list of mime types, best first. */
 export function mimeCandidates(container: string): string[] {

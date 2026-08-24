@@ -12,7 +12,7 @@
 
 import { SettingsStore } from "@api/Settings";
 import definePlugin from "@utils/types";
-import { createRoot } from "@webpack/common";
+import { createRoot, Toasts } from "@webpack/common";
 
 import { ClipperChatButton, ClipperIcon } from "./components/ClipperChatButton";
 import { ClipperOverlay } from "./components/ClipperOverlay";
@@ -20,6 +20,7 @@ import { runShortcut, startGlobalKeybinds, stopGlobalKeybinds, syncGlobalKeybind
 import { logger, recorder } from "./recorder";
 import { settings } from "./settings";
 import { isTypingTarget, keybindMatches, parseKeybind } from "./utils";
+import { installVoiceTaps, probeVoiceTaps, uninstallVoiceTaps } from "./voiceTaps";
 
 /*
  * In-client fallback. The same binds are registered with the OS (see
@@ -30,11 +31,12 @@ import { isTypingTarget, keybindMatches, parseKeybind } from "./utils";
 function onKeyDown(e: KeyboardEvent) {
     if (e.repeat) return;
 
-    const { saveKeybind, toggleKeybind } = settings.store;
+    const { saveKeybind, toggleKeybind, markKeybind } = settings.store;
 
     for (const [bind, action] of [
         [saveKeybind, "save"],
-        [toggleKeybind, "toggle"]
+        [toggleKeybind, "toggle"],
+        [markKeybind, "mark"]
     ] as const) {
         if (!keybindMatches(bind, e)) continue;
 
@@ -51,7 +53,7 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 /** Keeps the OS-level binds in sync with what the settings hold. */
-const KEYBIND_SETTINGS = ["saveKeybind", "toggleKeybind", "globalKeybinds"] as const;
+const KEYBIND_SETTINGS = ["saveKeybind", "toggleKeybind", "markKeybind", "globalKeybinds"] as const;
 
 /**
  * Kept so the listeners can be dropped again on stop(): toggling the plugin off
@@ -129,7 +131,7 @@ function unmountOverlay() {
 export default definePlugin({
     name: "Clipper",
     description: "Keeps the last seconds of a captured source in memory and saves them to a clip on a keybind, with configurable length, FPS, resolution and bitrate.",
-    authors: [{ name: "Alaric", id: 0n }],
+    authors: [{ name: "yeslife", id: 0n }],
     settings,
 
     chatBarButton: {
@@ -140,12 +142,28 @@ export default definePlugin({
     toolboxActions: {
         "Start / stop clip buffer": () => recorder.toggle(),
         "Save clip": () => recorder.save(),
+        "Drop a marker": () => recorder.mark(),
         "Choose capture source": () => recorder.chooseSource(),
-        "Open the clip studio": () => recorder.openStudio()
+        "Open the clip studio": () => recorder.openStudio(),
+        "Check per-person voice audio": () => {
+            const report = probeVoiceTaps();
+            logger.info(report);
+            Toasts.show({
+                id: Toasts.genId(),
+                message: report,
+                type: Toasts.Type.MESSAGE,
+                options: { duration: 8000, position: Toasts.Position.BOTTOM }
+            });
+        }
     },
 
     start() {
         migrateReloadKeybinds();
+
+        // Before anything else opens a connection: a call already running when
+        // the patch lands is invisible to it.
+        installVoiceTaps();
+
         logger.info("started", {
             source: settings.store.sourceName || "(none, will use the primary screen)"
         });
@@ -164,5 +182,6 @@ export default definePlugin({
         stopGlobalKeybinds();
         unmountOverlay();
         recorder.stop();
+        uninstallVoiceTaps();
     }
 });

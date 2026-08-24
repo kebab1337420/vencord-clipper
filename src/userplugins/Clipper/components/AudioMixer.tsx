@@ -36,6 +36,7 @@ import {
 } from "../mixer";
 import { recorder } from "../recorder";
 import { settings } from "../settings";
+import { VoicePanel } from "./VoicePanel";
 
 const logger = new Logger("Clipper", "#f0b132");
 
@@ -345,6 +346,9 @@ function Mixer({ compact }: { compact?: boolean; }) {
                     A channel left at 0 still opens its device; remove it instead to leave the device alone.
                 </Paragraph>
             )}
+
+            {/* Draws nothing outside a call, so it costs an empty list check. */}
+            <VoicePanel compact={compact} />
         </section>
     );
 }

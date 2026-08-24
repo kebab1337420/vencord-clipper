@@ -22,11 +22,12 @@ import { formatKeybind, toAccelerator } from "./utils";
 
 const Native = VencordNative.pluginHelpers.Clipper as PluginNative<typeof import("./native")>;
 
-type ShortcutAction = "save" | "toggle";
+type ShortcutAction = "save" | "toggle" | "mark";
 
 const ACTIONS: Record<ShortcutAction, () => void> = {
     save: () => void recorder.save(),
-    toggle: () => void recorder.toggle()
+    toggle: () => void recorder.toggle(),
+    mark: () => recorder.mark()
 };
 
 /** Bumped on every stop, so a pump loop left over from a previous run exits. */
@@ -80,7 +81,7 @@ export async function startGlobalKeybinds(): Promise<void> {
 export async function syncGlobalKeybinds(): Promise<void> {
     if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return;
 
-    const { saveKeybind, toggleKeybind, globalKeybinds } = settings.store;
+    const { saveKeybind, toggleKeybind, markKeybind, globalKeybinds } = settings.store;
 
     if (!globalKeybinds) {
         await Native.unregisterShortcuts().catch(e => logger.warn("Could not drop the global keybinds", e));
@@ -89,10 +90,11 @@ export async function syncGlobalKeybinds(): Promise<void> {
 
     const binds = {
         save: toAccelerator(saveKeybind),
-        toggle: toAccelerator(toggleKeybind)
+        toggle: toAccelerator(toggleKeybind),
+        mark: toAccelerator(markKeybind)
     };
 
-    for (const [action, bind] of [["save", saveKeybind], ["toggle", toggleKeybind]] as const) {
+    for (const [action, bind] of [["save", saveKeybind], ["toggle", toggleKeybind], ["mark", markKeybind]] as const) {
         if (bind && !binds[action]) {
             logger.warn(`"${formatKeybind(bind)}" cannot be registered system-wide, it only works while Discord is focused`);
         }

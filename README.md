@@ -2,6 +2,10 @@
 
 Free Clipping plugin for vencord because fuck giving money to corporations
 
+<p align="center">
+  <img src="docs/images/overlay-menu.png" alt="The Clipper button above the account panel, right click open on its actions menu" width="384">
+</p>
+
 ## Features
 
 - Rolling in-memory buffer, configurable from 10s to 300s
@@ -27,7 +31,10 @@ Free Clipping plugin for vencord because fuck giving money to corporations
   trash) and *File it* under a category. Double-clicking a clip drops it
   straight on the timeline.
 - On that timeline: chain several clips and imported MP4 / WebM / MOV / MKV
-  files, trim, split, duplicate and reorder each segment, give it its own speed
+  files, trim, split, duplicate and reorder each segment, cut a range out of the
+  montage from the ruler above it (drag to mark, *Cut out* to remove it, *Keep
+  only* to throw away the rest; captions, overlays and sounds move with the
+  picture), give it its own speed
   (0.25x–4x) and volume, add effects (brightness, contrast, saturation, black
   and white, blur, zoom, mirror, fade in / out), save the frame under the
   playhead as a PNG, lay captions over the result with their own size, colour,
@@ -38,9 +45,10 @@ Free Clipping plugin for vencord because fuck giving money to corporations
   it was saved (the captured window's title as a fallback), stored in a
   `clipper-library.json` next to the clips. The studio filters the list by
   category and any clip can be refiled by hand.
-- Studio shortcuts: `Space` plays the selected segment, `S` splits it, `D`
-  duplicates it, `Delete` removes it, `←` / `→` step the playhead, `Ctrl + Z` and
-  `Ctrl + Shift + Z` walk the edits, `Esc` closes
+- Studio shortcuts: `Space` plays the selected segment, `S` splits it, `I` and
+  `O` mark a range on the ruler, `X` cuts that range out, `Shift + X` keeps only
+  it, `D` duplicates the segment, `Delete` removes it, `←` / `→` step the
+  playhead, `Ctrl + Z` and `Ctrl + Shift + Z` walk the edits, `Esc` closes
 - Chat bar button — left click saves, right click starts/stops
 - Floating button above the account panel — left click opens the source picker,
   right click opens the actions menu (start/stop, save, clip studio, buffer
@@ -48,6 +56,44 @@ Free Clipping plugin for vencord because fuck giving money to corporations
 - Vencord toolbox entries for the same actions
 - Clips written straight to disk on the desktop app (configurable folder,
   defaults to `<Videos>/DiscordClips`), browser download as fallback
+
+## What it looks like
+
+The button sits above the account panel — left click opens the source picker,
+right click opens the actions menu.
+
+<p align="center">
+  <img src="docs/images/overlay-button.png" alt="The Clipper button next to the mute, deafen and settings buttons of the account panel" width="384">
+</p>
+
+A second one lives in the chat bar, next to the gift and GIF buttons — left
+click saves, right click starts or stops the buffer.
+
+<p align="center">
+  <img src="docs/images/chat-bar-button.png" alt="The Clipper button in the chat bar, among the gift, GIF and emoji buttons" width="384">
+</p>
+
+The picker lists screens and windows with a live preview, and carries the
+capture settings that are worth changing often: frame rate, resolution,
+encoding, quality and buffer length.
+
+![The source picker, listing screens and windows with their previews](docs/images/source-picker.png)
+
+The clip studio is the clip folder and the editor in one window: library on the
+left, preview and timeline in the middle, the picked segment's trim, speed,
+volume and effects on the right.
+
+![The clip studio, a Counter-Strike clip on the timeline with the segment panel open](docs/images/clip-studio.png)
+
+The right panel's other tabs cover the rest of a montage — captions, the sound
+of the people in the call plus the mixer, images laid over the frame, and the
+render settings.
+
+| Captions | Audio |
+| --- | --- |
+| ![The Captions tab and its caption style controls](docs/images/studio-captions.png) | ![The Audio tab, with the people recorded in the montage and the sound mixer](docs/images/studio-audio.png) |
+| **Images** | **Output** |
+| ![The Images tab, placing a picture at the playhead](docs/images/studio-images.png) | ![The Output tab: size, frame rate and audio for the render](docs/images/studio-output.png) |
 
 ## Install
 

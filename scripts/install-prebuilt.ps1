@@ -106,13 +106,6 @@ $discordRoots = @(
 foreach ($root in $discordRoots) {
     $name = Split-Path $root -Leaf
 
-    $running = Get-Process | Where-Object { $_.Path -like "$root\*" }
-    if ($running) {
-        Write-Host "      [!] $name is running - close it (check the tray) and run this again."
-        $skipped += $name
-        continue
-    }
-
     # only the newest app-x.y.z matters; older ones are leftovers Discord no longer starts
     $resources = Get-ChildItem $root -Directory -Filter "app-*" |
         Sort-Object Name -Descending |
@@ -126,6 +119,24 @@ foreach ($root in $discordRoots) {
     $original = Join-Path $resources "_app.asar"
 
     if (-not (Test-Path $asar) -and -not (Test-Path $original)) { continue }
+
+    # A running client is only in the way when there is something to write. The
+    # stub is written once and points at the dist folder; the dist folder has
+    # already been refreshed above. So a client whose stub already points here
+    # is not "not set up" - it is set up, holding the old bundle in memory until
+    # it restarts. Reporting that as a failed install sent someone looking for
+    # an installation that had already happened.
+    $running = Get-Process | Where-Object { $_.Path -like "$root\*" }
+    if ($running) {
+        if ((Test-Path $asar) -and (Get-StubTarget $asar) -eq $patcher) {
+            Write-Host "      $name already points at this build - restart it to load the new bundle."
+            $patched++
+        } else {
+            Write-Host "      [!] $name is running - close it (check the tray) and run this again."
+            $skipped += $name
+        }
+        continue
+    }
 
     if (Test-Path $asar) {
         $target = Get-StubTarget $asar

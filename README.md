@@ -1,10 +1,7 @@
 # Clipper — Vencord user plugin
 
-Free Clipping plugin for vencord because fuck giving money to corporations
+Free clipping plugin because i don't want to pay 10 bucks a month for basic features 👍👍👍👍👍👍👍👍👍👍
 
-<p align="center">
-  <img src="docs/images/overlay-menu.png" alt="The Clipper button above the account panel, right click open on its actions menu" width="384">
-</p>
 
 ## Features
 

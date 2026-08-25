@@ -96,6 +96,21 @@ function toast(message: string, type: string): void {
 }
 
 /**
+ * Whether the main process half of the plugin knows about updates.
+ *
+ * The renderer and the main bundle are loaded at different moments: reloading
+ * the client window (Ctrl+R) picks up a freshly installed renderer while the
+ * main process keeps the one it started with. A client in that state has an
+ * updater in the window and none behind it, and calling through would throw a
+ * TypeError at launch, which is exactly the moment nothing should shout.
+ */
+function nativeReady(): boolean {
+    return typeof Native?.checkUpdate === "function" && typeof Native?.downloadUpdate === "function";
+}
+
+export const RESTART_FIRST = "Clipper was updated under a running client. Quit Discord completely and start it again.";
+
+/**
  * Asks GitHub what the newest release is.
  *
  * Throws nothing: a client with no network, or a rate limit, must not turn a
@@ -103,6 +118,13 @@ function toast(message: string, type: string): void {
  */
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
     if (state.checking) return state.latest;
+
+    if (!nativeReady()) {
+        logger.info("The main process is still on an older Clipper, so the check waits for a full restart");
+        change({ error: RESTART_FIRST });
+
+        return null;
+    }
 
     change({ checking: true, error: "" });
 
@@ -131,6 +153,13 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
  */
 export async function installUpdate(info: UpdateInfo, quiet = false): Promise<boolean> {
     if (state.installing) return false;
+
+    if (!nativeReady()) {
+        change({ error: RESTART_FIRST });
+        if (!quiet) toast(RESTART_FIRST, Toasts.Type.FAILURE);
+
+        return false;
+    }
 
     if (!info.writable) {
         const message = `Clipper cannot write to ${info.directory}. Run install.bat again to update.`;
@@ -218,7 +247,10 @@ export async function checkNow(): Promise<void> {
     const info = await checkForUpdate();
 
     if (!info) {
-        toast(`Could not reach GitHub: ${state.error}`, Toasts.Type.FAILURE);
+        toast(
+            state.error === RESTART_FIRST ? RESTART_FIRST : `Could not reach GitHub: ${state.error}`,
+            Toasts.Type.FAILURE
+        );
         return;
     }
 
@@ -228,5 +260,10 @@ export async function checkNow(): Promise<void> {
 
 /** Restarts the client, for the settings button. */
 export function restartClient(): void {
+    if (typeof Native?.relaunchClient !== "function") {
+        toast("Quit Discord from the tray icon and start it again.", Toasts.Type.FAILURE);
+        return;
+    }
+
     void Native.relaunchClient();
 }

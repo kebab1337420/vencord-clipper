@@ -16,7 +16,7 @@ import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import { useEffect, useState } from "@webpack/common";
 
-import { checkForUpdate, CLIPPER_VERSION, installUpdate, restartClient, updateState, watchUpdates } from "../updater";
+import { checkForUpdate, CLIPPER_VERSION, installUpdate, RESTART_FIRST, restartClient, updateState, watchUpdates } from "../updater";
 
 export function UpdateStatus() {
     const [, redraw] = useState(0);
@@ -33,7 +33,7 @@ export function UpdateStatus() {
         : state.restartNeeded
             ? `Version ${latest?.version} is written. It loads once Discord restarts.`
             : state.error
-                ? `Last check failed: ${state.error}`
+                ? state.error === RESTART_FIRST ? state.error : `Last check failed: ${state.error}`
                 : latest?.available
                     ? `Version ${latest.version} is out.`
                     : latest

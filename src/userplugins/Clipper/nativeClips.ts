@@ -355,19 +355,19 @@ function unguardEngine(): void {
     const target = engine() as any;
 
     /*
-     * The list is only spent against an engine that is actually there.
+     * The list is spent whether or not the engine is still there.
      *
-     * Emptying it while the object is missing strands every wrapper still on it:
-     * the record of what to hand back is gone, so a later call has nothing to
-     * undo with and the engine keeps the plugin's methods for good.
+     * Keeping it for a missing engine was tried, on the reasoning that the
+     * wrappers would otherwise be stranded on it - but `guardEngine` refuses to
+     * shield an engine while the list is not empty, so a full list is what stops
+     * the next engine from being guarded at all, and the buffer it was meant to
+     * protect gets torn down by Discord on the first re-sync. A stranded wrapper
+     * is inert; an unguarded engine is a clip that never saves.
      */
-    if (!target) {
-        if (guards.length) logger.warn("The clip engine is gone, so its wrappers stay on until it comes back");
-        return;
-    }
-
     for (const { key, own, original } of guards.splice(0)) {
         try {
+            if (!target) continue;
+
             if (own) target[key] = original;
             else delete target[key];
         } catch (e) {

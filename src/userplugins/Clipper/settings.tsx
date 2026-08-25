@@ -52,6 +52,15 @@ export const settings = definePluginSettings({
         type: OptionType.CUSTOM,
         default: Container.Mp4H264
     },
+    /*
+     * Containers whose encoder failed on this client, against the build they
+     * failed on: `{ build, mimes }`. Read and written by ./recorder, which is
+     * where the reasoning lives.
+     */
+    brokenEncoders: {
+        type: OptionType.CUSTOM,
+        default: {}
+    },
     includeMic: {
         type: OptionType.CUSTOM,
         default: false

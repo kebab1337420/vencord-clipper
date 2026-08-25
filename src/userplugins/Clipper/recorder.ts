@@ -25,7 +25,7 @@ import type { CaptureSource } from "./native";
 import { arm, canRecord, disarm, goLiveActive, nativeAvailability, saveNativeClip, setRecordUser, watchRecording } from "./nativeClips";
 import { hasVideoTrack } from "./nativeTracks";
 import { clipLength, repairClip, trimClip } from "./repair";
-import { extensionFor, mimeTypeChain, settings } from "./settings";
+import { Container, extensionFor, mimeTypeChain, settings } from "./settings";
 import { writeThumbnail } from "./thumbnail";
 import { formatBytes, timestampName } from "./utils";
 import { shiftTracks, toMeta, voiceActivity, type VoiceFileMeta, voiceParticipants,type VoiceTrack } from "./voice";
@@ -47,16 +47,55 @@ const TIMESLICE = 1000;
 type Listener = (state: RecorderState) => void;
 
 /**
- * Containers whose encoder failed in this session.
+ * Containers whose encoder failed on this client.
  *
  * `MediaRecorder.isTypeSupported` speaks for the build, not for the machine: a
  * Chromium that claims H.264 still dies on the first frame when the encoder
- * behind it is broken, and a client or driver update is enough to break it. What
- * failed once here fails every time, so it is skipped from then on rather than
- * costing a dead buffer at every start. Kept for the session only - a restart is
- * exactly when the answer might have changed.
+ * behind it is broken, and a client or driver update is enough to break it.
+ * What failed once fails again, so it is skipped from then on rather than
+ * costing a dead buffer at every start.
+ *
+ * Remembered on disk rather than for the session, and against the client's own
+ * build string. Launching again is not new information, and a buffer that
+ * announced the same broken encoder at every single launch read as a plugin
+ * that could not encode rather than as a client that cannot. A client or
+ * Chromium update changes that string, and every container is tried again from
+ * scratch - so does starting the buffer by hand, which is what somebody who has
+ * just changed a driver does.
  */
 const brokenEncoders = new Set<string>();
+let brokenLoaded = false;
+
+/** Client and Chromium in one line: an update to either can bring an encoder back. */
+function clientBuild(): string {
+    return navigator.userAgent;
+}
+
+function knownBroken(): Set<string> {
+    if (brokenLoaded) return brokenEncoders;
+    brokenLoaded = true;
+
+    const stored = settings.store.brokenEncoders as { build?: string; mimes?: string[]; } | undefined;
+    if (stored?.build === clientBuild()) for (const mime of stored.mimes ?? []) brokenEncoders.add(mime);
+
+    return brokenEncoders;
+}
+
+function rememberBroken(mime: string): void {
+    knownBroken().add(mime);
+    settings.store.brokenEncoders = { build: clientBuild(), mimes: [...brokenEncoders] };
+}
+
+function forgetBroken(): void {
+    brokenLoaded = true;
+    brokenEncoders.clear();
+    settings.store.brokenEncoders = { build: clientBuild(), mimes: [] };
+}
+
+/** H.264 encoders take an even width and an even height, and nothing else. */
+function evenSize(n: number): number {
+    return Math.max(2, Math.round(n / 2) * 2);
+}
 
 /** What the last save produced, enough to cut it down or send it somewhere. */
 export interface SavedClip {
@@ -146,6 +185,13 @@ class ClipRecorder {
     /** The stream being encoded, kept so a failed encoder can be re-armed on it. */
     private recordStream: MediaStream | null = null;
 
+    /**
+     * Tears down the canvas the capture is being redrawn into, when there is
+     * one. Doubles as the record of having already tried that, so a container
+     * gets the canvas once and not once per candidate.
+     */
+    private relay: (() => void) | null = null;
+
     private listeners = new Set<Listener>();
 
     state: RecorderState = "idle";
@@ -226,8 +272,15 @@ class ClipRecorder {
         for (const listener of this.listeners) listener(state);
     }
 
-    async start(): Promise<boolean> {
+    /**
+     * @param retry Try the containers remembered as broken here again. Set when
+     * the user started the buffer themselves, which is what somebody who has
+     * just updated a driver does; never on the automatic start at launch.
+     */
+    async start(retry = false): Promise<boolean> {
         if (this.state !== "idle") return this.isRecording;
+
+        if (retry) forgetBroken();
 
         this.setState("starting");
         const mine = this.generation;
@@ -269,7 +322,7 @@ class ClipRecorder {
              * toast before the fallback each time.
              */
             this.recordStream = recordStream;
-            this.mimeChain = mimeTypeChain(container).filter(t => !brokenEncoders.has(t));
+            this.mimeChain = mimeTypeChain(container).filter(t => !knownBroken().has(t));
             this.mimeIndex = 0;
 
             // Everything is broken, which is not the same as nothing being
@@ -538,7 +591,7 @@ class ClipRecorder {
         while (this.mimeIndex < this.mimeChain.length) {
             if (this.tryEncoder(this.mimeChain[this.mimeIndex])) return true;
 
-            brokenEncoders.add(this.mimeChain[this.mimeIndex]);
+            rememberBroken(this.mimeChain[this.mimeIndex]);
             this.mimeIndex++;
         }
 
@@ -624,16 +677,170 @@ class ClipRecorder {
         }
 
         this.recorder = null;
-        brokenEncoders.add(failed);
-        this.mimeIndex++;
 
         // Nothing to fall back onto while the capture itself is gone: the
         // picture is what the buffer is for, and without it there is no clip to
         // keep whatever the container.
-        const live = this.recordStream?.getVideoTracks()[0]?.readyState === "live";
+        if (this.recordStream?.getVideoTracks()[0]?.readyState !== "live") {
+            toast(`Clip buffer stopped: the ${extensionFor(failed).toUpperCase()} encoder failed${detail ? ` (${detail})` : ""}`, Toasts.Type.FAILURE);
+            this.stop();
+            return;
+        }
 
-        if (!live || !this.armEncoder()) {
-            toast(`Clip buffer stopped: the ${extensionFor(failed).toUpperCase()} encoder failed`, Toasts.Type.FAILURE);
+        /*
+         * H.264 is worth one more try before the clip loses its container.
+         *
+         * The frames a screen capture hands over are the compositor's own, and
+         * a hardware H.264 encoder reading them where they lie is exactly the
+         * arrangement that fails on some drivers and after some client updates
+         * - while the same encoder takes a canvas without a word. So the
+         * capture is redrawn into one, at a size that is fixed and even, and
+         * the container is tried again on that before being written off. It
+         * costs one drawImage per frame, and only on a client that has already
+         * failed the direct way.
+         *
+         * Only MP4 is worth that: it is the container Discord plays with sound,
+         * and the only one the engine's per-person tracks can be muxed into.
+         */
+        if (failed.startsWith("video/mp4") && !this.relay) {
+            void this.retryOnCanvas(failed, detail);
+            return;
+        }
+
+        this.demote(failed, detail);
+    }
+
+    /**
+     * Redraws the capture into a canvas and arms the same container on that.
+     *
+     * Falls through to the next container when the canvas cannot be built or
+     * when the encoder refuses it too, which is the same outcome as before this
+     * existed.
+     */
+    private async retryOnCanvas(mime: string, detail: string): Promise<void> {
+        const mine = this.generation;
+        const relayed = await this.buildRelay();
+
+        // Stopped while the canvas was starting: this buffer is not ours to arm.
+        if (mine !== this.generation) return;
+
+        if (relayed) {
+            this.recordStream = relayed;
+
+            if (this.tryEncoder(mime)) {
+                // The footage they pointed at was written by the dead encoder.
+                this.marks = [];
+
+                logger.info(`The ${mime} encoder took the capture through a canvas`);
+                return;
+            }
+        }
+
+        this.demote(mime, detail);
+    }
+
+    /**
+     * The capture, redrawn into a canvas of its own at a fixed even size.
+     *
+     * Returns the canvas' stream with the same soundtrack attached, or null
+     * when this client will not play a capture into a video element at all.
+     */
+    private async buildRelay(): Promise<MediaStream | null> {
+        const source = this.recordStream;
+        const [track] = source?.getVideoTracks() ?? [];
+        if (!source || !track) return null;
+
+        const live = track.getSettings();
+        const width = evenSize(live.width || 1280);
+        const height = evenSize(live.height || 720);
+        const fps = settings.store.fps || 30;
+
+        const video = document.createElement("video");
+        video.srcObject = new MediaStream([track]);
+        video.muted = true;
+        video.playsInline = true;
+
+        try {
+            await video.play();
+        } catch (e) {
+            logger.warn("This client would not play the capture into a canvas", e);
+            return null;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d", { alpha: false });
+        if (!ctx) return null;
+
+        let stopped = false;
+        let drawn = 0;
+
+        // A source that changes size mid-capture is drawn to fit rather than
+        // resizing the canvas: a frame size moving under the encoder is one of
+        // the things that kills it.
+        const draw = () => {
+            if (stopped) return;
+
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            drawn++;
+        };
+
+        // Per source frame where the client offers it, so nothing is drawn
+        // twice and nothing is missed; on a timer otherwise.
+        const perFrame = (video as HTMLVideoElement & {
+            requestVideoFrameCallback?(callback: () => void): number;
+        }).requestVideoFrameCallback?.bind(video);
+
+        let ticker = 0;
+        const onTimer = () => { ticker = window.setInterval(draw, Math.max(1, Math.round(1000 / fps))); };
+
+        if (perFrame) {
+            const step = () => {
+                if (stopped) return;
+                draw();
+                perFrame(step);
+            };
+
+            perFrame(step);
+
+            // This video element is never in the document, and a client that
+            // declines to call back for one that is not on screen would leave
+            // the canvas on its first frame forever. Half a second without one
+            // is that client, and the timer takes over.
+            setTimeout(() => {
+                if (!stopped && drawn < 2 && !ticker) onTimer();
+            }, 500);
+        } else {
+            onTimer();
+        }
+
+        // One frame before the encoder is armed, so the first chunk is picture
+        // rather than an empty canvas.
+        draw();
+
+        const relayed = canvas.captureStream(fps);
+        for (const audio of source.getAudioTracks()) relayed.addTrack(audio);
+
+        this.relay = () => {
+            stopped = true;
+            if (ticker) clearInterval(ticker);
+
+            video.pause();
+            video.srcObject = null;
+        };
+
+        return relayed;
+    }
+
+    /** Takes a container out of the running and arms the next one on the same capture. */
+    private demote(failed: string, detail: string): void {
+        rememberBroken(failed);
+        this.mimeIndex++;
+
+        if (!this.armEncoder()) {
+            toast(`Clip buffer stopped: the ${extensionFor(failed).toUpperCase()} encoder failed${detail ? ` (${detail})` : ""}`, Toasts.Type.FAILURE);
             this.stop();
             return;
         }
@@ -642,7 +849,16 @@ class ClipRecorder {
         this.marks = [];
 
         logger.info(`The buffer carried on as ${this.mimeType}`);
-        toast(`The ${extensionFor(failed).toUpperCase()} encoder failed - the buffer carried on as ${extensionFor(this.mimeType).toUpperCase()}`, Toasts.Type.MESSAGE);
+
+        // Falling from one MP4 candidate to the next is not news: the clip is
+        // still an MP4 and nothing the user asked for has changed. Losing the
+        // container is, and it is said once, here, rather than at every launch.
+        if (extensionFor(failed) !== extensionFor(this.mimeType)) {
+            toast(
+                `This client's ${extensionFor(failed).toUpperCase()} encoder failed${detail ? ` (${detail})` : ""} - the buffer carried on as ${extensionFor(this.mimeType).toUpperCase()}`,
+                Toasts.Type.MESSAGE
+            );
+        }
     }
 
     stop() {
@@ -682,6 +898,12 @@ class ClipRecorder {
         this.header = null;
         this.chunks = [];
         this.marks = [];
+
+        this.relay?.();
+        this.relay = null;
+
+        this.recordStream?.getTracks().forEach(t => t.stop());
+        this.recordStream = null;
 
         this.stream?.getTracks().forEach(t => t.stop());
         this.micStream?.getTracks().forEach(t => t.stop());
@@ -993,7 +1215,18 @@ class ClipRecorder {
          */
         if (!this.mimeType.startsWith("video/mp4")) {
             logger.warn(`Cannot mux the call into a ${this.mimeType} clip; the container has to be MP4 for a track per person.`);
-            toast("The call was recorded one track per person, but only an MP4 clip can hold it - switch the container to MP4", Toasts.Type.MESSAGE);
+
+            // Telling somebody already set to MP4 to switch to MP4 is how this
+            // read as the plugin ignoring its own setting. The container is
+            // what it is because the encoder behind it failed here.
+            const asked = settings.store.container === Container.Mp4H264;
+
+            toast(
+                asked
+                    ? "The call was recorded one track per person, but this client's MP4 encoder failed and only an MP4 can hold them - the clip keeps one mixed track"
+                    : "The call was recorded one track per person, but only an MP4 clip can hold it - switch the container to MP4",
+                Toasts.Type.MESSAGE
+            );
             return clip;
         }
 
@@ -1186,9 +1419,19 @@ class ClipRecorder {
         }
     }
 
+    /**
+     * Forgets the containers remembered as broken here.
+     *
+     * For the encoder probe: a container that has just proved it encodes should
+     * not stay on a list that exists to stop the buffer trying it.
+     */
+    retryEncoders(): void {
+        forgetBroken();
+    }
+
     async toggle() {
         if (this.isRecording) this.stop();
-        else await this.start();
+        else await this.start(true);
     }
 
     /** Asks the overlay to show the source picker. */

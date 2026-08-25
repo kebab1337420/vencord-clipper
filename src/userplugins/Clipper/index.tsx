@@ -16,6 +16,7 @@ import { createRoot, Toasts } from "@webpack/common";
 
 import { ClipperChatButton, ClipperIcon } from "./components/ClipperChatButton";
 import { ClipperOverlay } from "./components/ClipperOverlay";
+import { encoderSummary, probeEncoders } from "./encoders";
 import { runShortcut, startGlobalKeybinds, stopGlobalKeybinds, syncGlobalKeybinds } from "./globalKeybinds";
 import { logger, recorder } from "./recorder";
 import { settings } from "./settings";
@@ -145,6 +146,25 @@ export default definePlugin({
         "Drop a marker": () => recorder.mark(),
         "Choose capture source": () => recorder.chooseSource(),
         "Open the clip studio": () => recorder.openStudio(),
+        "Check the video encoders": () => {
+            void (async () => {
+                const reports = await probeEncoders();
+                const summary = encoderSummary(reports);
+
+                logger.info(`Encoder probe\n${summary}`);
+
+                // A container that has just encoded is not broken, whatever it
+                // did the last time the buffer armed: let the next start try it.
+                if (reports.some(r => r.ok)) recorder.retryEncoders();
+
+                Toasts.show({
+                    id: Toasts.genId(),
+                    message: summary,
+                    type: reports.some(r => r.ok) ? Toasts.Type.MESSAGE : Toasts.Type.FAILURE,
+                    options: { duration: 12000, position: Toasts.Position.BOTTOM }
+                });
+            })();
+        },
         "Check per-person voice audio": () => {
             const report = probeVoiceTaps();
             logger.info(report);

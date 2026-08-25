@@ -203,8 +203,9 @@ function readFragmented(data: Uint8Array): Track[] {
         const version = view.getUint8(tkhd.start);
         const trackId = version === 1 ? view.getUint32(tkhd.start + 20) : view.getUint32(tkhd.start + 12);
 
-        // A version 1 header carries 64-bit times, which moves everything after
-        // them by eight bytes.
+        // A version 1 header widens creation time, modification time and
+        // duration to 64 bits, which moves everything after them by twelve
+        // bytes.
         const widthAt = version === 1 ? tkhd.start + 88 : tkhd.start + 76;
 
         const kind = handlerType(view, hdlr);

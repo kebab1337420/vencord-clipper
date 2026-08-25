@@ -28,7 +28,7 @@
 
 import { Logger } from "@utils/Logger";
 
-import { repairClip } from "./repair";
+import { clipLength, repairClip } from "./repair";
 import { settings } from "./settings";
 import { type VoiceTap, voiceTaps } from "./voiceTaps";
 
@@ -306,12 +306,30 @@ class VoiceBuffers {
                 logger.warn(`Could not rebase the voice track for ${name || userId}`, e);
             }
 
+            /*
+             * The rebase drops whatever sits before the first clean cluster, so
+             * the track no longer starts at the chunk it was assembled from: it
+             * starts that much later. Without this the studio lines the lane up
+             * against the wrong frame, and a mute lands beside the words it was
+             * meant to take out - the further the rebase had to walk, the
+             * further off it is.
+             */
+            let cutOff = 0;
+
+            if (blob !== raw) {
+                try {
+                    cutOff = Math.max(0, await clipLength(raw, lane.mimeType) - await clipLength(blob, lane.mimeType));
+                } catch (e) {
+                    logger.warn(`Could not measure the rebase of the voice track for ${name || userId}`, e);
+                }
+            }
+
             out.push({
                 userId,
                 name: name || userId,
                 blob,
                 mimeType: lane.mimeType,
-                offset: (kept[0].at - TIMESLICE - start) / 1000
+                offset: (kept[0].at - TIMESLICE - start) / 1000 + cutOff
             });
         }
 

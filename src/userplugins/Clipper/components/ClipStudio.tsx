@@ -66,6 +66,7 @@ import { Container, extensionFor, pickMimeType } from "../settings";
 import {
     type AvatarCache,
     type Caption,
+    cutRange,
     decodeImage,
     DEFAULT_CAPTION_STYLE,
     DEFAULT_EFFECTS,
@@ -74,6 +75,7 @@ import {
     estimatedSize,
     type Frame,
     type ImageSource,
+    keepRange,
     loadAvatars,
     newId,
     type Overlay,
@@ -98,6 +100,7 @@ import { createVoiceBand, type VoiceBand } from "../voiceBand";
 import { forgetVoiceMixes, type VoiceMix, voiceMixFor } from "../voiceMix";
 import { AudioMixerInput } from "./AudioMixer";
 import { AudioTimeline } from "./AudioTimeline";
+import { type CutMark, CutRuler } from "./CutRuler";
 import { VoiceLanes } from "./VoiceLanes";
 
 export const STUDIO_CSS = `
@@ -544,6 +547,94 @@ export const STUDIO_CSS = `
 .vc-clipper-block small {
     display: block;
     color: var(--text-muted, #949ba4);
+}
+
+/* ------------------------------------------------------------- cut ruler -- */
+.vc-clipper-ruler-wrap {
+    padding: 6px;
+    border-radius: 8px;
+    background: var(--background-secondary, #2b2d31);
+    box-shadow: inset 0 0 0 1px var(--background-modifier-accent, rgba(78, 80, 88, .48));
+}
+.vc-clipper-ruler {
+    position: relative;
+    height: 26px;
+    border-radius: 5px;
+    background: var(--background-tertiary, #1e1f22);
+    cursor: crosshair;
+    overflow: hidden;
+    user-select: none;
+}
+.vc-clipper-ruler-block {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    border-radius: 3px;
+    background: var(--background-modifier-accent, rgba(78, 80, 88, .6));
+    box-shadow: inset 0 0 0 1px var(--background-tertiary, #1e1f22);
+}
+.vc-clipper-ruler-block.vc-clipper-active {
+    background: var(--brand-experiment, #5865f2);
+}
+/* Over the blocks rather than between them: what is being marked is a stretch
+   of the montage, not a list of the segments under it. */
+.vc-clipper-ruler-mark {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: rgba(218, 55, 60, .34);
+    box-shadow: inset 0 0 0 1px var(--button-danger-background, #da373c);
+    pointer-events: none;
+}
+.vc-clipper-ruler-grip {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 3px;
+    background: var(--button-danger-background, #da373c);
+}
+.vc-clipper-ruler-grip-end {
+    left: auto;
+    right: 0;
+}
+.vc-clipper-ruler-head {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--text-normal, #dbdee1);
+    pointer-events: none;
+}
+.vc-clipper-ruler-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.vc-clipper-ruler-actions span {
+    flex: 1;
+    min-width: 180px;
+    color: var(--text-muted, #949ba4);
+    font-size: 11px;
+}
+.vc-clipper-ruler-actions button {
+    padding: 4px 9px;
+    border: none;
+    border-radius: 4px;
+    background: var(--button-secondary-background, #4e5058);
+    color: var(--text-normal, #dbdee1);
+    font-size: 12px;
+    cursor: pointer;
+}
+.vc-clipper-ruler-actions button:disabled {
+    opacity: .5;
+    cursor: default;
+}
+.vc-clipper-ruler-actions button.vc-clipper-danger {
+    background: var(--button-danger-background, #da373c);
+    color: #fff;
 }
 
 /* ---------------------------------------------------------- voice lanes -- */
@@ -999,6 +1090,15 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
     const [shelf, setShelf] = useState<Asset[]>([]);
 
     const [selected, setSelected] = useState("");
+
+    /*
+     * The range marked on the cut ruler, in project time.
+     *
+     * Null while nothing is marked, which is also what a cut leaves behind: the
+     * range has been spent by then, and keeping it on screen over the seam it
+     * just closed would only invite the same cut a second time.
+     */
+    const [mark, setMark] = useState<CutMark | null>(null);
     const [tab, setTab] = useState<"segment" | "captions" | "audio" | "images" | "output">("segment");
     const [progress, setProgress] = useState(-1);
     const [note, setNote] = useState("");
@@ -1121,6 +1221,7 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         lastEditRef.current = { tag: "", at: 0 };
 
         setProject(target);
+        setMark(null);
         setSelected(current => target.segments.some(s => s.id === current) ? current : "");
         setDepth({ past: history.past.length, future: history.future.length });
     };
@@ -1353,6 +1454,9 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
     // One lookup table rather than a scan per timeline block; a long montage
     // redraws this list on every slider move.
     const byId = new Map(sources.map(s => [s.id, s]));
+
+    /** Source name per segment id, for the blocks on the cut ruler. */
+    const rulerNames = new Map(project.segments.map(s => [s.id, byId.get(s.sourceId)?.name ?? "?"]));
 
     /** Every category present in the folder, for the filter dropdown. */
     const categories = categoriesOf((clips ?? []).map(c => c.name), meta);
@@ -2220,6 +2324,79 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         setSelected(current => current === id ? "" : current);
     };
 
+    /*
+     * The two ends of the marked range.
+     *
+     * Marking is done from the playhead rather than by sweeping when the keys
+     * are used, which is how a range is marked precisely: park the frame, press
+     * the key, park the other frame, press the other key. A first mark with no
+     * partner runs to the end of the montage, so `I` alone already means
+     * "everything from here".
+     */
+    const markIn = () => {
+        const at = projectTime();
+        const end = mark && mark.to > at + 0.05 ? mark.to : total;
+
+        if (end <= at + 0.05) {
+            toast("Nothing between the mark and the end of the montage", Toasts.Type.FAILURE);
+            return;
+        }
+
+        setMark({ from: at, to: end });
+    };
+
+    const markOut = () => {
+        const at = projectTime();
+        const start = mark && mark.from < at - 0.05 ? mark.from : 0;
+
+        if (at <= start + 0.05) {
+            toast("Nothing between the start of the montage and the mark", Toasts.Type.FAILURE);
+            return;
+        }
+
+        setMark({ from: start, to: at });
+    };
+
+    /*
+     * Takes the marked range out of the montage, or keeps only it.
+     *
+     * The new project is built here rather than inside the updater because the
+     * selection has to be checked against it: a cut that swallows the segment on
+     * screen leaves the editor pointing at a segment that no longer exists, and
+     * the panel beside the preview would go blank with no way back.
+     */
+    const cutMarked = (keep: boolean) => {
+        if (!mark || mark.to - mark.from < 0.05) {
+            toast("Mark a range on the ruler first", Toasts.Type.FAILURE);
+            return;
+        }
+
+        const before = projectRef.current;
+        const next = keep
+            ? keepRange(before, mark.from, mark.to)
+            : cutRange(before, mark.from, mark.to);
+
+        if (next === before) {
+            toast("That range holds nothing to cut", Toasts.Type.FAILURE);
+            return;
+        }
+
+        if (!next.segments.length) {
+            toast("That would empty the timeline", Toasts.Type.FAILURE);
+            return;
+        }
+
+        commit(() => next);
+        setMark(null);
+
+        // A split segment keeps its id on one of the two halves, so the usual
+        // case survives; only a segment the cut swallowed whole needs a new
+        // selection, and the head of the montage is the safe one to fall on.
+        setSelected(current => next.segments.some(s => s.id === current) ? current : next.segments[0].id);
+
+        toast(keep ? `Kept ${formatTime(mark.to - mark.from)}` : `Cut ${formatTime(mark.to - mark.from)}`, Toasts.Type.SUCCESS);
+    };
+
     /** Empties the timeline and forgets the saved project. */
     const clearProject = () => {
         const video = videoRef.current;
@@ -2234,6 +2411,7 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
 
         setSources([]);
         setSelected("");
+        setMark(null);
         setError("");
         setDepth({ past: 0, future: 0 });
         setProject(p => ({ ...p, segments: [], captions: [], audioClips: [], overlays: [], voiceLevels: {} }));
@@ -2280,8 +2458,14 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
             }
         };
 
-        if (video.readyState >= 1) seek();
-        else video.addEventListener("loadeddata", seek, { once: true });
+        if (video.readyState >= 1) return void seek();
+
+        video.addEventListener("loadeddata", seek, { once: true });
+
+        // Dropped when the selection moves on before the file is ready: the
+        // handler holds the segment it was made for, and letting a stale one
+        // fire would seek the preview back into the segment the user just left.
+        return () => video.removeEventListener("loadeddata", seek);
     }, [selected, source?.url]);
 
     /*
@@ -2711,6 +2895,9 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                 break;
             case "s": split(); break;
             case "d": if (selected) duplicate(selected); break;
+            case "i": markIn(); break;
+            case "o": markOut(); break;
+            case "x": cutMarked(e.shiftKey); break;
             case "delete":
             case "backspace": if (selected) remove(selected); break;
             case "arrowleft":
@@ -3181,6 +3368,39 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                             onSelect={id => { setPickedSound(id); setTab("audio"); }}
                             onSeek={seekProject}
                         />
+
+                        <CutRuler
+                            segments={project.segments}
+                            names={rulerNames}
+                            length={total}
+                            playhead={projectAt}
+                            mark={mark}
+                            selected={selected}
+                            disabled={busy}
+                            onMark={setMark}
+                            onSeek={seekProject}
+                            onSelect={id => { setSelected(id); setTab("segment"); }}
+                        />
+
+                        {project.segments.length > 0 && (
+                            <div className="vc-clipper-ruler-actions">
+                                <span>
+                                    {mark
+                                        ? `Marked ${formatTime(mark.from)} - ${formatTime(mark.to)} (${formatTime(mark.to - mark.from)})`
+                                        : "Drag across the ruler, or press I and O at the playhead, to mark a range"}
+                                </span>
+
+                                <button disabled={busy} onClick={markIn} title="I">Mark in</button>
+                                <button disabled={busy} onClick={markOut} title="O">Mark out</button>
+                                <button className="vc-clipper-danger" disabled={busy || !mark} onClick={() => cutMarked(false)} title="X">
+                                    Cut out
+                                </button>
+                                <button disabled={busy || !mark} onClick={() => cutMarked(true)} title="Shift+X">
+                                    Keep only
+                                </button>
+                                <button disabled={busy || !mark} onClick={() => setMark(null)}>Clear</button>
+                            </div>
+                        )}
 
                         <div className="vc-clipper-timeline">
                             {!project.segments.length && (

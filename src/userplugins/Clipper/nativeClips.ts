@@ -354,10 +354,20 @@ function guardEngine(found: ClipsEngine): void {
 function unguardEngine(): void {
     const target = engine() as any;
 
+    /*
+     * The list is only spent against an engine that is actually there.
+     *
+     * Emptying it while the object is missing strands every wrapper still on it:
+     * the record of what to hand back is gone, so a later call has nothing to
+     * undo with and the engine keeps the plugin's methods for good.
+     */
+    if (!target) {
+        if (guards.length) logger.warn("The clip engine is gone, so its wrappers stay on until it comes back");
+        return;
+    }
+
     for (const { key, own, original } of guards.splice(0)) {
         try {
-            if (!target) continue;
-
             if (own) target[key] = original;
             else delete target[key];
         } catch (e) {

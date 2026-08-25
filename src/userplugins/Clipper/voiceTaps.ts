@@ -351,7 +351,15 @@ function tick() {
     // they are silent: a run of zeroes is what makes the correlation mean
     // anything. A person who has never spoken has no row at all.
     for (const userId of speaking) if (!speech.has(userId)) speech.set(userId, []);
-    for (const [userId, history] of speech) push(history, speaking.has(userId) ? 1 : 0);
+
+    for (const [userId, history] of speech) {
+        push(history, speaking.has(userId) ? 1 : 0);
+
+        // A full window with nothing in it is somebody who has left the call:
+        // a row of zeroes correlates with nothing, so all it can still do is
+        // sit in the matcher as a candidate that will never win.
+        if (history.length >= HISTORY && !history.some(Boolean)) speech.delete(userId);
+    }
 
     match();
 }

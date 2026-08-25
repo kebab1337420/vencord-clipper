@@ -241,14 +241,51 @@ let retry: ReturnType<typeof setInterval> | null = null;
 const RETRY_MS = 3_000;
 
 /**
+ * How many offers the heartbeat makes before it gives up.
+ *
+ * The heartbeat exists for one race - the engine taking a source before it has
+ * a video to attach it to - and that race is decided within seconds. Past that
+ * the engine is answering the same way it will answer forever, and going on
+ * asking is not patience, it is a leak: see `noteEnded` below.
+ */
+const RETRY_LIMIT = 10;
+
+/**
+ * How long after an offer the engine's answer still belongs to that offer.
+ *
+ * The teardown comes back on the order of a hundred milliseconds; this is wide
+ * enough to catch a slow one and far short of the next offer.
+ */
+const OFFER_ECHO_MS = 2_500;
+
+/** How many offers may end in a teardown before the heartbeat stops. */
+const ENDED_LIMIT = 2;
+
+/** Offers made since the buffer was armed. */
+let offers = 0;
+
+/** When the last offer went out, so the engine's answer can be tied to it. */
+let offeredAt = 0;
+
+/** Recordings the engine ended right after an offer of this heartbeat's. */
+let endedAfterOffer = 0;
+
+/**
  * Keep offering the source until the engine admits it is recording.
  *
- * Re-offering is safe by the engine's own account - `CLIPS Screenshare:
- * SetWumpusSource idempotent ` is what it logs for the second and every
- * subsequent offer of an id it already holds - so the heartbeat costs nothing
- * once the capture is up. `setClipsRecordingEnabled(true)` goes back on the
- * wire alongside it because a source offered to a disabled engine is dropped:
- * `Engine::SetClipsSource declining: clips recording is disabled`.
+ * `setClipsRecordingEnabled(true)` goes back on the wire alongside it because a
+ * source offered to a disabled engine is dropped: `Engine::SetClipsSource
+ * declining: clips recording is disabled`.
+ *
+ * Bounded, because re-offering is not free. The engine's own `CLIPS Screenshare:
+ * SetWumpusSource idempotent ` had been read as a promise that a repeat offer
+ * costs nothing, and on a source it cannot capture that is plainly untrue: for
+ * a screen id the native side reads the id as a window handle, gets `HWND(0x0)`,
+ * and every single offer builds a capture session, boots a D3D adapter, fails
+ * with `Window cannot be captured HWND(0x0)` and tears the whole thing back
+ * down. Twelve hundred of those an hour is what walked the media process up by
+ * ~170 MB an hour until the client died - about once an hour, which is exactly
+ * what this was reported as.
  */
 function keepOffering(): void {
     if (retry != null) return;
@@ -256,10 +293,17 @@ function keepOffering(): void {
     retry = setInterval(() => {
         if (!armed || !source || confirmed) return;
 
+        if (offers >= RETRY_LIMIT) {
+            pauseOffering(`the engine took the source ${offers} times without ever saying it was recording`);
+            return;
+        }
+
         const found = engine();
         if (!found) return;
 
         ours++;
+        offers++;
+        offeredAt = Date.now();
 
         try {
             found.setClipsRecordingEnabled?.(true);
@@ -272,12 +316,46 @@ function keepOffering(): void {
     }, RETRY_MS);
 }
 
+/**
+ * What an `ended` says about the offer that came just before it.
+ *
+ * One of them is the engine settling - it tears a previous session down when a
+ * source is replaced - and that is why arming ignores them. A second one
+ * arriving right behind an offer of ours is a different statement: the offer is
+ * what ended the recording, not what started it, and every further offer will
+ * do the same. The heartbeat stops there and leaves the arming standing, which
+ * costs nothing that was working - the engine goes on recording a track per
+ * person even when its video capture failed, which is the only part of it this
+ * plugin uses.
+ */
+function noteEnded(): void {
+    if (!armed || retry == null) return;
+    if (!offeredAt || Date.now() - offeredAt > OFFER_ECHO_MS) return;
+
+    endedAfterOffer++;
+    if (endedAfterOffer < ENDED_LIMIT) return;
+
+    pauseOffering(`the engine ended the recording right after ${endedAfterOffer} offers in a row, so offering it again tears the capture down rather than starting it`);
+}
+
+/** Drop the heartbeat, keeping the arming it was made for. */
+function pauseOffering(why: string): void {
+    if (retry == null) return;
+
+    clearInterval(retry);
+    retry = null;
+    logger.info(`No longer re-offering the capture source: ${why}.`);
+}
+
 /** Drop the heartbeat and everything it was keeping alive. */
 function stopOffering(): void {
     if (retry != null) clearInterval(retry);
     retry = null;
     source = null;
     confirmed = false;
+    offers = 0;
+    offeredAt = 0;
+    endedAfterOffer = 0;
 }
 
 /*
@@ -453,9 +531,40 @@ function listen(): void {
              * Enabled`, so it does not depend on the out-of-process recorder.
              */
             if (event === READY) confirmed = args[0] !== false;
-            logger.info(`The clip engine emitted ${event}`, ...args);
+            if (event === ENDED) noteEnded();
+            logEvent(event, args);
         });
     }
+}
+
+/** How many times an event is logged in full before it is counted instead. */
+const LOUD_TIMES = 3;
+
+/** How long between two lines about an event that keeps repeating. */
+const LOUD_EVERY_MS = 60_000;
+
+/** Per event: how often it has arrived, and when it was last written down. */
+const heard = new Map<string, { count: number; at: number; }>();
+
+/**
+ * Log the engine's events without letting one of them own the log.
+ *
+ * `clips-recording-ended` arrived on a three second heartbeat and put twelve
+ * thousand identical lines - eight megabytes - into one day of `renderer_js.log`,
+ * which buries everything else the plugin has to say. The first few are worth
+ * having in full; after that the count is the whole of the news.
+ */
+function logEvent(event: string, args: any[]): void {
+    const seen = heard.get(event) ?? { count: 0, at: 0 };
+    seen.count++;
+
+    if (seen.count <= LOUD_TIMES || Date.now() - seen.at >= LOUD_EVERY_MS) {
+        const repeats = seen.count > LOUD_TIMES ? ` (${seen.count} times so far)` : "";
+        logger.info(`The clip engine emitted ${event}${repeats}`, ...args);
+        seen.at = Date.now();
+    }
+
+    heard.set(event, seen);
 }
 
 function engine(): ClipsEngine | null {
@@ -654,6 +763,10 @@ export function arm(options: {
         logger.info(`Clip quality: ${qualityNote} (${width}x${resolution}@${frameRate})`);
 
         confirmed = false;
+        offers = 0;
+        offeredAt = 0;
+        endedAfterOffer = 0;
+        heard.clear();
         source = {
             desktopDescription: {
                 id: sourceId,

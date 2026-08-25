@@ -60,11 +60,6 @@ export async function sendClip(name: string): Promise<boolean> {
     }
 }
 
-/** Attaches a clip that is already in memory, so it need not be read back. */
-export function sendBlob(blob: Blob, name: string): boolean {
-    return attach(new File([blob], name, { type: blob.type }));
-}
-
 function toast(message: string, type: string) {
     Toasts.show({ id: Toasts.genId(), message, type });
 }

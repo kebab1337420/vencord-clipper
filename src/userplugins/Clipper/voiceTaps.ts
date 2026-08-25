@@ -115,30 +115,9 @@ function audioContext(): AudioContext {
     return ctx;
 }
 
-/**
- * True on a client whose voice goes through WebRTC.
- *
- * Only says the patch is in place and the client has the API, not that anybody
- * is in a call: an empty tap list on a supported client just means nobody is
- * talking to you yet.
- */
-export function voiceTapsSupported(): boolean {
-    return installed && !!nativePeerConnection;
-}
-
 /** Every receiver currently open, named where the matcher could name it. */
 export function voiceTaps(): VoiceTap[] {
     return [...tracked.values()].filter(t => !t.dead).map(t => t.tap);
-}
-
-/** The tap belonging to one person, if they have spoken enough to be found. */
-export function voiceTapFor(userId: string): VoiceTap | undefined {
-    return voiceTaps().find(t => t.userId === userId);
-}
-
-/** Taps the matcher has put a name to. The only ones worth recording apart. */
-export function namedVoiceTaps(): VoiceTap[] {
-    return voiceTaps().filter(t => t.userId);
 }
 
 /**

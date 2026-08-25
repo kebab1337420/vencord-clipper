@@ -138,11 +138,6 @@ function currentVoiceChannel(): string | undefined {
     }
 }
 
-/** True while this client is sitting in a voice channel. */
-export function inVoice(): boolean {
-    return !!currentVoiceChannel();
-}
-
 function nameOf(userId: string): string {
     try {
         const user = UserStore.getUser(userId) as any;
@@ -158,7 +153,7 @@ function nameOf(userId: string): string {
  * 128 rather than the panel's 32: the same URL is what the speaker badge is
  * painted from, and a 32px image blown up to a badge on a 1080p frame is mush.
  */
-export function avatarOf(userId: string, size = 128): string {
+function avatarOf(userId: string, size = 128): string {
     try {
         return (UserStore.getUser(userId) as any)?.getAvatarURL?.(undefined, size) ?? "";
     } catch {
@@ -247,7 +242,7 @@ export function setLocalMuted(userId: string, muted: boolean): void {
 }
 
 /** Packs samples for the metadata file: one byte each, base64'd. */
-export function encodeLevels(levels: Uint8Array): string {
+function encodeLevels(levels: Uint8Array): string {
     let binary = "";
     for (let i = 0; i < levels.length; i++) binary += String.fromCharCode(levels[i]);
 
@@ -259,7 +254,7 @@ export function encodeLevels(levels: Uint8Array): string {
     }
 }
 
-export function decodeLevels(encoded: string): Uint8Array {
+function decodeLevels(encoded: string): Uint8Array {
     try {
         const binary = atob(encoded);
         const out = new Uint8Array(binary.length);
@@ -504,7 +499,7 @@ export function shiftTracks(tracks: VoiceTrack[], bySeconds: number): VoiceTrack
  * asymmetric, which is what the duck needs - it has to be in place before the
  * word starts and stay there through the gap before the next one.
  */
-export function levelAt(track: VoiceTrack, seconds: number, back = 1, ahead = 1): number {
+function levelAt(track: VoiceTrack, seconds: number, back = 1, ahead = 1): number {
     const { levels } = track;
     if (!levels.length) return 0;
 

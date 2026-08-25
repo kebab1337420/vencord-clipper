@@ -52,17 +52,6 @@ export async function loadClipUrl(name: string): Promise<string> {
     return URL.createObjectURL(new Blob([data.buffer as ArrayBuffer], { type: typeOfClip(name) }));
 }
 
-/**
- * A clip's raw bytes.
- *
- * `folder` is for the callers that wrote somewhere other than the configured
- * directory - the native engine is handed a full path of its own - and defaults
- * to the setting everything else reads.
- */
-export async function loadClipBytes(name: string, folder?: string): Promise<Uint8Array> {
-    return await Native.readClip(folder || settings.store.saveDirectory, name);
-}
-
 /** Media type a clip's name implies. WebM is the fallback, as it always was. */
 export function typeOfClip(name: string): string {
     return name.toLowerCase().endsWith(".mp4") ? "video/mp4" : "video/webm";

@@ -287,7 +287,7 @@ const TITLE_NOISE = /\s*[-|–—:]\s.*$/;
 const TITLE_STRIP = /\s*\((?:32|64)[- ]?bit\)|\s*\[[^\]]*\]/gi;
 
 /** Turns a window title into something worth showing as a category. */
-export function categoryFromTitle(title: string): string {
+function categoryFromTitle(title: string): string {
     const cleaned = title.replace(TITLE_STRIP, "").replace(TITLE_NOISE, "").trim();
 
     // A whole screen is not a game, and neither is Discord watching itself.
@@ -304,7 +304,7 @@ export function categoryFromTitle(title: string): string {
  * window ("Counter-Strike 2", not "Counter-Strike 2 - Direct3D 11"). The
  * captured source's title is the fallback.
  */
-export function detectGame(): string {
+function detectGame(): string {
     try {
         const games = RunningGameStore?.getRunningGames?.() as { name?: string; }[] | undefined;
         const running = games?.map(g => g?.name).find(name => typeof name === "string" && name.trim());

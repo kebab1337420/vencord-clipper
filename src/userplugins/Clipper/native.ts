@@ -182,10 +182,6 @@ export function saveVoiceTrack(_: IpcMainInvokeEvent, dir: string, clip: string,
     return path;
 }
 
-export function listVoiceTracks(_: IpcMainInvokeEvent, dir: string, clip: string): Array<{ userId: string; file: string; }> {
-    return voiceTracksIn(dir, clip);
-}
-
 /** Reads one of them back. */
 export function readVoiceTrack(_: IpcMainInvokeEvent, dir: string, file: string): Uint8Array {
     const flat = basename(String(file ?? "").replace(/[\\/]/g, "_"));

@@ -367,15 +367,3 @@ export function AudioMixerInput({ compact }: { compact?: boolean; } = {}) {
     );
 }
 
-/**
- * The settings panel's entry point.
- *
- * Vencord hands a setting component its own props, which do not match the
- * mixer's, so the panel gets a wrapper rather than the mixer itself. A named
- * one, not an inline arrow: an arrow would be a new component type on every
- * render of the panel and would remount the mixer, losing whatever was being
- * typed in a channel's name.
- */
-export function AudioMixerSetting() {
-    return <AudioMixerInput />;
-}

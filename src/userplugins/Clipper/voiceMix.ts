@@ -7,7 +7,7 @@
 /*
  * Vencord Clipper - the separated soundtrack of one file, kept around
  *
- * `separate.ts` is arithmetic and knows nothing about files. This is the part
+ * `laneMix.ts` is arithmetic and knows nothing about caching. This is the part
  * that fetches the bytes, decodes them, and remembers the result, because the
  * expensive half of a separation describes the recording rather than what the
  * user asked for: the same analysis serves every set of levels, every segment
@@ -170,13 +170,13 @@ export async function voiceMixFor(
      * rebuild and the caller falls back to the mixer's own rule.
      *
      * There used to be a third path here: learn each voice from the moments
-     * that person spoke alone and subtract it everywhere else. It is in
-     * `separate.ts` still, and on paper it is the right answer for a recording
-     * that was mixed before it reached this client. In practice it made the
-     * sound stutter wherever two people overlapped and left the muted person
-     * audible underneath anyway, which is both of the things it was meant to
-     * fix. An estimate that fails at exactly the moments it exists for is not
-     * worth the seconds it costs, so it is not run.
+     * that person spoke alone and subtract it everywhere else. On paper it is
+     * the right answer for a recording that was mixed before it reached this
+     * client. In practice it made the sound stutter wherever two people
+     * overlapped and left the muted person audible underneath anyway, which is
+     * both of the things it was meant to fix. An estimate that fails at exactly
+     * the moments it exists for is not worth the seconds it costs, so it was
+     * deleted rather than left switched off.
      */
     return null;
 }

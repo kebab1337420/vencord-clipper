@@ -736,10 +736,6 @@ export function disarm(): void {
     armed = null;
 }
 
-export function isArmed(): boolean {
-    return armed != null;
-}
-
 /**
  * Say, per person in the call, whether their voice may be recorded.
  *

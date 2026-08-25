@@ -26,7 +26,7 @@
  *
  * What that leaves is arithmetic rather than estimation: every person is in a
  * track of their own, so muting somebody is a sum with one term left out. That
- * is the difference between this file and `separate.ts`.
+ * is the difference between this file and any attempt to unmix one track.
  *
  * The engine writes a plain MP4 - `moov` with a real sample table, not the
  * fragmented layout `mp4.ts` handles - and every audio track in it is AAC,

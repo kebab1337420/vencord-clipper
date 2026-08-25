@@ -76,7 +76,7 @@ function clean(value: unknown): Asset | null {
  * may have written, and an entry with no path would reach the loader as
  * `undefined` and fail somewhere far from here.
  */
-export function readAssets(kind?: AssetKind): Asset[] {
+function readAssets(kind?: AssetKind): Asset[] {
     const raw = settings.store.assetLibrary as Partial<Shelf> | undefined;
     const items = Array.isArray(raw?.items) ? raw.items : [];
 
@@ -147,17 +147,6 @@ export function removeAsset(id: string): void {
         writeAssets(readAssets().filter(a => a.id !== id));
     } catch (e) {
         logger.warn("Could not drop an asset from the shelf", e);
-    }
-}
-
-export function renameAsset(id: string, name: string): void {
-    const trimmed = name.trim().slice(0, 80);
-    if (!trimmed) return;
-
-    try {
-        writeAssets(readAssets().map(a => a.id === id ? { ...a, name: trimmed } : a));
-    } catch (e) {
-        logger.warn("Could not rename an asset", e);
     }
 }
 

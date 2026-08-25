@@ -1695,6 +1695,6 @@ export function estimatedSize(project: Project): number {
 }
 
 /** Mime type the render will produce, for naming the file before it exists. */
-export function renderMimeType(): string {
+function renderMimeType(): string {
     return pickMimeType(settings.store.container) || "video/webm";
 }

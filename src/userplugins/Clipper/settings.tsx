@@ -206,7 +206,7 @@ export function mimeTypeChain(container: string): string[] {
 }
 
 /** Resolves the configured container to a list of mime types, best first. */
-export function mimeCandidates(container: string): string[] {
+function mimeCandidates(container: string): string[] {
     switch (container) {
         case Container.Mp4H264:
             return [

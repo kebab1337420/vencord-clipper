@@ -185,6 +185,23 @@ What differs there:
   while Discord is focused. Bind a compositor shortcut, or use the chat bar
   button.
 
+## Updates
+
+The plugin ships as a finished bundle, so it keeps itself current: at every
+Discord launch it asks GitHub for the newest release and, when there is one,
+offers it. Taking it downloads the release's bundle, checks every file against
+the hashes the build recorded, swaps them into the installed folder and offers
+a restart, which is when the new version actually loads.
+
+Both halves are switches in the plugin settings, under *Updates*: **check at
+launch** (on) and **install without asking** (off). The same panel shows the
+installed version, a *Check now* button and the release notes; the toolbox has
+*Check for a new Clipper version* as well. Nothing is downloaded by a check
+alone.
+
+An install that cannot write to its own folder says so instead of failing
+quietly — run `install.bat` again in that case.
+
 ## Usage
 
 | Action | Default |
@@ -227,7 +244,8 @@ firing it only while Discord is focused.
 | `studio.ts` | Timeline model and the montage render engine (canvas + WebAudio) |
 | `webm.ts` | Rebases the buffered WebM timeline so saved clips start at zero |
 | `globalKeybinds.ts` | System-wide keybind registration and dispatch |
-| `native.ts` | Main process: file write, source listing, global shortcuts |
+| `updater.ts` | Version check at launch, and the install that follows it |
+| `native.ts` | Main process: file write, source listing, global shortcuts, bundle updates |
 | `utils.ts` | Keybind parsing / accelerators, formatting helpers |
 | `components/ClipperOverlay.tsx` | Floating button, source picker, capture options |
 | `components/ClipStudio.tsx` | Clip library, categories, timeline, effects, captions, render |
@@ -236,6 +254,7 @@ firing it only while Discord is focused.
 | `components/ClipperChatButton.tsx` | Chat bar button |
 | `components/KeybindInput.tsx` | Keybind picker used by the settings |
 | `components/SaveDirectoryInput.tsx` | Clip folder picker used by the settings |
+| `components/UpdateStatus.tsx` | Installed version, check / install / restart buttons |
 
 ## Known limitations
 

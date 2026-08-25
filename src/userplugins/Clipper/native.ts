@@ -11,8 +11,10 @@
  * here and written to the folder chosen in the settings.
  */
 
+import { createHash } from "crypto";
 import { app, desktopCapturer, dialog, globalShortcut, type IpcMainInvokeEvent, session, shell } from "electron";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { accessSync, constants as fsConstants, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { get as httpsGet } from "https";
 import { basename, extname, isAbsolute, join } from "path";
 
 // From utils rather than defined here: the renderer needs the same names and
@@ -783,3 +785,266 @@ export function waitForShortcut(_: IpcMainInvokeEvent, timeoutMs = 30_000): Prom
 
 // Electron keeps OS-level binds alive past the window, so drop them on exit.
 app.on("will-quit", () => unregisterShortcuts());
+
+/*
+ * ---------------------------------------------------------------- updates ---
+ *
+ * The plugin ships as a finished Vencord bundle rather than as sources, so an
+ * update is a handful of files replaced in the installed dist folder. Doing it
+ * here rather than in the renderer is not a preference: Discord's content
+ * security policy blocks a renderer fetch to GitHub, and nothing in the
+ * renderer can write to disk anyway.
+ */
+
+/** Where the prebuilt bundle is published. */
+const UPDATE_REPO = "kebab1337420/vencord-clipper";
+
+/** GitHub rejects an API request with no user agent, so every call carries one. */
+const UPDATE_AGENT = `VencordClipper (+https://github.com/${UPDATE_REPO})`;
+
+/**
+ * What a release replaces when it carries no manifest of its own.
+ *
+ * Builds made by scripts\build-prebuilt.ps1 list their files, with a hash each,
+ * in prebuilt\build-info.json; this list only covers a release published before
+ * that existed. A name missing from such a release is skipped rather than
+ * treated as a failure.
+ */
+const BUNDLE_FILES = [
+    "patcher.js",
+    "patcher.js.LEGAL.txt",
+    "preload.js",
+    "renderer.css",
+    "renderer.js",
+    "renderer.js.LEGAL.txt",
+    "vencordDesktopMain.js",
+    "vencordDesktopMain.js.LEGAL.txt",
+    "vencordDesktopPreload.js",
+    "vencordDesktopRenderer.css",
+    "vencordDesktopRenderer.js",
+    "vencordDesktopRenderer.js.LEGAL.txt"
+];
+
+interface Fetched {
+    status: number;
+    body: Buffer;
+}
+
+/** One GET, following redirects, with the whole body in memory. */
+function httpGet(url: string, redirects = 0): Promise<Fetched> {
+    return new Promise((resolve, reject) => {
+        const request = httpsGet(url, { headers: { "User-Agent": UPDATE_AGENT, Accept: "*/*" } }, response => {
+            const status = response.statusCode ?? 0;
+            const { location } = response.headers;
+
+            // Release assets and raw files both answer from a redirect.
+            if (status >= 300 && status < 400 && location) {
+                response.resume();
+
+                if (redirects >= 5) reject(new Error(`Too many redirects for ${url}`));
+                else resolve(httpGet(new URL(location, url).toString(), redirects + 1));
+
+                return;
+            }
+
+            const chunks: Buffer[] = [];
+            response.on("data", chunk => chunks.push(chunk));
+            response.on("end", () => resolve({ status, body: Buffer.concat(chunks) }));
+            response.on("error", reject);
+        });
+
+        request.setTimeout(60_000, () => request.destroy(new Error(`${url} timed out`)));
+        request.on("error", reject);
+    });
+}
+
+/** Same, refusing anything but a 200. */
+async function httpGetOk(url: string): Promise<Buffer> {
+    const { status, body } = await httpGet(url);
+    if (status !== 200) throw new Error(`${url} answered ${status}`);
+
+    return body;
+}
+
+/**
+ * The folder the patched client loads the bundle from.
+ *
+ * This module is compiled into that bundle, so `__dirname` is the folder itself
+ * whichever install script put it there. A folder without a patcher in it is
+ * not one, and is refused rather than written into.
+ */
+function bundleDirectory(): string {
+    return __dirname;
+}
+
+function bundleInstalled(dir: string): boolean {
+    return existsSync(join(dir, "patcher.js")) && existsSync(join(dir, "renderer.js"));
+}
+
+function canWrite(dir: string): boolean {
+    try {
+        accessSync(dir, fsConstants.W_OK);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/** Compares two `1.2.3` versions, ignoring anything after the numbers. */
+function isNewer(candidate: string, installed: string): boolean {
+    const parts = (version: string) => version.replace(/^v/i, "").split(/[.\-+]/).map(part => Number(part) || 0);
+
+    const left = parts(candidate);
+    const right = parts(installed);
+
+    for (let i = 0; i < 3; i++) {
+        if ((left[i] ?? 0) !== (right[i] ?? 0)) return (left[i] ?? 0) > (right[i] ?? 0);
+    }
+
+    return false;
+}
+
+export interface UpdateInfo {
+    /** Latest published version, without the leading v. */
+    version: string;
+    /** The tag it was published under, which is what the files are fetched from. */
+    tag: string;
+    /** True when that version is newer than the one asking. */
+    available: boolean;
+    /** Release notes, trimmed to something a modal can hold. */
+    notes: string;
+    /** Release page, for the "what changed" link. */
+    url: string;
+    /** Where the bundle would be written. */
+    directory: string;
+    /** False when this install cannot be updated from here: no bundle, or a read-only folder. */
+    writable: boolean;
+}
+
+/**
+ * Asks GitHub for the newest release and says whether it beats `installed`.
+ *
+ * Only the release list is read here; nothing is downloaded and nothing is
+ * written, so a failed check costs a launch nothing but a log line.
+ */
+export async function checkUpdate(_: IpcMainInvokeEvent, installed: string): Promise<UpdateInfo> {
+    const body = await httpGetOk(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`);
+    const release = JSON.parse(body.toString("utf8"));
+
+    const tag = String(release.tag_name ?? "");
+    const version = tag.replace(/^v/i, "");
+    const directory = bundleDirectory();
+
+    return {
+        version,
+        tag,
+        available: Boolean(version) && isNewer(version, installed),
+        notes: String(release.body ?? "").trim().slice(0, 1200),
+        url: String(release.html_url ?? `https://github.com/${UPDATE_REPO}/releases`),
+        directory,
+        writable: bundleInstalled(directory) && canWrite(directory)
+    };
+}
+
+interface ManifestEntry {
+    size?: number;
+    sha256?: string;
+}
+
+/** The file list a build left behind, or null for a release published without one. */
+async function fetchManifest(tag: string): Promise<Record<string, ManifestEntry> | null> {
+    const { status, body } = await httpGet(`https://raw.githubusercontent.com/${UPDATE_REPO}/${tag}/prebuilt/build-info.json`);
+    if (status !== 200) return null;
+
+    try {
+        const { files } = JSON.parse(body.toString("utf8"));
+        return files && typeof files === "object" ? files : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Downloads a release and swaps it into the installed bundle.
+ *
+ * Everything lands in a staging folder first and is only moved over the live
+ * files once every single one has arrived and matched its hash: a download that
+ * dies halfway then costs nothing, where writing straight into the dist folder
+ * would leave a client that no longer starts.
+ *
+ * Returns the names of the files that were replaced.
+ */
+export async function downloadUpdate(_: IpcMainInvokeEvent, tag: string): Promise<string[]> {
+    if (!/^[\w.-]{1,40}$/.test(tag)) throw new Error(`Refusing to fetch a release named ${tag}`);
+
+    const dir = bundleDirectory();
+    if (!bundleInstalled(dir)) throw new Error(`No installed bundle at ${dir}`);
+    if (!canWrite(dir)) throw new Error(`${dir} is read-only`);
+
+    const manifest = await fetchManifest(tag);
+    const names = manifest ? Object.keys(manifest) : BUNDLE_FILES;
+
+    const staging = join(dir, ".clipper-update");
+    rmSync(staging, { recursive: true, force: true });
+    mkdirSync(staging, { recursive: true });
+
+    try {
+        const written: string[] = [];
+
+        for (const name of names) {
+            // The name comes off the network; it may only ever be a file sitting
+            // in the dist folder, never a path reaching out of it.
+            if (name !== basename(name) || name.startsWith(".")) throw new Error(`Refusing a release file named ${name}`);
+
+            const { status, body } = await httpGet(`https://raw.githubusercontent.com/${UPDATE_REPO}/${tag}/prebuilt/dist/${name}`);
+
+            // Without a manifest the list is a guess, so a name the release does
+            // not carry is simply not part of it.
+            if (status === 404 && !manifest) continue;
+            if (status !== 200) throw new Error(`${name} answered ${status}`);
+            if (body.length === 0) throw new Error(`${name} came back empty`);
+
+            const expected = manifest?.[name];
+            if (expected?.size !== undefined && body.length !== expected.size) {
+                throw new Error(`${name} is ${body.length} bytes, the release says ${expected.size}`);
+            }
+
+            if (expected?.sha256) {
+                const got = createHash("sha256").update(body).digest("hex");
+                if (got.toLowerCase() !== expected.sha256.toLowerCase()) throw new Error(`${name} does not match its hash`);
+            }
+
+            writeFileSync(join(staging, name), body);
+            written.push(name);
+        }
+
+        if (written.length === 0) throw new Error(`There is no bundle published under ${tag}`);
+
+        // A bundle with no plugin in it would install cleanly and take the whole
+        // point away with it, so the two files that carry it are checked.
+        for (const name of ["renderer.js", "patcher.js"]) {
+            if (!written.includes(name)) throw new Error(`The release carries no ${name}`);
+        }
+        if (!readFileSync(join(staging, "renderer.js")).includes("Clipper")) {
+            throw new Error("There is no Clipper in that release's renderer");
+        }
+
+        for (const name of written) renameSync(join(staging, name), join(dir, name));
+
+        return written;
+    } finally {
+        rmSync(staging, { recursive: true, force: true });
+    }
+}
+
+/**
+ * Restarts the client so the bundle just written is the one that loads.
+ *
+ * Discord closes to the tray on a plain quit, which would leave the old bundle
+ * running in a window nobody can see, so the exit is forced shortly after.
+ */
+export function relaunchClient(_: IpcMainInvokeEvent): void {
+    app.relaunch();
+    app.quit();
+    setTimeout(() => app.exit(0), 3000);
+}

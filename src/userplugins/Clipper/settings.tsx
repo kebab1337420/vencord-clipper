@@ -14,6 +14,7 @@ import { OptionType } from "@utils/types";
 import { KeybindInput } from "./components/KeybindInput";
 import { SaveDirectoryInput } from "./components/SaveDirectoryInput";
 import { SettingsSection } from "./components/SettingsSection";
+import { UpdateStatus } from "./components/UpdateStatus";
 
 export const enum Container {
     WebmVp9 = "webm-vp9",
@@ -184,6 +185,29 @@ export const settings = definePluginSettings({
                 onChange={v => (settings.store.markKeybind = v)}
             />
         )
+    },
+    updatesSection: {
+        type: OptionType.COMPONENT,
+        component: () => (
+            <SettingsSection
+                title="Updates"
+                note="The plugin is installed as a finished bundle, so it checks for a newer one itself."
+            />
+        )
+    },
+    updateStatus: {
+        type: OptionType.COMPONENT,
+        component: UpdateStatus
+    },
+    updateCheck: {
+        type: OptionType.BOOLEAN,
+        description: "Look for a newer Clipper release when Discord starts. Nothing is downloaded by the check itself",
+        default: true
+    },
+    updateAutomatic: {
+        type: OptionType.BOOLEAN,
+        description: "Install a newer release as soon as the check finds one, instead of asking first. It still only takes effect on the next Discord restart",
+        default: false
     }
 });
 

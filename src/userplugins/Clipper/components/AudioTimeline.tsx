@@ -175,13 +175,9 @@ export function AudioTimeline({ clips, sources, length, playhead, disabled, onCh
 
     return (
         <div className="vc-clipper-sounds">
-            <div className="vc-clipper-sounds-head">
-                <span>Sounds</span>
-                <span>{clips.length} on the timeline - drag to move, drag an edge to trim</span>
-            </div>
-
             <div
                 className="vc-clipper-sound-lane"
+                title="Drag to move, drag an edge to trim"
                 ref={laneRef}
                 onMouseDown={e => {
                     // A click on the empty part of the lane is a seek, which is

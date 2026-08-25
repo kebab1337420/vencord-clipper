@@ -108,6 +108,15 @@ export const STUDIO_CSS = `
     width: min(1280px, 96vw);
     height: min(840px, 92vh);
 }
+/* The title is the whole header here: the panels underneath say what each does. */
+.vc-clipper-studio .vc-clipper-head {
+    align-items: center;
+    padding: 12px 16px 10px;
+}
+.vc-clipper-studio .vc-clipper-head h2 {
+    font-size: 16px;
+    line-height: 20px;
+}
 .vc-clipper-studio-body {
     display: flex;
     flex: 1;
@@ -136,7 +145,7 @@ export const STUDIO_CSS = `
     flex-direction: column;
     min-width: 0;
     padding: 12px 14px;
-    gap: 10px;
+    gap: 8px;
     background: var(--background-primary, #313338);
 }
 /* ----------------------------------------------------------------- stage -- */
@@ -172,26 +181,93 @@ export const STUDIO_CSS = `
     display: flex;
     align-items: center;
     gap: 10px;
+    padding: 0 2px;
 }
+/* Round, so the one control that is pressed constantly reads as the one that is. */
 .vc-clipper-transport button {
     flex: 0 0 auto;
-    min-width: 72px;
-    padding: 5px 12px;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
     border: none;
-    border-radius: 6px;
-    background: var(--button-secondary-background, #4e5058);
-    color: var(--text-normal, #dbdee1);
+    border-radius: 50%;
+    background: var(--brand-experiment, #5865f2);
+    color: #fff;
     font-size: 12px;
-    font-weight: 500;
+    line-height: 1;
     cursor: pointer;
+    transition: background-color .12s ease, transform .12s ease;
+}
+.vc-clipper-transport button:hover:not(:disabled) {
+    background: var(--brand-experiment-560, #4752c4);
+    transform: scale(1.06);
 }
 .vc-clipper-transport button:disabled {
+    background: var(--button-secondary-background, #4e5058);
     opacity: .4;
     cursor: default;
 }
 .vc-clipper-transport input[type="range"] {
     flex: 1;
     min-width: 0;
+    accent-color: var(--brand-experiment, #5865f2);
+}
+.vc-clipper-time {
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted, #949ba4);
+}
+.vc-clipper-time b {
+    color: var(--text-normal, #dbdee1);
+    font-weight: 600;
+}
+
+/*
+ * The strips under the picture - cut ruler, segments, sounds, voices - are one
+ * card with a label gutter rather than four cards in a column. Four bordered
+ * boxes stacked on top of each other read as four unrelated widgets; the same
+ * four rows sharing a background read as one timeline, which is what they are.
+ */
+.vc-clipper-tracks {
+    display: flex;
+    flex-direction: column;
+    border-radius: 8px;
+    background: var(--background-secondary, #2b2d31);
+    box-shadow: inset 0 0 0 1px var(--background-modifier-accent, rgba(78, 80, 88, .48));
+    overflow: hidden;
+}
+.vc-clipper-track {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+}
+.vc-clipper-track + .vc-clipper-track {
+    border-top: 1px solid var(--background-modifier-accent, rgba(78, 80, 88, .32));
+}
+.vc-clipper-track-label {
+    flex: 0 0 auto;
+    width: 44px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--text-muted, #949ba4);
+    user-select: none;
+}
+.vc-clipper-track-body {
+    flex: 1;
+    min-width: 0;
+}
+.vc-clipper-track-empty {
+    align-self: center;
+    padding: 12px 2px;
+    color: var(--text-muted, #949ba4);
+    font-size: 12px;
 }
 
 /* ------------------------------------------------------------ sound lane -- */
@@ -200,19 +276,11 @@ export const STUDIO_CSS = `
     flex-direction: column;
     gap: 4px;
 }
-.vc-clipper-sounds-head {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    font-size: 11px;
-    color: var(--text-muted, #949ba4);
-}
 .vc-clipper-sound-lane {
     position: relative;
-    height: 44px;
-    border-radius: 8px;
-    background: var(--background-secondary, #2b2d31);
-    box-shadow: inset 0 0 0 1px var(--background-modifier-accent, rgba(78, 80, 88, .48));
+    height: 40px;
+    border-radius: 6px;
+    background: var(--background-tertiary, #1e1f22);
     overflow: hidden;
     cursor: crosshair;
 }
@@ -325,8 +393,11 @@ export const STUDIO_CSS = `
 .vc-clipper-side.vc-clipper-side-left {
     width: 268px;
 }
+.vc-clipper-side > h4:first-child {
+    margin-top: 0;
+}
 .vc-clipper-side h4 {
-    margin: 0 0 8px;
+    margin: 14px 0 8px;
     font-size: 12px;
     font-weight: 700;
     text-transform: uppercase;
@@ -359,6 +430,19 @@ export const STUDIO_CSS = `
 .vc-clipper-side-clip:disabled {
     opacity: .5;
     cursor: default;
+}
+/* Same row as the library entries, but an outline: this one makes something. */
+.vc-clipper-add {
+    margin-bottom: 10px;
+    border: 1px dashed var(--background-modifier-accent, rgba(78, 80, 88, .8));
+    color: var(--header-secondary, #b5bac1);
+    text-align: center;
+    font-size: 12px;
+    font-weight: 500;
+}
+.vc-clipper-add:hover:not(:disabled) {
+    border-color: var(--brand-experiment, #5865f2);
+    color: var(--text-normal, #dbdee1);
 }
 .vc-clipper-side-clip .vc-clipper-name {
     overflow: hidden;
@@ -512,16 +596,13 @@ export const STUDIO_CSS = `
     display: flex;
     gap: 4px;
     overflow-x: auto;
-    padding: 6px;
-    min-height: 74px;
-    border-radius: 8px;
-    background: var(--background-secondary, #2b2d31);
-    box-shadow: inset 0 0 0 1px var(--background-modifier-accent, rgba(78, 80, 88, .48));
+    padding: 2px 0 4px;
+    min-height: 56px;
 }
 .vc-clipper-block {
     flex: 0 0 auto;
     min-width: 74px;
-    padding: 7px 9px;
+    padding: 6px 9px;
     border: 2px solid transparent;
     border-radius: 6px;
     background: var(--background-tertiary, #1e1f22);
@@ -551,15 +632,12 @@ export const STUDIO_CSS = `
 
 /* ------------------------------------------------------------- cut ruler -- */
 .vc-clipper-ruler-wrap {
-    padding: 6px;
-    border-radius: 8px;
-    background: var(--background-secondary, #2b2d31);
-    box-shadow: inset 0 0 0 1px var(--background-modifier-accent, rgba(78, 80, 88, .48));
+    min-width: 0;
 }
 .vc-clipper-ruler {
     position: relative;
-    height: 26px;
-    border-radius: 5px;
+    height: 24px;
+    border-radius: 6px;
     background: var(--background-tertiary, #1e1f22);
     cursor: crosshair;
     overflow: hidden;
@@ -607,67 +685,61 @@ export const STUDIO_CSS = `
     background: var(--text-normal, #dbdee1);
     pointer-events: none;
 }
+/* Sits in the ruler's own row, so marking a range costs no vertical space. */
 .vc-clipper-ruler-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-}
-.vc-clipper-ruler-actions span {
-    flex: 1;
-    min-width: 180px;
-    color: var(--text-muted, #949ba4);
-    font-size: 11px;
+    gap: 4px;
+    flex: 0 0 auto;
 }
 .vc-clipper-ruler-actions button {
-    padding: 4px 9px;
+    padding: 3px 8px;
     border: none;
     border-radius: 4px;
-    background: var(--button-secondary-background, #4e5058);
-    color: var(--text-normal, #dbdee1);
-    font-size: 12px;
+    background: var(--background-tertiary, #1e1f22);
+    color: var(--text-muted, #949ba4);
+    font-size: 11px;
+    font-weight: 500;
     cursor: pointer;
+    transition: background-color .12s ease, color .12s ease;
+}
+.vc-clipper-ruler-actions button:hover:not(:disabled) {
+    background: var(--background-modifier-hover, rgba(78, 80, 88, .3));
+    color: var(--text-normal, #dbdee1);
 }
 .vc-clipper-ruler-actions button:disabled {
-    opacity: .5;
+    opacity: .4;
     cursor: default;
 }
-.vc-clipper-ruler-actions button.vc-clipper-danger {
+.vc-clipper-ruler-actions button.vc-clipper-danger:not(:disabled) {
     background: var(--button-danger-background, #da373c);
     color: #fff;
+}
+.vc-clipper-mark-badge {
+    flex: 0 0 auto;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--button-danger-background, #da373c) 24%, transparent);
+    color: var(--text-normal, #dbdee1);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
 }
 
 /* ---------------------------------------------------------- voice lanes -- */
 .vc-clipper-lanes {
-    padding: 8px 10px 10px;
-    border-radius: 8px;
-    background: var(--background-secondary, #2b2d31);
-    box-shadow: inset 0 0 0 1px var(--background-modifier-accent, rgba(78, 80, 88, .48));
-}
-.vc-clipper-lanes-head {
     display: flex;
-    justify-content: space-between;
-    margin-bottom: 6px;
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: .02em;
-    color: var(--header-secondary, #b5bac1);
-}
-.vc-clipper-lanes-head span:last-child {
-    font-weight: 400;
-    text-transform: none;
-    letter-spacing: 0;
-    color: var(--text-muted, #949ba4);
+    flex-direction: column;
+    gap: 3px;
+    max-height: 116px;
+    overflow-y: auto;
 }
 .vc-clipper-lane {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-top: 3px;
 }
 .vc-clipper-lane-name {
-    width: 108px;
+    width: 96px;
     flex: 0 0 auto;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -678,7 +750,7 @@ export const STUDIO_CSS = `
 .vc-clipper-lane-track {
     position: relative;
     flex: 1;
-    height: 22px;
+    height: 20px;
     min-width: 0;
     border-radius: 4px;
     background: var(--background-tertiary, #1e1f22);
@@ -775,13 +847,25 @@ export const STUDIO_CSS = `
 .vc-clipper-caption-item {
     margin-bottom: 8px;
     padding: 10px;
+    border: 1px solid transparent;
     border-radius: 8px;
     background: var(--background-tertiary, #1e1f22);
 }
+.vc-clipper-caption-item.vc-clipper-active {
+    border-color: var(--brand-experiment, #5865f2);
+}
+.vc-clipper-caption-item > .vc-clipper-field:last-of-type,
+.vc-clipper-caption-item > .vc-clipper-row:last-of-type {
+    margin-bottom: 0;
+}
 .vc-clipper-side-manage {
     margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px solid var(--background-modifier-accent, rgba(78, 80, 88, .48));
+    padding: 10px;
+    border-radius: 8px;
+    background: var(--background-secondary-alt, #232428);
+}
+.vc-clipper-side-manage h4 {
+    margin-top: 0;
 }
 .vc-clipper-side-manage h4 {
     overflow: hidden;
@@ -824,6 +908,7 @@ export const STUDIO_CSS = `
 /* --------------------------------------------------------------- buttons -- */
 .vc-clipper-side-actions button,
 .vc-clipper-row button,
+.vc-clipper-caption-row button,
 .vc-clipper-studio-foot button {
     height: 32px;
     padding: 0 12px;
@@ -838,11 +923,13 @@ export const STUDIO_CSS = `
 }
 .vc-clipper-side-actions button:hover:not(:disabled),
 .vc-clipper-row button:hover:not(:disabled),
+.vc-clipper-caption-row button:hover:not(:disabled),
 .vc-clipper-studio-foot button:hover:not(:disabled) {
     background: var(--button-secondary-background-hover, #6d6f78);
 }
 .vc-clipper-side-actions button:focus-visible,
 .vc-clipper-row button:focus-visible,
+.vc-clipper-caption-row button:focus-visible,
 .vc-clipper-studio-foot button:focus-visible,
 .vc-clipper-side-clip:focus-visible,
 .vc-clipper-block:focus-visible {
@@ -851,6 +938,7 @@ export const STUDIO_CSS = `
 }
 .vc-clipper-side-actions button:disabled,
 .vc-clipper-row button:disabled,
+.vc-clipper-caption-row button:disabled,
 .vc-clipper-studio-foot button:disabled {
     opacity: .5;
     cursor: default;
@@ -865,13 +953,184 @@ export const STUDIO_CSS = `
 }
 .vc-clipper-side-actions button.vc-clipper-danger,
 .vc-clipper-row button.vc-clipper-danger,
+.vc-clipper-caption-row button.vc-clipper-danger,
 .vc-clipper-studio-foot button.vc-clipper-danger {
     background: var(--button-danger-background, #da373c);
 }
 .vc-clipper-side-actions button.vc-clipper-danger:hover:not(:disabled),
 .vc-clipper-row button.vc-clipper-danger:hover:not(:disabled),
+.vc-clipper-caption-row button.vc-clipper-danger:hover:not(:disabled),
 .vc-clipper-studio-foot button.vc-clipper-danger:hover:not(:disabled) {
     background: var(--button-danger-background-hover, #a12828);
+}
+.vc-clipper-caption-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+.vc-clipper-caption-row button {
+    flex: 1 1 auto;
+    height: 28px;
+    padding: 0 8px;
+    font-size: 12px;
+}
+
+/* ----------------------------------------------------------------- notes -- */
+/*
+ * A note in the panels is an aside, not an announcement: the shared style is a
+ * centred paragraph the width of a modal, which in a 312px column turns three
+ * sentences into a wall. Here it is a quiet left-aligned block with a rule down
+ * its side, sized so it reads as a caption to the control above it.
+ */
+.vc-clipper-studio .vc-clipper-note {
+    padding: 7px 10px;
+    border-radius: 6px;
+    border-left: 2px solid var(--background-modifier-accent, rgba(78, 80, 88, .8));
+    background: var(--background-secondary-alt, #232428);
+    text-align: left;
+    font-size: 12px;
+    line-height: 16px;
+}
+.vc-clipper-studio-main > .vc-clipper-note {
+    padding: 8px 12px;
+}
+.vc-clipper-side .vc-clipper-note {
+    margin-bottom: 10px;
+}
+.vc-clipper-studio .vc-clipper-note.vc-clipper-error {
+    border-left-color: var(--text-danger, #f23f43);
+}
+
+/*
+ * The long explanations - what a mute costs, what the render is about to do -
+ * are worth reading once and in the way afterwards, so they fold. Shut by
+ * default: the summary carries the answer, the body carries the reasoning.
+ */
+.vc-clipper-hint {
+    margin-bottom: 10px;
+    border-radius: 6px;
+    background: var(--background-secondary-alt, #232428);
+}
+.vc-clipper-hint > summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    color: var(--text-muted, #949ba4);
+    font-size: 12px;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+.vc-clipper-hint > summary::-webkit-details-marker {
+    display: none;
+}
+.vc-clipper-hint > summary::before {
+    content: "";
+    flex: 0 0 auto;
+    width: 0;
+    height: 0;
+    border-left: 4px solid currentColor;
+    border-top: 3.5px solid transparent;
+    border-bottom: 3.5px solid transparent;
+    transition: transform .12s ease;
+}
+.vc-clipper-hint[open] > summary::before {
+    transform: rotate(90deg);
+}
+.vc-clipper-hint > summary:hover {
+    color: var(--text-normal, #dbdee1);
+}
+.vc-clipper-hint > div {
+    padding: 0 10px 9px 20px;
+    color: var(--text-muted, #949ba4);
+    font-size: 12px;
+    line-height: 16px;
+}
+
+/* --------------------------------------------------------------- groups -- */
+/*
+ * Ten sliders in a column is a list nobody scans. Grouped, the panel opens on
+ * the three or four that are wanted and the rest stay one click away.
+ */
+.vc-clipper-group {
+    margin-bottom: 10px;
+    border-radius: 8px;
+    background: var(--background-secondary-alt, #232428);
+}
+.vc-clipper-group > summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    color: var(--header-secondary, #b5bac1);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .02em;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+.vc-clipper-group > summary::-webkit-details-marker {
+    display: none;
+}
+.vc-clipper-group > summary::before {
+    content: "";
+    flex: 0 0 auto;
+    width: 0;
+    height: 0;
+    border-left: 4px solid currentColor;
+    border-top: 3.5px solid transparent;
+    border-bottom: 3.5px solid transparent;
+    transition: transform .12s ease;
+}
+.vc-clipper-group[open] > summary::before {
+    transform: rotate(90deg);
+}
+.vc-clipper-group > summary:hover {
+    color: var(--header-primary, #f2f3f5);
+}
+.vc-clipper-group > summary small {
+    margin-left: auto;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--text-muted, #949ba4);
+    font-variant-numeric: tabular-nums;
+}
+.vc-clipper-group-body {
+    padding: 2px 10px 4px;
+}
+.vc-clipper-group-body > .vc-clipper-field:last-child,
+.vc-clipper-group-body > .vc-clipper-row:last-child {
+    margin-bottom: 0;
+}
+.vc-clipper-group-body > .vc-clipper-row + .vc-clipper-row {
+    margin-top: 6px;
+}
+
+/* The tabs stay put while the panel under them scrolls. */
+.vc-clipper-side .vc-clipper-tabs {
+    position: sticky;
+    top: -12px;
+    z-index: 1;
+    margin: -12px -12px 12px;
+    padding: 12px 12px 9px;
+    border-radius: 0;
+    background: var(--background-secondary, #2b2d31);
+}
+.vc-clipper-tab-strip {
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 8px;
+    background: var(--background-tertiary, #1e1f22);
+}
+.vc-clipper-side h4 + .vc-clipper-field,
+.vc-clipper-side h4 + .vc-clipper-group {
+    margin-top: 0;
 }
 `;
 
@@ -1048,6 +1307,48 @@ function Shelf({ kind, items, busy, onPlace, onForget }: {
                 ))}
             </div>
         </div>
+    );
+}
+
+/**
+ * A paragraph worth reading once, folded away until it is.
+ *
+ * The studio has several of these - what a mute actually costs, what the render
+ * is about to do - and they are true and they matter, but a panel 312px wide
+ * turns any of them into a wall standing between two controls. The summary is
+ * the answer; the body is why.
+ */
+function Hint({ summary, children }: { summary: string; children: React.ReactNode; }) {
+    const [open, setOpen] = useState(false);
+
+    return (
+        <details className="vc-clipper-hint" open={open} onToggle={e => setOpen(e.currentTarget.open)}>
+            <summary>{summary}</summary>
+            <div>{children}</div>
+        </details>
+    );
+}
+
+/**
+ * A named run of controls, foldable.
+ *
+ * The segment panel is a dozen sliders deep and only three or four of them are
+ * ever wanted at once, so they come in groups: the ones that get touched every
+ * time are open, the rest are a click away rather than a scroll away.
+ */
+function Group({ title, note, start = false, children }: {
+    title: string;
+    note?: string;
+    start?: boolean;
+    children: React.ReactNode;
+}) {
+    const [open, setOpen] = useState(start);
+
+    return (
+        <details className="vc-clipper-group" open={open} onToggle={e => setOpen(e.currentTarget.open)}>
+            <summary>{title}{note ? <small>{note}</small> : null}</summary>
+            <div className="vc-clipper-group-body">{children}</div>
+        </details>
     );
 }
 
@@ -3142,7 +3443,6 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                 <div className="vc-clipper-head">
                     <div>
                         <h2>Clip studio</h2>
-                        <p>Manage the clip folder, chain clips and videos, trim each one, add effects and captions, render it as a single file.</p>
                     </div>
                     <button className="vc-clipper-close" onClick={onClose} disabled={busy} aria-label="Close">×</button>
                 </div>
@@ -3151,8 +3451,8 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                     <div className="vc-clipper-side vc-clipper-side-left">
                         <h4>Clip library</h4>
 
-                        <button className="vc-clipper-side-clip" disabled={busy} onClick={() => void onImport()}>
-                            Import a video file…
+                        <button className="vc-clipper-side-clip vc-clipper-add" disabled={busy} onClick={() => void onImport()}>
+                            Import a video…
                         </button>
 
                         {!!clips?.length && (
@@ -3213,27 +3513,37 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                 <h4 title={picked}>{picked}</h4>
 
                                 <div className="vc-clipper-side-actions">
-                                    <button className="vc-clipper-primary" disabled={busy} onClick={() => void onAddClip(picked)}>
-                                        Add to the timeline
+                                    <button
+                                        className="vc-clipper-primary"
+                                        disabled={busy}
+                                        title="Put this clip at the end of the timeline"
+                                        onClick={() => void onAddClip(picked)}
+                                    >
+                                        Add
                                     </button>
-                                    <button disabled={busy} onClick={() => void onSend(picked)}>Send to this channel</button>
-                                    <button disabled={busy} onClick={() => void revealClip(picked)}>Show in folder</button>
+                                    <button disabled={busy} title="Attach it to the channel behind the studio" onClick={() => void onSend(picked)}>
+                                        Send
+                                    </button>
+                                    <button disabled={busy} title="Show the file in the folder" onClick={() => void revealClip(picked)}>
+                                        Folder
+                                    </button>
                                     {/\.webm$/i.test(picked) && (
                                         <button
                                             disabled={busy}
                                             title="Discord's player gives no sound on WebM; this re-encodes the clip so it plays in chat"
                                             onClick={() => void onConvert(picked)}
                                         >
-                                            Convert to MP4
+                                            To MP4
                                         </button>
                                     )}
-                                    <button disabled={busy} onClick={() => setRenaming(picked)}>Rename</button>
+                                    <button disabled={busy} title="Rename the file" onClick={() => setRenaming(picked)}>Rename</button>
                                     <button
                                         className={confirmDelete ? "vc-clipper-danger" : ""}
                                         disabled={busy}
+                                        title="Delete the file from the folder"
                                         onClick={() => void onDeleteClip()}
                                     >
-                                        {confirmDelete ? "Delete for good?" : "Delete"}
+                                        {confirmDelete ? "Sure?" : "Delete"}
                                     </button>
                                 </div>
 
@@ -3275,12 +3585,13 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                 </div>
 
                                 <div className="vc-clipper-side-actions">
-                                    <button disabled={busy || !tagging.trim()} onClick={() => void applyCategory(tagging)}>File it</button>
+                                    <button disabled={busy || !tagging.trim()} onClick={() => void applyCategory(tagging)}>File</button>
                                     <button
                                         disabled={busy || categoryOf(picked) === UNCATEGORISED}
+                                        title="Take it out of its category"
                                         onClick={() => void applyCategory("")}
                                     >
-                                        Unfile it
+                                        Unfile
                                     </button>
                                 </div>
                             </div>
@@ -3321,7 +3632,7 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                     else video.pause();
                                 }}
                             >
-                                {playing ? "Pause" : "Play"}
+                                {playing ? "❚❚" : "▶"}
                             </button>
 
                             <input
@@ -3337,93 +3648,133 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                 }}
                             />
 
-                            <span className="vc-clipper-meta">
-                                {formatTime(Math.max(0, playhead.at - (segment?.from ?? 0)))} / {formatTime(segment ? segmentLength(segment) * segment.speed : 0)}
-                                {" - "}{formatTime(projectAt)} in the montage
+                            <span className="vc-clipper-time" title="In the segment / segment length - position in the montage">
+                                <b>{formatTime(Math.max(0, playhead.at - (segment?.from ?? 0)))}</b>
+                                {" / "}{formatTime(segment ? segmentLength(segment) * segment.speed : 0)}
+                                {" · "}{formatTime(projectAt)}
                             </span>
                         </div>
 
-                        {!!segment && (
-                            <VoiceLanes
-                                tracks={lanes}
-                                length={playhead.length}
-                                current={playhead.at}
-                                from={segment.from}
-                                to={segment.to}
-                                onSeek={at => {
-                                    const video = videoRef.current;
-                                    if (video) video.currentTime = at;
-                                }}
-                            />
-                        )}
+                        {/*
+                          * One card, four rows: what is being cut, what is on
+                          * the timeline, what is under it. Four widgets stacked
+                          * with a gap between them read as four tools; sharing a
+                          * background and a label gutter, they read as one.
+                          */}
+                        <div className="vc-clipper-tracks">
+                            <div className="vc-clipper-track">
+                                <span className="vc-clipper-track-label">Cut</span>
 
-                        <AudioTimeline
-                            clips={audioClips}
-                            sources={soundsById}
-                            length={total}
-                            playhead={projectAt}
-                            disabled={busy}
-                            selected={pickedSound}
-                            onChange={patchSound}
-                            onSelect={id => { setPickedSound(id); setTab("audio"); }}
-                            onSeek={seekProject}
-                        />
+                                <div className="vc-clipper-track-body">
+                                    <CutRuler
+                                        segments={project.segments}
+                                        names={rulerNames}
+                                        length={total}
+                                        playhead={projectAt}
+                                        mark={mark}
+                                        selected={selected}
+                                        disabled={busy}
+                                        onMark={setMark}
+                                        onSeek={seekProject}
+                                        onSelect={id => { setSelected(id); setTab("segment"); }}
+                                    />
+                                </div>
 
-                        <CutRuler
-                            segments={project.segments}
-                            names={rulerNames}
-                            length={total}
-                            playhead={projectAt}
-                            mark={mark}
-                            selected={selected}
-                            disabled={busy}
-                            onMark={setMark}
-                            onSeek={seekProject}
-                            onSelect={id => { setSelected(id); setTab("segment"); }}
-                        />
+                                {project.segments.length > 0 && (
+                                    <div className="vc-clipper-ruler-actions">
+                                        {!!mark && (
+                                            <span className="vc-clipper-mark-badge">
+                                                {formatTime(mark.from)}-{formatTime(mark.to)}
+                                            </span>
+                                        )}
 
-                        {project.segments.length > 0 && (
-                            <div className="vc-clipper-ruler-actions">
-                                <span>
-                                    {mark
-                                        ? `Marked ${formatTime(mark.from)} - ${formatTime(mark.to)} (${formatTime(mark.to - mark.from)})`
-                                        : "Drag across the ruler, or press I and O at the playhead, to mark a range"}
-                                </span>
-
-                                <button disabled={busy} onClick={markIn} title="I">Mark in</button>
-                                <button disabled={busy} onClick={markOut} title="O">Mark out</button>
-                                <button className="vc-clipper-danger" disabled={busy || !mark} onClick={() => cutMarked(false)} title="X">
-                                    Cut out
-                                </button>
-                                <button disabled={busy || !mark} onClick={() => cutMarked(true)} title="Shift+X">
-                                    Keep only
-                                </button>
-                                <button disabled={busy || !mark} onClick={() => setMark(null)}>Clear</button>
+                                        <button disabled={busy} onClick={markIn} title="Mark the start of a range (I)">In</button>
+                                        <button disabled={busy} onClick={markOut} title="Mark the end of a range (O)">Out</button>
+                                        <button
+                                            className="vc-clipper-danger"
+                                            disabled={busy || !mark}
+                                            onClick={() => cutMarked(false)}
+                                            title="Cut the marked range out (X)"
+                                        >
+                                            Cut
+                                        </button>
+                                        <button disabled={busy || !mark} onClick={() => cutMarked(true)} title="Throw away everything else (Shift+X)">
+                                            Keep
+                                        </button>
+                                        <button disabled={busy || !mark} onClick={() => setMark(null)} title="Drop the mark">Clear</button>
+                                    </div>
+                                )}
                             </div>
-                        )}
 
-                        <div className="vc-clipper-timeline">
-                            {!project.segments.length && (
-                                <div className="vc-clipper-note">Add a clip on the left to start the timeline.</div>
+                            <div className="vc-clipper-track">
+                                <span className="vc-clipper-track-label">Clips</span>
+
+                                <div className="vc-clipper-track-body">
+                                    <div className="vc-clipper-timeline">
+                                        {!project.segments.length && (
+                                            <span className="vc-clipper-track-empty">Pick a clip on the left to start</span>
+                                        )}
+
+                                        {project.segments.map((s, i) => {
+                                            const name = byId.get(s.sourceId)?.name ?? "?";
+
+                                            return (
+                                                <button
+                                                    key={s.id}
+                                                    className={`vc-clipper-block${s.id === selected ? " vc-clipper-active" : ""}`}
+                                                    style={{ width: `${Math.max(74, (segmentLength(s) / Math.max(1, total)) * 620)}px` }}
+                                                    disabled={busy}
+                                                    title={name}
+                                                    onClick={() => { setSelected(s.id); setTab("segment"); }}
+                                                >
+                                                    <div className="vc-clipper-name">{i + 1}. {name}</div>
+                                                    <small>{formatTime(segmentLength(s))}</small>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {audioClips.length > 0 && (
+                                <div className="vc-clipper-track">
+                                    <span className="vc-clipper-track-label">Sound</span>
+
+                                    <div className="vc-clipper-track-body">
+                                        <AudioTimeline
+                                            clips={audioClips}
+                                            sources={soundsById}
+                                            length={total}
+                                            playhead={projectAt}
+                                            disabled={busy}
+                                            selected={pickedSound}
+                                            onChange={patchSound}
+                                            onSelect={id => { setPickedSound(id); setTab("audio"); }}
+                                            onSeek={seekProject}
+                                        />
+                                    </div>
+                                </div>
                             )}
 
-                            {project.segments.map((s, i) => {
-                                const name = byId.get(s.sourceId)?.name ?? "?";
+                            {!!segment && lanes.length > 0 && (
+                                <div className="vc-clipper-track">
+                                    <span className="vc-clipper-track-label">Voices</span>
 
-                                return (
-                                    <button
-                                        key={s.id}
-                                        className={`vc-clipper-block${s.id === selected ? " vc-clipper-active" : ""}`}
-                                        style={{ width: `${Math.max(74, (segmentLength(s) / Math.max(1, total)) * 620)}px` }}
-                                        disabled={busy}
-                                        title={name}
-                                        onClick={() => { setSelected(s.id); setTab("segment"); }}
-                                    >
-                                        <div className="vc-clipper-name">{i + 1}. {name}</div>
-                                        <small>{formatTime(segmentLength(s))}</small>
-                                    </button>
-                                );
-                            })}
+                                    <div className="vc-clipper-track-body">
+                                        <VoiceLanes
+                                            tracks={lanes}
+                                            length={playhead.length}
+                                            current={playhead.at}
+                                            from={segment.from}
+                                            to={segment.to}
+                                            onSeek={at => {
+                                                const video = videoRef.current;
+                                                if (video) video.currentTime = at;
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <div className="vc-clipper-studio-foot">
@@ -3443,25 +3794,32 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                 </>
                             )}
 
-                            <button disabled={busy || !depth.past} onClick={undo} title="Ctrl+Z">Undo</button>
-                            <button disabled={busy || !depth.future} onClick={redo} title="Ctrl+Shift+Z">Redo</button>
-                            <button className="vc-clipper-danger" disabled={busy || !project.segments.length} onClick={clearProject}>
-                                New project
+                            <button disabled={busy || !depth.past} onClick={undo} title="Undo (Ctrl+Z)">Undo</button>
+                            <button disabled={busy || !depth.future} onClick={redo} title="Redo (Ctrl+Shift+Z)">Redo</button>
+                            <button
+                                className="vc-clipper-danger"
+                                disabled={busy || !project.segments.length}
+                                title="Empty the timeline and start over"
+                                onClick={clearProject}
+                            >
+                                New
                             </button>
 
-                            <span className="vc-clipper-meta">
-                                {project.segments.length} segment{project.segments.length === 1 ? "" : "s"} - {project.captions.length} caption{project.captions.length === 1 ? "" : "s"} - about {formatBytes(estimatedSize(project))}, rendered in real time
+                            <span className="vc-clipper-meta" title="Segments, captions and the size the render should land at. It runs in real time.">
+                                {project.segments.length} seg · {project.captions.length} cap · ~{formatBytes(estimatedSize(project))}
                             </span>
                         </div>
                     </div>
 
                     <div className="vc-clipper-side">
                         <div className="vc-clipper-tabs">
-                            <button className={tab === "segment" ? "vc-clipper-active" : ""} onClick={() => setTab("segment")}>Segment</button>
-                            <button className={tab === "captions" ? "vc-clipper-active" : ""} onClick={() => setTab("captions")}>Captions</button>
-                            <button className={tab === "audio" ? "vc-clipper-active" : ""} onClick={() => setTab("audio")}>Audio</button>
-                            <button className={tab === "images" ? "vc-clipper-active" : ""} onClick={() => setTab("images")}>Images</button>
-                            <button className={tab === "output" ? "vc-clipper-active" : ""} onClick={() => setTab("output")}>Output</button>
+                            <div className="vc-clipper-tab-strip">
+                                <button className={tab === "segment" ? "vc-clipper-active" : ""} onClick={() => setTab("segment")}>Segment</button>
+                                <button className={tab === "captions" ? "vc-clipper-active" : ""} onClick={() => setTab("captions")}>Captions</button>
+                                <button className={tab === "audio" ? "vc-clipper-active" : ""} onClick={() => setTab("audio")}>Audio</button>
+                                <button className={tab === "images" ? "vc-clipper-active" : ""} onClick={() => setTab("images")}>Images</button>
+                                <button className={tab === "output" ? "vc-clipper-active" : ""} onClick={() => setTab("output")}>Output</button>
+                            </div>
                         </div>
 
                         {tab === "segment" && !segment && <div className="vc-clipper-note">Pick a segment on the timeline.</div>}
@@ -3470,127 +3828,161 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                             <>
                                 <h4>{source?.name ?? "Segment"}</h4>
 
-                                <div className="vc-clipper-field">
-                                    <label><span>Start</span><span>{formatTime(segment.from)}</span></label>
-                                    <div className="vc-clipper-row">
-                                        <button disabled={busy} onClick={() => patchSegment(segment.id, { from: Math.min(videoRef.current?.currentTime ?? 0, segment.to - 0.2) })}>
-                                            From the playhead
-                                        </button>
-                                        <button disabled={busy} onClick={() => patchSegment(segment.id, { from: Math.max(0, segment.from - 0.5) })}>-0.5</button>
-                                        <button disabled={busy} onClick={() => patchSegment(segment.id, { from: Math.min(segment.to - 0.2, segment.from + 0.5) })}>+0.5</button>
-                                    </div>
-                                </div>
-
-                                <div className="vc-clipper-field">
-                                    <label><span>End</span><span>{formatTime(segment.to)}</span></label>
-                                    <div className="vc-clipper-row">
-                                        <button disabled={busy} onClick={() => patchSegment(segment.id, { to: Math.max(videoRef.current?.currentTime ?? 0, segment.from + 0.2) })}>
-                                            From the playhead
-                                        </button>
-                                        <button disabled={busy} onClick={() => patchSegment(segment.id, { to: Math.max(segment.from + 0.2, segment.to - 0.5) })}>-0.5</button>
-                                        <button disabled={busy} onClick={() => patchSegment(segment.id, { to: segment.to + 0.5 })}>+0.5</button>
-                                    </div>
-                                </div>
-
-                                {!!source && !!meta[source.name]?.markers?.length && (
+                                <Group title="Trim" note={formatTime(segmentLength(segment))} start>
                                     <div className="vc-clipper-field">
-                                        <label>
-                                            <span>Markers</span>
-                                            <span>click to seek, shift to cut there</span>
-                                        </label>
-                                        <div className="vc-clipper-row vc-clipper-markers">
-                                            {meta[source.name]!.markers!.map((at, i) => (
-                                                <button
-                                                    key={`${at}-${i}`}
-                                                    disabled={busy}
-                                                    title={`Marker ${i + 1} at ${formatTime(at)}`}
-                                                    onClick={e => {
-                                                        if (e.shiftKey) {
-                                                            patchSegment(segment.id, {
-                                                                from: Math.min(at, segment.to - 0.2)
-                                                            });
-                                                            return;
-                                                        }
-
-                                                        const video = videoRef.current;
-                                                        if (video) video.currentTime = at;
-                                                    }}
-                                                >
-                                                    {formatTime(at)}
-                                                </button>
-                                            ))}
+                                        <label><span>Start</span><span>{formatTime(segment.from)}</span></label>
+                                        <div className="vc-clipper-row">
+                                            <button
+                                                disabled={busy}
+                                                title="Start the segment at the playhead"
+                                                onClick={() => patchSegment(segment.id, { from: Math.min(videoRef.current?.currentTime ?? 0, segment.to - 0.2) })}
+                                            >
+                                                Here
+                                            </button>
+                                            <button disabled={busy} onClick={() => patchSegment(segment.id, { from: Math.max(0, segment.from - 0.5) })}>-0.5</button>
+                                            <button disabled={busy} onClick={() => patchSegment(segment.id, { from: Math.min(segment.to - 0.2, segment.from + 0.5) })}>+0.5</button>
                                         </div>
                                     </div>
-                                )}
 
-                                {slider("Speed", segment.speed, 0.25, 4, 0.25, v => patchSegment(segment.id, { speed: v }, "speed"), "x")}
+                                    <div className="vc-clipper-field">
+                                        <label><span>End</span><span>{formatTime(segment.to)}</span></label>
+                                        <div className="vc-clipper-row">
+                                            <button
+                                                disabled={busy}
+                                                title="End the segment at the playhead"
+                                                onClick={() => patchSegment(segment.id, { to: Math.max(videoRef.current?.currentTime ?? 0, segment.from + 0.2) })}
+                                            >
+                                                Here
+                                            </button>
+                                            <button disabled={busy} onClick={() => patchSegment(segment.id, { to: Math.max(segment.from + 0.2, segment.to - 0.5) })}>-0.5</button>
+                                            <button disabled={busy} onClick={() => patchSegment(segment.id, { to: segment.to + 0.5 })}>+0.5</button>
+                                        </div>
+                                    </div>
 
-                                {segment.speed !== 1 && (
+                                    {!!source && !!meta[source.name]?.markers?.length && (
+                                        <div className="vc-clipper-field">
+                                            <label>
+                                                <span>Markers</span>
+                                                <span title="Click a marker to jump there, shift-click to start the segment there">click, shift to cut</span>
+                                            </label>
+                                            <div className="vc-clipper-row vc-clipper-markers">
+                                                {meta[source.name]!.markers!.map((at, i) => (
+                                                    <button
+                                                        key={`${at}-${i}`}
+                                                        disabled={busy}
+                                                        title={`Marker ${i + 1} at ${formatTime(at)}`}
+                                                        onClick={e => {
+                                                            if (e.shiftKey) {
+                                                                patchSegment(segment.id, {
+                                                                    from: Math.min(at, segment.to - 0.2)
+                                                                });
+                                                                return;
+                                                            }
+
+                                                            const video = videoRef.current;
+                                                            if (video) video.currentTime = at;
+                                                        }}
+                                                    >
+                                                        {formatTime(at)}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </Group>
+
+                                <Group title="Speed and sound" note={`${segment.speed}x · ${Math.round(segment.volume * 100)}%`} start>
+                                    {slider("Speed", segment.speed, 0.25, 4, 0.25, v => patchSegment(segment.id, { speed: v }, "speed"), "x")}
+
+                                    {segment.speed !== 1 && (
+                                        <div className="vc-clipper-field">
+                                            <label>
+                                                <span>Keep the voices natural</span>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={segment.pitch !== false}
+                                                    disabled={busy}
+                                                    onChange={e => patchSegment(segment.id, { pitch: e.currentTarget.checked })}
+                                                />
+                                            </label>
+                                            <small>Off gives the chipmunk when sped up, the drawl when slowed down.</small>
+                                        </div>
+                                    )}
+
+                                    {slider("Volume", Math.round(segment.volume * 100), 0, 100, 5, v => patchSegment(segment.id, { volume: v / 100 }, "volume"), "%")}
+                                </Group>
+
+                                <Group title="Look">
+                                    {slider("Brightness", segment.effects.brightness, 20, 200, 5, v => patchEffects(segment.id, { brightness: v }, "brightness"), "%")}
+                                    {slider("Contrast", segment.effects.contrast, 20, 200, 5, v => patchEffects(segment.id, { contrast: v }, "contrast"), "%")}
+                                    {slider("Saturation", segment.effects.saturate, 0, 300, 5, v => patchEffects(segment.id, { saturate: v }, "saturate"), "%")}
+                                    {slider("Black and white", segment.effects.grayscale, 0, 100, 5, v => patchEffects(segment.id, { grayscale: v }, "grayscale"), "%")}
+                                    {slider("Blur", segment.effects.blur, 0, 20, 1, v => patchEffects(segment.id, { blur: v }, "blur"), "px")}
+                                    {slider("Zoom", segment.effects.zoom, 1, 3, 0.05, v => patchEffects(segment.id, { zoom: v }, "zoom"), "x")}
+
                                     <div className="vc-clipper-field">
                                         <label>
-                                            <span>Keep the voices natural</span>
+                                            <span>Mirror the image</span>
                                             <input
                                                 type="checkbox"
-                                                checked={segment.pitch !== false}
+                                                checked={segment.effects.flip}
                                                 disabled={busy}
-                                                onChange={e => patchSegment(segment.id, { pitch: e.currentTarget.checked })}
+                                                onChange={e => patchEffects(segment.id, { flip: e.currentTarget.checked })}
                                             />
                                         </label>
-                                        <small>Off gives the chipmunk when sped up, the drawl when slowed down.</small>
                                     </div>
-                                )}
+                                </Group>
 
-                                {slider("Volume", Math.round(segment.volume * 100), 0, 100, 5, v => patchSegment(segment.id, { volume: v / 100 }, "volume"), "%")}
+                                <Group title="Fades">
+                                    {slider("Fade in", segment.effects.fadeIn, 0, 3, 0.1, v => patchEffects(segment.id, { fadeIn: v }, "fadeIn"), "s")}
+                                    {slider("Fade out", segment.effects.fadeOut, 0, 3, 0.1, v => patchEffects(segment.id, { fadeOut: v }, "fadeOut"), "s")}
+                                </Group>
 
-                                <h4>Effects</h4>
-                                {slider("Brightness", segment.effects.brightness, 20, 200, 5, v => patchEffects(segment.id, { brightness: v }, "brightness"), "%")}
-                                {slider("Contrast", segment.effects.contrast, 20, 200, 5, v => patchEffects(segment.id, { contrast: v }, "contrast"), "%")}
-                                {slider("Saturation", segment.effects.saturate, 0, 300, 5, v => patchEffects(segment.id, { saturate: v }, "saturate"), "%")}
-                                {slider("Black and white", segment.effects.grayscale, 0, 100, 5, v => patchEffects(segment.id, { grayscale: v }, "grayscale"), "%")}
-                                {slider("Blur", segment.effects.blur, 0, 20, 1, v => patchEffects(segment.id, { blur: v }, "blur"), "px")}
-                                {slider("Zoom", segment.effects.zoom, 1, 3, 0.05, v => patchEffects(segment.id, { zoom: v }, "zoom"), "x")}
-                                {slider("Fade in", segment.effects.fadeIn, 0, 3, 0.1, v => patchEffects(segment.id, { fadeIn: v }, "fadeIn"), "s")}
-                                {slider("Fade out", segment.effects.fadeOut, 0, 3, 0.1, v => patchEffects(segment.id, { fadeOut: v }, "fadeOut"), "s")}
-
-                                <div className="vc-clipper-field">
-                                    <label>
-                                        <span>Mirror the image</span>
-                                        <input
-                                            type="checkbox"
-                                            checked={segment.effects.flip}
+                                <Group title="Arrange" start>
+                                    <div className="vc-clipper-row">
+                                        <button disabled={busy} title="Play this segment from its start (space)" onClick={playSegment}>Play</button>
+                                        <button
                                             disabled={busy}
-                                            onChange={e => patchEffects(segment.id, { flip: e.currentTarget.checked })}
-                                        />
-                                    </label>
-                                </div>
+                                            title="Trim back to the whole file"
+                                            onClick={() => patchSegment(segment.id, { from: 0, to: Math.max(0.2, videoRef.current?.duration || segment.to) })}
+                                        >
+                                            Full clip
+                                        </button>
+                                        <button disabled={busy} title="Split at the playhead (S)" onClick={split}>Split</button>
+                                    </div>
 
-                                <div className="vc-clipper-row" style={{ marginBottom: "6px" }}>
-                                    <button disabled={busy} onClick={playSegment}>Play the segment</button>
-                                    <button disabled={busy} onClick={() => patchSegment(segment.id, { from: 0, to: Math.max(0.2, videoRef.current?.duration || segment.to) })}>
-                                        Whole file
-                                    </button>
-                                </div>
+                                    <div className="vc-clipper-row">
+                                        <button disabled={busy} title="Move it one place earlier" onClick={() => move(segment.id, -1)}>Earlier</button>
+                                        <button disabled={busy} title="Move it one place later" onClick={() => move(segment.id, 1)}>Later</button>
+                                        <button disabled={busy} title="Copy it in place (D)" onClick={() => duplicate(segment.id)}>Duplicate</button>
+                                    </div>
 
-                                <div className="vc-clipper-row">
-                                    <button disabled={busy} onClick={() => move(segment.id, -1)}>Move left</button>
-                                    <button disabled={busy} onClick={() => move(segment.id, 1)}>Move right</button>
-                                </div>
-                                <div className="vc-clipper-row" style={{ marginTop: "6px" }}>
-                                    <button disabled={busy} onClick={split}>Split here</button>
-                                    <button disabled={busy} onClick={() => duplicate(segment.id)}>Duplicate</button>
-                                    <button className="vc-clipper-danger" disabled={busy} onClick={() => remove(segment.id)}>Remove</button>
-                                </div>
-                                <div className="vc-clipper-row" style={{ marginTop: "6px" }}>
-                                    <button disabled={busy} onClick={() => patchEffects(segment.id, { ...DEFAULT_EFFECTS })}>Reset the effects</button>
-                                    <button disabled={busy} onClick={() => void onSaveFrame()}>Save the frame</button>
-                                </div>
+                                    <div className="vc-clipper-row">
+                                        <button
+                                            disabled={busy}
+                                            title="Put every effect back to its default"
+                                            onClick={() => patchEffects(segment.id, { ...DEFAULT_EFFECTS })}
+                                        >
+                                            Reset look
+                                        </button>
+                                        <button disabled={busy} title="Save this frame as a picture" onClick={() => void onSaveFrame()}>Save frame</button>
+                                        <button
+                                            className="vc-clipper-danger"
+                                            disabled={busy}
+                                            title="Take this segment off the timeline (Delete)"
+                                            onClick={() => remove(segment.id)}
+                                        >
+                                            Remove
+                                        </button>
+                                    </div>
+                                </Group>
                             </>
                         )}
 
                         {tab === "captions" && (
                             <>
-                                <button className="vc-clipper-side-clip" disabled={busy} onClick={addCaption}>
-                                    Add a caption at the playhead
+                                <button className="vc-clipper-side-clip vc-clipper-add" disabled={busy} onClick={addCaption}>
+                                    Add a caption here
                                 </button>
 
                                 {!project.captions.length && <div className="vc-clipper-note">No caption yet.</div>}
@@ -3692,31 +4084,29 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                         </div>
 
                                         {voiceMix?.exact ? (
-                                            <div className="vc-clipper-note">
-                                                This clip was recorded by Discord's own engine, which kept every person
-                                                on a track of their own and the game on another. So a level here moves
-                                                that person and nobody else, and a mute leaves them out of the mix
-                                                entirely: the others carry on talking over the hole where they were,
-                                                and the game never dips. Nothing is estimated and nothing is ducked.
-                                            </div>
+                                            <Hint summary="One track per person - a mute is exact">
+                                                Discord's own engine recorded this clip, and it kept every person on a
+                                                track of their own with the game on another. A level here moves that
+                                                person and nobody else; a mute leaves them out of the mix entirely, the
+                                                others carrying on over the hole where they were. Nothing is estimated
+                                                and nothing is ducked.
+                                            </Hint>
                                         ) : (
-                                            <div className="vc-clipper-note">
-                                                The call reached this client already mixed - one signal, everybody summed
-                                                into it - so a level here can only turn the whole montage up or down while
-                                                a given person is making noise. A mute is therefore absolute: wherever that
-                                                person can be heard the sound is cut, so they are not in the clip once, and
-                                                anybody talking across them loses those instants too. The percentage next to
-                                                a mute is how much of the clip goes with them, so the price is visible
-                                                before you render. Clips recorded with the native engine on - the setting
-                                                is in the plugin's settings - keep one track per person instead, and there
-                                                a mute costs nobody else anything.
-                                            </div>
+                                            <Hint summary="One mixed track - a mute costs the others">
+                                                The call reached this client already mixed, everybody summed into one
+                                                signal, so a level here can only move the whole montage while that
+                                                person is making noise. A mute is absolute: wherever they can be heard
+                                                the sound is cut, and anybody talking across them loses those instants
+                                                too. The percentage beside a mute is how much of the clip goes with
+                                                them. Turn the native engine on in the plugin's settings and a
+                                                recording keeps one track per person, where a mute costs nobody else
+                                                anything.
+                                            </Hint>
                                         )}
 
                                         {separating >= 0 && (
                                             <div className="vc-clipper-note">
-                                                Separating the voices, {Math.round(separating * 100)}% - the preview picks
-                                                it up as soon as it is done.
+                                                Separating the voices, {Math.round(separating * 100)}%…
                                             </div>
                                         )}
 
@@ -3768,17 +4158,14 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                             clip with a track per person it costs nothing - the mute drops that
                                             track and the call carries on - so the warning is only for the rest. */}
                                         {!voiceMix?.exact && Object.values(project.voiceLevels ?? {}).some(v => v === 0) && (
-                                            <div className="vc-clipper-note">
-                                                This clip was recorded as one mixed signal, so a mute works on the band
-                                                a voice lives in rather than on the whole soundtrack: wherever the muted
-                                                person is talking their voice drops out of the clip, and the game, the
-                                                music and the low end carry on at full volume. What it cannot do is tell
-                                                two voices apart - two people talking at once are literally the same
-                                                samples - so anybody talking across the muted person sounds muffled for
-                                                those instants. A recording with one track per person - the native
-                                                engine, in the plugin's settings - mutes exactly and leaves every other
-                                                voice untouched.
-                                            </div>
+                                            <Hint summary="What this mute costs">
+                                                The mute works on the band that voice lives in, not on the whole
+                                                soundtrack: the game, the music and the low end carry on at full
+                                                volume while the muted person drops out. What it cannot do is tell two
+                                                voices apart - two people talking at once are literally the same
+                                                samples - so anybody talking across them sounds muffled for those
+                                                instants.
+                                            </Hint>
                                         )}
 
                                         <div className="vc-clipper-field">
@@ -3791,26 +4178,21 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                                     onChange={e => { const showSpeakers = e.currentTarget.checked; commit(p => ({ ...p, showSpeakers })); }}
                                                 />
                                             </label>
-                                        </div>
-
-                                        <div className="vc-clipper-note">
-                                            Their avatar and name are painted in the top-left corner of the frame while they
-                                            speak, in the preview and in the render alike.
+                                            <small>Avatar and name in the corner of the frame while they speak.</small>
                                         </div>
                                     </>
                                 )}
 
-                                <button className="vc-clipper-side-clip" disabled={busy} onClick={() => void onImportSound()}>
-                                    Add a sound at the playhead…
+                                <button className="vc-clipper-side-clip vc-clipper-add" disabled={busy} onClick={() => void onImportSound()}>
+                                    Add a sound here…
                                 </button>
 
                                 <Shelf kind="sound" items={shelf} busy={busy} onPlace={placeAsset} onForget={forgetAsset} />
 
                                 {!audioClips.length && (
                                     <div className="vc-clipper-note">
-                                        No sound on the timeline. Add one and it lands where the playhead is; drag it on the
-                                        lane under the preview to move it, drag an edge to trim it, or park the playhead and
-                                        cut it there.
+                                        No sound yet. One lands at the playhead, then moves and trims on the lane
+                                        under the picture.
                                     </div>
                                 )}
 
@@ -3877,19 +4259,19 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                             </div>
 
                                             <div className="vc-clipper-caption-row">
-                                                <button disabled={busy || !inside} onClick={() => cutSound(clip, "start")}>
-                                                    Cut start here
+                                                <button disabled={busy || !inside} title="Trim the start up to the playhead" onClick={() => cutSound(clip, "start")}>
+                                                    Cut start
                                                 </button>
-                                                <button disabled={busy || !inside} onClick={() => cutSound(clip, "end")}>
-                                                    Cut end here
+                                                <button disabled={busy || !inside} title="Trim the end back to the playhead" onClick={() => cutSound(clip, "end")}>
+                                                    Cut end
                                                 </button>
-                                                <button disabled={busy || !inside} onClick={() => splitSound(clip)}>
-                                                    Split here
+                                                <button disabled={busy || !inside} title="Split it in two at the playhead" onClick={() => splitSound(clip)}>
+                                                    Split
                                                 </button>
                                             </div>
 
                                             <div className="vc-clipper-caption-row">
-                                                <button disabled={busy} onClick={() => patchSound(clip.id, { at: projectTime() })}>
+                                                <button disabled={busy} title="Move it to the playhead" onClick={() => patchSound(clip.id, { at: projectTime() })}>
                                                     Move here
                                                 </button>
                                                 <button disabled={busy} onClick={() => patchSound(clip.id, { muted: !clip.muted })}>
@@ -3903,9 +4285,7 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                     );
                                 })}
 
-                                <div className="vc-clipper-note">
-                                    The sliders below balance what goes into a new recording, not what is on this timeline.
-                                </div>
+                                <h4 title="These balance what goes into a new recording, not what is on this timeline">Recording mixer</h4>
 
                                 <div className="vc-clipper-mixer">
                                     <AudioMixerInput compact />
@@ -3915,19 +4295,19 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
 
                         {tab === "images" && (
                             <>
-                                <button className="vc-clipper-side-clip" disabled={busy} onClick={() => void onImportImage()}>
-                                    Add a picture or a clip at the playhead…
+                                <button className="vc-clipper-side-clip vc-clipper-add" disabled={busy} onClick={() => void onImportImage()}>
+                                    Add a picture or a clip here…
                                 </button>
 
                                 <Shelf kind="image" items={shelf} busy={busy} onPlace={placeAsset} onForget={forgetAsset} />
 
                                 {!overlays.length && (
-                                    <div className="vc-clipper-note">
-                                        Nothing over the picture yet. A PNG, a GIF or a short MP4 all work, and the
-                                        moving ones play while the montage does. Add one and it lands in the middle of the frame for
-                                        {" "}{OVERLAY_SECONDS} seconds from the playhead; drag it on the preview to move it,
-                                        and set how long it stays with the two buttons under it.
-                                    </div>
+                                    <Hint summary="Nothing over the picture yet">
+                                        A PNG, a GIF or a short MP4 all work, and the moving ones play while the
+                                        montage does. One lands in the middle of the frame for {OVERLAY_SECONDS}
+                                        {" "}seconds from the playhead; drag it on the preview to move it, and the
+                                        two buttons under it set how long it stays.
+                                    </Hint>
                                 )}
 
                                 {overlays.map(overlay => {
@@ -4064,12 +4444,14 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                             <div className="vc-clipper-caption-row">
                                                 <button
                                                     disabled={busy}
+                                                    title="Start showing it at the playhead"
                                                     onClick={() => patchOverlay(overlay.id, { from: Math.min(projectTime(), overlay.to - 0.2) })}
                                                 >
                                                     Starts here
                                                 </button>
                                                 <button
                                                     disabled={busy}
+                                                    title="Stop showing it at the playhead"
                                                     onClick={() => patchOverlay(overlay.id, { to: Math.max(projectTime(), overlay.from + 0.2) })}
                                                 >
                                                     Ends here
@@ -4082,10 +4464,10 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                     );
                                 })}
 
-                                <div className="vc-clipper-note">
-                                    Sizes and positions are kept as a share of the frame, so a montage laid out on this
-                                    preview comes out the same whether it is rendered at 720p or at 1080p.
-                                </div>
+                                <Hint summary="Laid out here, the same at any size">
+                                    Sizes and positions are kept as a share of the frame, so a montage laid out on
+                                    this preview comes out the same whether it is rendered at 720p or at 1080p.
+                                </Hint>
                             </>
                         )}
 
@@ -4125,13 +4507,19 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                     </label>
                                 </div>
 
-                                <div className="vc-clipper-note">
-                                    The render plays the whole timeline through the encoder, so it takes about {formatTime(total)} and lands next to your clips, weighing roughly {formatBytes(estimatedSize(project))}. The bitrate and the container follow the plugin settings. Keep the window visible while it runs: a hidden window stops painting frames and the sound drifts away from the picture.
-                                </div>
+                                <Hint summary={`About ${formatTime(total)} to render, roughly ${formatBytes(estimatedSize(project))}`}>
+                                    The render plays the whole timeline through the encoder in real time and lands
+                                    next to your clips. The bitrate and the container follow the plugin settings.
+                                    Keep the window visible while it runs: a hidden one stops painting frames and the
+                                    sound drifts away from the picture.
+                                </Hint>
 
-                                <div className="vc-clipper-note">
-                                    Shortcuts: space plays the segment, S splits it, D duplicates it, Delete removes it, arrows step the playhead, Ctrl+Z and Ctrl+Shift+Z walk the edits, Esc closes the studio. The timeline is kept when you close it and comes back on the next opening.
-                                </div>
+                                <Hint summary="Shortcuts">
+                                    Space plays the segment, S splits it, D duplicates it, Delete removes it, I and O
+                                    mark a range and X cuts it, arrows step the playhead, Ctrl+Z and Ctrl+Shift+Z
+                                    walk the edits, Esc closes the studio. The timeline is kept when you close it and
+                                    comes back on the next opening.
+                                </Hint>
                             </>
                         )}
                     </div>

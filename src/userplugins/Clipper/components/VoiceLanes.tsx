@@ -71,7 +71,7 @@ function Lane({ track, length, current, from, to, onSeek }: {
         <div className="vc-clipper-lane">
             <div className="vc-clipper-lane-name" title={track.name}>{track.name}</div>
 
-            <div className="vc-clipper-lane-track" onClick={pick}>
+            <div className="vc-clipper-lane-track" title="Click to jump there" onClick={pick}>
                 {/* The part of the source the segment actually keeps. */}
                 <div
                     className="vc-clipper-lane-kept"
@@ -122,11 +122,6 @@ export function VoiceLanes({ tracks, length, current, from, to, onSeek }: {
 
     return (
         <div className="vc-clipper-lanes">
-            <div className="vc-clipper-lanes-head">
-                <span>Voices</span>
-                <span>{tracks.length} in the call - click a lane to jump there</span>
-            </div>
-
             {tracks.map(track => (
                 <Lane
                     key={track.id}

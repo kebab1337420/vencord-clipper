@@ -90,6 +90,45 @@ function forgetBroken(): void {
     brokenLoaded = true;
     brokenEncoders.clear();
     settings.store.brokenEncoders = { build: clientBuild(), mimes: [] };
+    forgetRelayOnly();
+}
+
+/**
+ * Containers whose encoder only works on a capture redrawn into a canvas.
+ *
+ * A hardware H.264 encoder handed the compositor's own frames is the
+ * arrangement that dies with `EncodingError - The given encoder configuration
+ * is not supported by the encoder`, while the same encoder takes a canvas
+ * without a word. Once the canvas has been shown to work here, going the direct
+ * way again at the next launch buys nothing: it costs a dead encoder, a red
+ * line in the console and the first seconds of the buffer, every single time.
+ *
+ * Remembered against the client build like the broken list above, so a client
+ * or driver update tries the direct way once more - and cleared with it when
+ * the user starts the buffer by hand.
+ */
+const relayEncoders = new Set<string>();
+let relayLoaded = false;
+
+function knownRelayOnly(): Set<string> {
+    if (relayLoaded) return relayEncoders;
+    relayLoaded = true;
+
+    const stored = settings.store.relayEncoders as { build?: string; mimes?: string[]; } | undefined;
+    if (stored?.build === clientBuild()) for (const mime of stored.mimes ?? []) relayEncoders.add(mime);
+
+    return relayEncoders;
+}
+
+function rememberRelayOnly(mime: string): void {
+    knownRelayOnly().add(mime);
+    settings.store.relayEncoders = { build: clientBuild(), mimes: [...relayEncoders] };
+}
+
+function forgetRelayOnly(): void {
+    relayLoaded = true;
+    relayEncoders.clear();
+    settings.store.relayEncoders = { build: clientBuild(), mimes: [] };
 }
 
 /** H.264 encoders take an even width and an even height, and nothing else. */
@@ -328,6 +367,27 @@ class ClipRecorder {
             // Everything is broken, which is not the same as nothing being
             // supported: better to try the whole list again than to refuse.
             if (!this.mimeChain.length) this.mimeChain = mimeTypeChain(container);
+
+            /*
+             * Onto the canvas before anything is armed, when the direct way is
+             * known to fail here: what died once dies again, and it dies after
+             * the buffer has started, so the retry costs the first seconds of
+             * footage on top of the noise.
+             */
+            const direct = this.mimeChain[this.mimeIndex];
+            if (direct && knownRelayOnly().has(direct)) {
+                const relayed = await this.buildRelay();
+
+                if (mine !== this.generation) {
+                    this.cleanup();
+                    return false;
+                }
+
+                if (relayed) {
+                    this.recordStream = relayed;
+                    logger.info(`Arming ${direct} through a canvas, which is what worked here last time`);
+                }
+            }
 
             if (!this.armEncoder()) throw new Error("This client can encode neither MP4 nor WebM");
 
@@ -667,7 +727,13 @@ class ClipRecorder {
         const detail = [raised?.name, raised?.message].filter(Boolean).join(" - ");
         const failed = this.mimeType;
 
-        logger.error(`The ${failed} encoder failed${detail ? `: ${detail}` : ""}`, event);
+        // The capture outliving the encoder is what the fallbacks below are
+        // for, and they turn this into a container change nobody has to act on.
+        // Shouting about it in red read as a plugin that had just broken.
+        const captureAlive = this.recordStream?.getVideoTracks()[0]?.readyState === "live";
+        const report = captureAlive ? logger.warn : logger.error;
+
+        report.call(logger, `The ${failed} encoder failed${detail ? `: ${detail}` : ""}`, event);
 
         try {
             if (this.recorder && this.recorder.state !== "inactive") this.recorder.stop();
@@ -681,7 +747,7 @@ class ClipRecorder {
         // Nothing to fall back onto while the capture itself is gone: the
         // picture is what the buffer is for, and without it there is no clip to
         // keep whatever the container.
-        if (this.recordStream?.getVideoTracks()[0]?.readyState !== "live") {
+        if (!captureAlive) {
             toast(`Clip buffer stopped: the ${extensionFor(failed).toUpperCase()} encoder failed${detail ? ` (${detail})` : ""}`, Toasts.Type.FAILURE);
             this.stop();
             return;
@@ -731,6 +797,7 @@ class ClipRecorder {
                 // The footage they pointed at was written by the dead encoder.
                 this.marks = [];
 
+                rememberRelayOnly(mime);
                 logger.info(`The ${mime} encoder took the capture through a canvas`);
                 return;
             }

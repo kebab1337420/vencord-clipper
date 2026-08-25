@@ -62,6 +62,15 @@ export const settings = definePluginSettings({
         type: OptionType.CUSTOM,
         default: {}
     },
+    /*
+     * Containers whose encoder works here only on a capture redrawn into a
+     * canvas, against the build that needed it: `{ build, mimes }`. Same shape
+     * and same owner as the list above.
+     */
+    relayEncoders: {
+        type: OptionType.CUSTOM,
+        default: {}
+    },
     includeMic: {
         type: OptionType.CUSTOM,
         default: false

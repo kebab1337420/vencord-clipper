@@ -186,10 +186,23 @@ export const settings = definePluginSettings({
  * rather than fail to arm the buffer at all.
  */
 export function pickMimeType(container: string): string {
-    const others = [Container.Mp4H264, Container.WebmVp9, Container.WebmVp8].filter(c => c !== container);
-    const candidates = [container, ...others].flatMap(mimeCandidates);
+    return mimeTypeChain(container)[0] ?? "";
+}
 
-    return candidates.find(t => MediaRecorder.isTypeSupported(t)) ?? "";
+/**
+ * Every mime type this client says it can take, the configured one first.
+ *
+ * `isTypeSupported` is a claim, not a guarantee: a Chromium that answers yes to
+ * H.264 still fails at the first frame when the hardware encoder behind it is
+ * broken, which a driver or a client update is enough to do. The buffer keeps
+ * the whole list so a dead encoder costs the clip its container rather than
+ * costing the user their buffer.
+ */
+export function mimeTypeChain(container: string): string[] {
+    const others = [Container.Mp4H264, Container.WebmVp9, Container.WebmVp8].filter(c => c !== container);
+    const candidates = [...new Set([container, ...others].flatMap(mimeCandidates))];
+
+    return candidates.filter(t => MediaRecorder.isTypeSupported(t));
 }
 
 /** Resolves the configured container to a list of mime types, best first. */

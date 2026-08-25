@@ -25,7 +25,7 @@ import type { CaptureSource } from "./native";
 import { arm, canRecord, disarm, goLiveActive, nativeAvailability, saveNativeClip, setRecordUser, watchRecording } from "./nativeClips";
 import { hasVideoTrack } from "./nativeTracks";
 import { clipLength, repairClip, trimClip } from "./repair";
-import { extensionFor, pickMimeType, settings } from "./settings";
+import { extensionFor, mimeTypeChain, settings } from "./settings";
 import { writeThumbnail } from "./thumbnail";
 import { formatBytes, timestampName } from "./utils";
 import { shiftTracks, toMeta, voiceActivity, type VoiceFileMeta, voiceParticipants,type VoiceTrack } from "./voice";
@@ -45,6 +45,18 @@ interface TimedChunk {
 const TIMESLICE = 1000;
 
 type Listener = (state: RecorderState) => void;
+
+/**
+ * Containers whose encoder failed in this session.
+ *
+ * `MediaRecorder.isTypeSupported` speaks for the build, not for the machine: a
+ * Chromium that claims H.264 still dies on the first frame when the encoder
+ * behind it is broken, and a client or driver update is enough to break it. What
+ * failed once here fails every time, so it is skipped from then on rather than
+ * costing a dead buffer at every start. Kept for the session only - a restart is
+ * exactly when the answer might have changed.
+ */
+const brokenEncoders = new Set<string>();
 
 /** What the last save produced, enough to cut it down or send it somewhere. */
 export interface SavedClip {
@@ -120,6 +132,19 @@ class ClipRecorder {
 
     /** Resolved by the next chunk, used to flush the recorder before a save. */
     private nextChunk: (() => void) | null = null;
+
+    /**
+     * The containers left to try, best first, and where in that list we are.
+     *
+     * An encoder that fails takes its own container out of the running and the
+     * next one is armed on the same capture, so a broken H.264 costs the clip
+     * its container instead of costing the user their buffer.
+     */
+    private mimeChain: string[] = [];
+    private mimeIndex = 0;
+
+    /** The stream being encoded, kept so a failed encoder can be re-armed on it. */
+    private recordStream: MediaStream | null = null;
 
     private listeners = new Set<Listener>();
 
@@ -208,7 +233,7 @@ class ClipRecorder {
         const mine = this.generation;
 
         try {
-            const { fps, resolution, videoBitrate, audioBitrate, container } = settings.store;
+            const { fps, resolution, container } = settings.store;
 
             const stream = await acquireStream(fps, resolution);
 
@@ -237,39 +262,21 @@ class ClipRecorder {
             const tracks = [videoTrack, audioTrack].filter(Boolean) as MediaStreamTrack[];
             const recordStream = new MediaStream(tracks);
 
-            this.mimeType = pickMimeType(container);
-            if (!this.mimeType) throw new Error("This client can encode neither MP4 nor WebM");
-
             /*
-             * One keyframe per timeslice.
-             *
-             * Without it the encoder places keyframes where it likes, which on
-             * Chromium's H.264 is several seconds apart. A clip cut out of the
-             * buffer has to start on one - everything before the first keyframe
-             * is undecodable and gets dropped by the repair - so a buffer asked
-             * for ten seconds was handing back three. Chromium reads this option
-             * from Chrome 111; older builds ignore it and fall back on the guard
-             * in the repair.
+             * The containers this client will take, minus the ones already known
+             * to be broken here: a client whose H.264 encoder fails does it every
+             * time, and retrying it on every start would cost a dead buffer and a
+             * toast before the fallback each time.
              */
-            const options: MediaRecorderOptions & { videoKeyFrameIntervalDuration?: number; } = {
-                mimeType: this.mimeType,
-                videoBitsPerSecond: videoBitrate * 1_000_000,
-                audioBitsPerSecond: audioBitrate * 1000,
-                videoKeyFrameIntervalDuration: TIMESLICE
-            };
+            this.recordStream = recordStream;
+            this.mimeChain = mimeTypeChain(container).filter(t => !brokenEncoders.has(t));
+            this.mimeIndex = 0;
 
-            this.recorder = new MediaRecorder(recordStream, options);
+            // Everything is broken, which is not the same as nothing being
+            // supported: better to try the whole list again than to refuse.
+            if (!this.mimeChain.length) this.mimeChain = mimeTypeChain(container);
 
-            this.header = null;
-            this.chunks = [];
-
-            this.recorder.ondataavailable = e => this.onChunk(e.data);
-            this.recorder.onerror = e => {
-                logger.error("Recorder error", e);
-                this.stop();
-            };
-
-            this.recorder.start(TIMESLICE);
+            if (!this.armEncoder()) throw new Error("This client can encode neither MP4 nor WebM");
 
             // The call is followed on the same window as the footage: a clip is
             // saved after the fact, so who was talking has to have been kept all
@@ -518,6 +525,124 @@ class ClipRecorder {
         // A mark whose footage has been dropped points at nothing.
         const start = this.bufferStart;
         if (this.marks.length) this.marks = this.marks.filter(m => m >= start);
+    }
+
+    /**
+     * Arms the best encoder still standing on the stream being captured.
+     *
+     * Walks down the chain rather than trusting the first name: a container that
+     * `isTypeSupported` accepts can still refuse to be constructed, and that
+     * refusal is the same information as a failure at the first frame.
+     */
+    private armEncoder(): boolean {
+        while (this.mimeIndex < this.mimeChain.length) {
+            if (this.tryEncoder(this.mimeChain[this.mimeIndex])) return true;
+
+            brokenEncoders.add(this.mimeChain[this.mimeIndex]);
+            this.mimeIndex++;
+        }
+
+        return false;
+    }
+
+    private tryEncoder(mime: string): boolean {
+        const stream = this.recordStream;
+        if (!stream) return false;
+
+        const { videoBitrate, audioBitrate } = settings.store;
+
+        /*
+         * One keyframe per timeslice.
+         *
+         * Without it the encoder places keyframes where it likes, which on
+         * Chromium's H.264 is several seconds apart. A clip cut out of the
+         * buffer has to start on one - everything before the first keyframe
+         * is undecodable and gets dropped by the repair - so a buffer asked
+         * for ten seconds was handing back three. Chromium reads this option
+         * from Chrome 111; older builds ignore it and fall back on the guard
+         * in the repair.
+         */
+        const options: MediaRecorderOptions & { videoKeyFrameIntervalDuration?: number; } = {
+            mimeType: mime,
+            videoBitsPerSecond: videoBitrate * 1_000_000,
+            audioBitsPerSecond: audioBitrate * 1000,
+            videoKeyFrameIntervalDuration: TIMESLICE
+        };
+
+        let recorder: MediaRecorder;
+        try {
+            recorder = new MediaRecorder(stream, options);
+        } catch (e) {
+            logger.warn(`This client would not open a ${mime} encoder`, e);
+            return false;
+        }
+
+        // The bytes already held were written by the encoder being replaced, in
+        // a container the new one knows nothing about: a clip assembled from
+        // both is unplayable, so the buffer starts again from here.
+        this.recorder = recorder;
+        this.mimeType = mime;
+        this.header = null;
+        this.chunks = [];
+
+        recorder.ondataavailable = e => this.onChunk(e.data);
+        recorder.onerror = e => this.onEncoderFailure(e);
+
+        try {
+            recorder.start(TIMESLICE);
+        } catch (e) {
+            logger.warn(`The ${mime} encoder would not start`, e);
+            this.recorder = null;
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * What to do when the encoder gives up mid-capture.
+     *
+     * It used to stop the buffer outright, which is how a broken H.264 encoder
+     * read from the outside as "the clip buffer will not run any more": the
+     * capture was fine, the picture was arriving, and the only thing wrong was
+     * the encoder Chromium had just said it supported. The capture is worth more
+     * than the container, so the next one in the chain takes over on the same
+     * stream and the buffer keeps running.
+     */
+    private onEncoderFailure(event: Event): void {
+        const raised = (event as unknown as { error?: { name?: string; message?: string; }; }).error;
+        const detail = [raised?.name, raised?.message].filter(Boolean).join(" - ");
+        const failed = this.mimeType;
+
+        logger.error(`The ${failed} encoder failed${detail ? `: ${detail}` : ""}`, event);
+
+        try {
+            if (this.recorder && this.recorder.state !== "inactive") this.recorder.stop();
+        } catch {
+            // An encoder that has already given up throws on being stopped,
+            // which is not something the fallback below needs to know about.
+        }
+
+        this.recorder = null;
+        brokenEncoders.add(failed);
+        this.mimeIndex++;
+
+        // Nothing to fall back onto while the capture itself is gone: the
+        // picture is what the buffer is for, and without it there is no clip to
+        // keep whatever the container.
+        const live = this.recordStream?.getVideoTracks()[0]?.readyState === "live";
+
+        if (!live || !this.armEncoder()) {
+            toast(`Clip buffer stopped: the ${extensionFor(failed).toUpperCase()} encoder failed`, Toasts.Type.FAILURE);
+            this.stop();
+            return;
+        }
+
+        // The footage they pointed at was written by the encoder that just died.
+        this.marks = [];
+
+        logger.info(`The buffer carried on as ${this.mimeType}`);
+        toast(`The ${extensionFor(failed).toUpperCase()} encoder failed - the buffer carried on as ${extensionFor(this.mimeType).toUpperCase()}`, Toasts.Type.MESSAGE);
     }
 
     stop() {

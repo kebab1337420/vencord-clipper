@@ -37,7 +37,6 @@ import {
 } from "../mixer";
 import { recorder } from "../recorder";
 import { settings } from "../settings";
-import { setSpotifyMuted, setSpotifyVolume, type SpotifyAudio, spotifyAudio, watchSpotify } from "../spotify";
 import { VoicePanel } from "./VoicePanel";
 
 const logger = new Logger("Clipper", "#f0b132");
@@ -176,56 +175,6 @@ function Channel({ id, name, note, level, meter, compact, onChange, onRemove, ch
 }
 
 /**
- * Spotify's own volume in the Windows mixer, as a row among the channels.
- *
- * It is not one of them and says so: the others are gain stages inside the
- * plugin's graph, this one reaches out and turns the application down before
- * its sound ever gets to the capture. That is the only way to have the music
- * quieter in a clip than everything around it - and the price is that it is
- * quieter in your headphones too, since Windows gives out one mix.
- */
-function AppChannel({ name, note, audio, compact, onVolume, onMute }: {
-    name: string;
-    note: string;
-    audio: SpotifyAudio;
-    compact?: boolean;
-    onVolume(level: number): void;
-    onMute(muted: boolean): void;
-}) {
-    return (
-        <div style={{ marginTop: 12 }}>
-            <div style={ROW}>
-                <div style={compact ? COMPACT_NAME : NAME}>
-                    <div>{name}</div>
-                    <div style={{ fontSize: 11, color: "var(--text-muted, #949ba4)" }}>{note}</div>
-                </div>
-
-                <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={Math.round(audio.volume * 100)}
-                    style={{ flex: 1, accentColor: "var(--green-360, #23a55a)" }}
-                    onChange={e => onVolume(Number(e.currentTarget.value) / 100)}
-                />
-
-                <span style={VALUE}>{audio.muted ? "muted" : `${Math.round(audio.volume * 100)}%`}</span>
-                {!compact && <Meter level={audio.peak} />}
-
-                <Button
-                    size="small"
-                    variant={audio.muted ? "primary" : "secondary"}
-                    onClick={() => onMute(!audio.muted)}
-                >
-                    {audio.muted ? "Unmute" : "Mute"}
-                </Button>
-            </div>
-        </div>
-    );
-}
-
-/**
  * What the microphone row says under its name.
  *
  * The gate is invisible otherwise: a slider that looks open while nothing is
@@ -245,14 +194,6 @@ function Mixer({ compact }: { compact?: boolean; }) {
     const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
     const [levels, setLevels] = useState<Record<string, number>>({});
     const [recording, setRecording] = useState(() => guard("Reading the recorder state", () => recorder.isRecording, false));
-    const [spotify, setSpotify] = useState<SpotifyAudio>(() => guard("Reading Spotify", spotifyAudio, {
-        present: false,
-        playing: false,
-        volume: 1,
-        muted: false,
-        peak: 0
-    }));
-
     const [mic, setMic] = useState<MicStatus>(() => guard("Reading the microphone", micStatus, {
         live: false,
         gated: true,
@@ -263,9 +204,7 @@ function Mixer({ compact }: { compact?: boolean; }) {
         mode: "unknown"
     }));
 
-    // Only while the panel is on screen: the reading behind it is a round trip
-    // to a helper process, and it stops itself once nobody is watching.
-    useEffect(() => guard("Watching Spotify", () => watchSpotify(setSpotify), () => void 0), []);
+    // Only while the panel is on screen.
     useEffect(() => guard("Watching the microphone", () => watchMic(setMic), () => void 0), []);
 
     useEffect(() => {
@@ -355,8 +294,8 @@ function Mixer({ compact }: { compact?: boolean; }) {
 
             <Paragraph style={{ marginTop: 6, fontSize: compact ? 12 : undefined, color: "var(--text-muted, #949ba4)" }}>
                 {compact
-                    ? "Levels the buffer records with. They apply to the clips saved from now on, not to what is already on the timeline - a segment's own volume is in the Segment tab. Spotify included: Windows hands its music to the recording already mixed into the system sound, so muting it here silences the next clip and your headphones, and leaves this one exactly as it was recorded."
-                    : "Balance of what goes into a clip. Sliders take effect immediately, so they can be set while the buffer is running. Windows hands out the captured source's sound as one stream, so the game, the people talking and the music arrive already mixed together: to give an application its own slider, send it to a virtual cable (VB-CABLE, Voicemeeter) and add the cable below as its own channel. The people in a voice call are the exception: they are recorded one track per person as well, so each of them gets a channel of their own at the bottom of this list. Spotify gets a row of its own whenever it is playing here - that one is its volume in Windows rather than a channel in the clip, so it turns the music down in the recording and in your headphones at the same time."}
+                    ? "Levels the buffer records with. They apply to the clips saved from now on, not to what is already on the timeline - a segment's own volume is in the Segment tab."
+                    : "Balance of what goes into a clip. Sliders take effect immediately, so they can be set while the buffer is running. Windows hands out the captured source's sound as one stream, so the game, the people talking and the music arrive already mixed together: to give an application its own slider, send it to a virtual cable (VB-CABLE, Voicemeeter) and add the cable below as its own channel. The people in a voice call are the exception: they are recorded one track per person as well, so each of them gets a channel of their own at the bottom of this list."}
             </Paragraph>
 
             <Channel
@@ -368,25 +307,6 @@ function Mixer({ compact }: { compact?: boolean; }) {
                 meter={levels[SYSTEM_CHANNEL] ?? 0}
                 onChange={next => apply({ ...mixer, system: next }, SYSTEM_CHANNEL)}
             />
-
-            {spotify.present && (
-                <AppChannel
-                    name="Spotify"
-                    // In the studio this row is the one thing on screen that
-                    // does not act on the clip being watched: the music was
-                    // mixed into the recording by Windows and no slider takes
-                    // it back out. Saying so is the only honest option, and it
-                    // is worth saying twice - a mute that visibly changes
-                    // nothing reads as a broken mute.
-                    note={compact
-                        ? "Volume in Windows - changes the next clip, never the one playing"
-                        : spotify.playing ? "Playing on this machine" : "Running, silent"}
-                    audio={spotify}
-                    compact={compact}
-                    onVolume={level => guard("Setting Spotify's volume", () => setSpotifyVolume(level), undefined)}
-                    onMute={muted => guard("Muting Spotify", () => setSpotifyMuted(muted), undefined)}
-                />
-            )}
 
             <Channel
                 id={MIC_CHANNEL}

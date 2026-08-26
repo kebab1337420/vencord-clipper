@@ -38,19 +38,6 @@ usually takes up a couple % of GPU usage
   moment it is opened in the studio, where it can still be changed. Unlike
   Discord's own per-user volume, none of it touches what you hear while you
   play
-- **Spotify row in the mixer**, when Spotify is playing through this machine.
-  Detection is the audio session on the output, not Discord's linked account,
-  which follows whichever device is playing — including a phone in another room
-  this machine cannot hear. The slider is Spotify's own volume in Windows, one
-  step before the mix the loopback captures, so it lowers the music in the clip
-  and in your headphones at the same time. That is the only place the music can
-  be turned down separately: Windows hands out a single mixed stream and no
-  browser API takes it apart again. It only ever changes what gets recorded
-  next, for the same reason: a clip already on disk keeps the music that was
-  playing when it was taken, and muting the row while watching it in the studio
-  cannot take that back out. Every active output is written to rather than the
-  default one alone, so the mute also lands when Spotify is playing into a
-  second endpoint. Windows only.
 - Sound played when a clip is saved, built-in or any audio file of your own,
   with its own volume. The system channel is ducked for the length of it, so the
   sound confirms the clip without ending up inside it, and it never fires while
@@ -284,8 +271,6 @@ firing it only while Discord is focused.
 | `mixer.ts` | Audio channel levels and the input device list behind the sound mixer |
 | `micInput.ts` | Opens the microphone Discord is set to, and gates it the way Discord gates it |
 | `clipSound.ts` | The sound played on save, and the ducking that keeps it out of the clip |
-| `spotify.ts` | Spotify detection and volume, polled only while the mixer is on screen |
-| `appVolume.ts` | Main process: per-application volume through the Windows audio sessions |
 | `library.ts` | Clip categories: game detection and the `clipper-library.json` sidecar |
 | `studio.ts` | Timeline model and the montage render engine (canvas + WebAudio) |
 | `webm.ts` | Rebases the buffered WebM timeline so saved clips start at zero |

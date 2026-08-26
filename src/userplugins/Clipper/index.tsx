@@ -21,7 +21,6 @@ import { runShortcut, startGlobalKeybinds, stopGlobalKeybinds, syncGlobalKeybind
 import { micReport } from "./micInput";
 import { logger, recorder } from "./recorder";
 import { settings } from "./settings";
-import { stopSpotifyWatch } from "./spotify";
 import { checkAtLaunch, checkNow } from "./updater";
 import { isTypingTarget, keybindMatches, keybindsSuspended, parseKeybind } from "./utils";
 import { installVoiceTaps, probeVoiceTaps, uninstallVoiceTaps } from "./voiceTaps";
@@ -228,6 +227,5 @@ export default definePlugin({
         unmountOverlay();
         recorder.stop();
         uninstallVoiceTaps();
-        stopSpotifyWatch();
     }
 });

@@ -2,13 +2,13 @@
     "vencordVersion":  "1.15.2",
     "vencordCommit":  "ef29bbe",
     "plugin":  "Clipper",
-    "clipperVersion":  "3.3.3",
-    "clipperCommit":  "df110b0",
-    "builtAt":  "2026-08-26T20:43:29",
+    "clipperVersion":  "3.3.4",
+    "clipperCommit":  "91b685f",
+    "builtAt":  "2026-08-26T20:59:00",
     "files":  {
                   "patcher.js":  {
-                                     "size":  63323,
-                                     "sha256":  "ae21e2abbd6f6df197a0a2dcd673305b5627022fae2c615b2bc340fcd762e4e5"
+                                     "size":  54062,
+                                     "sha256":  "52869690f79c1552c590cf26a2f2b27485f70c0c25062532d79a7bb0fb96f638"
                                  },
                   "patcher.js.LEGAL.txt":  {
                                                "size":  964,
@@ -23,16 +23,16 @@
                                        "sha256":  "96411110eb3ad1fafeeff831a02a09305ec687318be3d311e710cebb9ca78fad"
                                    },
                   "renderer.js":  {
-                                      "size":  982902,
-                                      "sha256":  "2f041434537d7e6fbeae9d0d332685ce6f65847ac09fadb0451201b82cc702c1"
+                                      "size":  979782,
+                                      "sha256":  "14289200fd186527000fc9f798b7c97fa4342b2644efde00e850559118d46264"
                                   },
                   "renderer.js.LEGAL.txt":  {
                                                 "size":  1880,
                                                 "sha256":  "180a18086f32719f048206e5516fa98449bd49c3967811969c34c8c7facf1bfc"
                                             },
                   "vencordDesktopMain.js":  {
-                                                "size":  59279,
-                                                "sha256":  "fc68fc19dad212005a16937d31cb7121a010bbfe0f7da142be2e6593fea4992c"
+                                                "size":  50022,
+                                                "sha256":  "e9547f50c6da952ed489e07f0d32159d067caab391c822ec6d8ba405c9883f47"
                                             },
                   "vencordDesktopMain.js.LEGAL.txt":  {
                                                           "size":  964,
@@ -47,8 +47,8 @@
                                                      "sha256":  "96411110eb3ad1fafeeff831a02a09305ec687318be3d311e710cebb9ca78fad"
                                                  },
                   "vencordDesktopRenderer.js":  {
-                                                    "size":  990395,
-                                                    "sha256":  "7d2fe68cb04c38671e52c5878437eda9e335ac67b0fcc41a967f08396f7d682f"
+                                                    "size":  987275,
+                                                    "sha256":  "59c42209d28688ce27e12cc61df7874808694bac0733ae4a500e1c0256d4c9f6"
                                                 },
                   "vencordDesktopRenderer.js.LEGAL.txt":  {
                                                               "size":  1880,

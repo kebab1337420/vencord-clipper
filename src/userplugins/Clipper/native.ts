@@ -17,6 +17,7 @@ import { accessSync, constants as fsConstants, existsSync, mkdirSync, readdirSyn
 import { get as httpsGet } from "https";
 import { basename, extname, isAbsolute, join } from "path";
 
+import { type AppAudioSession, applyAppVolume, listAppSessions, stopAppVolumeHelper } from "./appVolume";
 // From utils rather than defined here: the renderer needs the same names and
 // cannot import this module, which pulls in fs and electron. Not re-exported
 // either - every value export of a native module must be an IPC handler.
@@ -515,6 +516,44 @@ export function openClipDirectory(_: IpcMainInvokeEvent, dir: string): void {
     mkdirSync(target, { recursive: true });
     shell.openPath(target);
 }
+
+/*
+ * The volume mixer Windows already keeps, exposed to the renderer.
+ *
+ * Everything about it lives in ./appVolume; these three are the doorway. They
+ * answer with empty lists and zeroes off Windows rather than throwing, because
+ * the caller is a settings panel that is drawn on every platform.
+ */
+
+/** Every process currently playing sound, with its own volume and meter. */
+export async function listAppAudio(_: IpcMainInvokeEvent): Promise<AppAudioSession[]> {
+    try {
+        return await listAppSessions();
+    } catch (e) {
+        console.warn("[Clipper] Could not read the application volumes", e);
+
+        return [];
+    }
+}
+
+/** Sets one application's volume, 0 to 1. Answers with the sessions it touched. */
+export async function setAppAudioVolume(_: IpcMainInvokeEvent, name: string, level: number): Promise<number> {
+    return await applyAppVolume(name, Math.min(1, Math.max(0, level)), -1);
+}
+
+/** Mutes or unmutes one application. Answers with the sessions it touched. */
+export async function setAppAudioMuted(_: IpcMainInvokeEvent, name: string, muted: boolean): Promise<number> {
+    return await applyAppVolume(name, -1, muted ? 1 : 0);
+}
+
+/** Lets go of the helper process. Called when the plugin stops. */
+export function releaseAppAudio(_?: IpcMainInvokeEvent): void {
+    stopAppVolumeHelper();
+}
+
+// A helper outliving the client it was started from would be a stray
+// PowerShell in the task manager with nothing to explain it.
+app.once("will-quit", stopAppVolumeHelper);
 
 export interface PlatformInfo {
     platform: NodeJS.Platform;

@@ -20,6 +20,7 @@ import { encoderSummary, probeEncoders } from "./encoders";
 import { runShortcut, startGlobalKeybinds, stopGlobalKeybinds, syncGlobalKeybinds } from "./globalKeybinds";
 import { logger, recorder } from "./recorder";
 import { settings } from "./settings";
+import { stopSpotifyWatch } from "./spotify";
 import { checkAtLaunch, checkNow } from "./updater";
 import { isTypingTarget, keybindMatches, parseKeybind } from "./utils";
 import { installVoiceTaps, probeVoiceTaps, uninstallVoiceTaps } from "./voiceTaps";
@@ -208,5 +209,6 @@ export default definePlugin({
         unmountOverlay();
         recorder.stop();
         uninstallVoiceTaps();
+        stopSpotifyWatch();
     }
 });

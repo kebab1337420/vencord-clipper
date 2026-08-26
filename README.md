@@ -22,6 +22,18 @@ usually takes up a couple % of GPU usage
   captured source, **Microphone** is your own voice, and any input device can be
   added as its own channel. Moving a slider is heard in the clip being buffered
   right now, not only in the next one
+- **Spotify row in the mixer**, when Spotify is playing through this machine.
+  Detection is the audio session on the output, not Discord's linked account,
+  which follows whichever device is playing — including a phone in another room
+  this machine cannot hear. The slider is Spotify's own volume in Windows, one
+  step before the mix the loopback captures, so it lowers the music in the clip
+  and in your headphones at the same time. That is the only place the music can
+  be turned down separately: Windows hands out a single mixed stream and no
+  browser API takes it apart again. Windows only.
+- Sound played when a clip is saved, built-in or any audio file of your own,
+  with its own volume. The system channel is ducked for the length of it, so the
+  sound confirms the clip without ending up inside it, and it never fires while
+  a clip is being played back in the studio or the overlay.
 - Built-in source picker with live previews, searchable, screens and windows
 - Clip studio, one window for the whole clip folder and a light video editor.
   The left panel is the library: search, category filter, and for the picked
@@ -241,6 +253,9 @@ firing it only while Discord is focused.
 | `recorder.ts` | Capture, rolling buffer, saving |
 | `clips.ts` | Clip folder access: listing, loading, renaming, deleting, frame export |
 | `mixer.ts` | Audio channel levels and the input device list behind the sound mixer |
+| `clipSound.ts` | The sound played on save, and the ducking that keeps it out of the clip |
+| `spotify.ts` | Spotify detection and volume, polled only while the mixer is on screen |
+| `appVolume.ts` | Main process: per-application volume through the Windows audio sessions |
 | `library.ts` | Clip categories: game detection and the `clipper-library.json` sidecar |
 | `studio.ts` | Timeline model and the montage render engine (canvas + WebAudio) |
 | `webm.ts` | Rebases the buffered WebM timeline so saved clips start at zero |

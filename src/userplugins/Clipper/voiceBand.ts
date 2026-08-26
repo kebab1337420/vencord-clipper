@@ -102,7 +102,7 @@ export interface VoiceBand {
 }
 
 /** Chains `count` identical filters and hands back both ends. */
-function cascade(ctx: BaseAudioContext, type: BiquadFilterType, frequency: number, count: number) {
+export function cascade(ctx: BaseAudioContext, type: BiquadFilterType, frequency: number, count: number) {
     const filters: BiquadFilterNode[] = [];
 
     for (let i = 0; i < count; i++) {

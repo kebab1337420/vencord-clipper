@@ -70,7 +70,8 @@ import { Logger } from "@utils/Logger";
 
 import { loadVoiceTrack } from "./clips";
 import { hasVoiceTracks, readNativeAudio } from "./nativeTracks";
-import { voiceGainOf, type VoiceLevels } from "./voice";
+import { type VoiceFileMeta, voiceGainOf, type VoiceLevels } from "./voice";
+import { cascade } from "./voiceBand";
 import type { MixTarget, VoiceMix } from "./voiceMix";
 
 const logger = new Logger("Clipper");
@@ -136,7 +137,6 @@ const BAND_HI = 4000;
  */
 const LOW_HZ = 45;
 const SECTIONS = 4;
-const Q = Math.SQRT1_2;
 
 /**
  * How much louder than the bed the voices come back while the notch is open.
@@ -534,24 +534,6 @@ function matchGain(bed: Float32Array, lane: Float32Array, alone: Float32Array, f
     return Math.min(MATCH_MAX, Math.max(MATCH_MIN, ratios[ratios.length >> 1]));
 }
 
-/** Chains `SECTIONS` filters of one type and hands back both ends. */
-function cascade(ctx: BaseAudioContext, type: BiquadFilterType, frequency: number) {
-    const filters: BiquadFilterNode[] = [];
-
-    for (let i = 0; i < SECTIONS; i++) {
-        const filter = ctx.createBiquadFilter();
-
-        filter.type = type;
-        filter.frequency.value = frequency;
-        filter.Q.value = Q;
-
-        if (i > 0) filters[i - 1].connect(filter);
-        filters.push(filter);
-    }
-
-    return { input: filters[0], output: filters[filters.length - 1] };
-}
-
 async function decode(ctx: BaseAudioContext, data: Uint8Array): Promise<AudioBuffer> {
     // decodeAudioData detaches what it is handed, so it never gets a view onto
     // a buffer anything else still holds.
@@ -932,7 +914,7 @@ async function render(
         const direct = offline.createGain();
         const low = offline.createGain();
 
-        const lowpass = cascade(offline, "lowpass", LOW_HZ);
+        const lowpass = cascade(offline, "lowpass", LOW_HZ, SECTIONS);
 
         split.connect(direct);
         split.connect(lowpass.input);
@@ -1096,23 +1078,36 @@ export async function laneMixFor(
     if (!metas?.length) return null;
 
     const found = await heldFor(`${target.id}:lanes`, async () => {
-        const bed = await decode(ctx, new Uint8Array(await (await fetch(target.url)).arrayBuffer()));
-        const raw: RawLane[] = [];
+        /*
+         * The bed and every voice at once rather than one after another.
+         *
+         * They were read and decoded in a queue, which on a call of five people
+         * meant six reads end to end before the first sample could be looked
+         * at. Nothing here depends on anything else here, and they all end up
+         * in memory together in any case, so the only thing the queue was
+         * buying was the wait.
+         */
+        const readBed = async () => decode(ctx, new Uint8Array(await (await fetch(target.url)).arrayBuffer()));
 
-        for (const meta of metas) {
+        const readLane = async (meta: VoiceFileMeta): Promise<RawLane | null> => {
             try {
-                raw.push({
+                return {
                     userId: meta.id,
                     name: meta.name,
                     offset: meta.offset,
                     buffer: await decode(ctx, await loadVoiceTrack(meta.file))
-                });
+                };
             } catch (e) {
+                // One unreadable track is one person missing from the mix,
+                // rather than a clip that cannot be put together at all.
                 logger.warn(`Could not decode the voice track "${meta.file}"`, e);
+                return null;
             }
-        }
+        };
 
-        return { bed, bedOffset: 0, raw };
+        const [bed, lanes] = await Promise.all([readBed(), Promise.all(metas.map(readLane))]);
+
+        return { bed, bedOffset: 0, raw: lanes.filter((lane): lane is RawLane => lane !== null) };
     });
 
     if (!found) return null;

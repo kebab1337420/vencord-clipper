@@ -197,7 +197,7 @@ interface ClipsConnection {
     setClipRecordUser?(userId: string, kind: RecordKind, enabled: boolean): void;
 }
 
-export interface NativeAvailability {
+interface NativeAvailability {
     /** Whether a clip can be recorded and saved through the native engine. */
     available: boolean;
     /** Why not, in a form that can be shown to the user as it is. */
@@ -1025,7 +1025,7 @@ export async function saveNativeClip(filepath: string, seconds: number, metadata
 }
 
 /** What the engine had to say about whether it is recording. */
-export interface RecordingVerdict {
+interface RecordingVerdict {
     /** Whether it is worth keeping the native path for this buffer. */
     recording: boolean;
     /** Why not, when it is not. Empty otherwise. */
@@ -1044,7 +1044,7 @@ export interface RecordingVerdict {
 }
 
 /** A verdict being waited on, and the means to stop waiting for it. */
-export interface RecordingWatch {
+interface RecordingWatch {
     settled: Promise<RecordingVerdict>;
     /** Drops the listeners, for a caller that gave up before the verdict. */
     stop(): void;

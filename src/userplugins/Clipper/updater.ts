@@ -38,7 +38,7 @@ const logger = new Logger("Clipper");
  */
 export const CLIPPER_VERSION = "3.3.4";
 
-export interface UpdateState {
+interface UpdateState {
     /** A check is in flight. */
     checking: boolean;
     /** The bundle is being fetched and swapped in. */

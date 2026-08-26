@@ -377,6 +377,7 @@ function Mixer({ compact }: { compact?: boolean; }) {
             {/* Draws nothing outside a call, so it costs an empty list check. */}
             <VoicePanel
                 compact={compact}
+                recording={recording}
                 voices={mixer.voices}
                 onChange={(userId, level) => apply({ ...mixer, voices: { ...mixer.voices, [userId]: level } })}
             />

@@ -215,7 +215,7 @@ export interface Caption {
     text: string;
 }
 
-export interface CaptionStyle {
+interface CaptionStyle {
     /** Height of the text as a fraction of the frame height. */
     size: number;
     color: string;
@@ -273,7 +273,7 @@ export interface Project {
     showSpeakers?: boolean;
 }
 
-export interface RenderOptions {
+interface RenderOptions {
     onProgress?(ratio: number): void;
     cancelled?(): boolean;
     /**

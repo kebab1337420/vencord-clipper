@@ -37,6 +37,8 @@
 
 import { Logger } from "@utils/Logger";
 
+import { type Box, boxes, descend, find } from "./boxes";
+
 const logger = new Logger("Clipper");
 
 /** `sample_is_non_sync_sample`, the one flag bit that matters here. */
@@ -44,14 +46,6 @@ const NON_SYNC = 0x00010000;
 
 /** Movie timescale of the file written out. Milliseconds, for legibility. */
 const MOVIE_TIMESCALE = 1000;
-
-interface Box {
-    type: string;
-    /** First byte of the payload, past the size and type. */
-    start: number;
-    /** One past the last byte of the box. */
-    end: number;
-}
 
 interface Sample {
     /** Offset of the sample's bytes inside the file it came from. */
@@ -82,50 +76,6 @@ interface Track {
     samples: Sample[];
     /** The file the samples' offsets point into. */
     source: Uint8Array;
-}
-
-function boxes(view: DataView, from: number, to: number): Box[] {
-    const found: Box[] = [];
-    let at = from;
-
-    while (at + 8 <= to) {
-        let size = view.getUint32(at);
-        const type = String.fromCharCode(
-            view.getUint8(at + 4), view.getUint8(at + 5), view.getUint8(at + 6), view.getUint8(at + 7)
-        );
-
-        let head = 8;
-
-        if (size === 1) {
-            size = Number(view.getBigUint64(at + 8));
-            head = 16;
-        } else if (size === 0) {
-            size = to - at;
-        }
-
-        if (size < head || at + size > to) break;
-
-        found.push({ type, start: at + head, end: at + size });
-        at += size;
-    }
-
-    return found;
-}
-
-function find(list: Box[], type: string): Box | undefined {
-    return list.find(box => box.type === type);
-}
-
-/** Walks a chain of box types, e.g. `mdia/minf/stbl`. */
-function descend(view: DataView, box: Box, path: string[]): Box | undefined {
-    let at: Box | undefined = box;
-
-    for (const type of path) {
-        if (!at) return undefined;
-        at = find(boxes(view, at.start, at.end), type);
-    }
-
-    return at;
 }
 
 /** The four bytes of a `hdlr` that say what the track carries. */
@@ -163,19 +113,19 @@ interface Defaults {
  */
 function readFragmented(data: Uint8Array): Track[] {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-    const top = boxes(view, 0, data.length);
+    const top = boxes(data, view, 0, data.length);
 
     const moov = find(top, "moov");
     if (!moov) return [];
 
-    const inside = boxes(view, moov.start, moov.end);
+    const inside = boxes(data, view, moov.start, moov.end);
 
     /** Per-track defaults from `trex`, used wherever a run leaves a field out. */
     const trex = new Map<number, Defaults>();
     const mvex = find(inside, "mvex");
 
     if (mvex) {
-        for (const box of boxes(view, mvex.start, mvex.end)) {
+        for (const box of boxes(data, view, mvex.start, mvex.end)) {
             if (box.type !== "trex") continue;
 
             trex.set(view.getUint32(box.start + 4), {
@@ -189,15 +139,17 @@ function readFragmented(data: Uint8Array): Track[] {
     const tracks = new Map<number, Track>();
 
     for (const trak of inside.filter(box => box.type === "trak")) {
-        const tkhd = find(boxes(view, trak.start, trak.end), "tkhd");
-        const mdia = find(boxes(view, trak.start, trak.end), "mdia");
+        const walk = boxes(data, view, trak.start, trak.end);
+
+        const tkhd = find(walk, "tkhd");
+        const mdia = find(walk, "mdia");
         if (!tkhd || !mdia) continue;
 
-        const parts = boxes(view, mdia.start, mdia.end);
+        const parts = boxes(data, view, mdia.start, mdia.end);
         const mdhd = find(parts, "mdhd");
         const hdlr = find(parts, "hdlr");
-        const stbl = descend(view, mdia, ["minf", "stbl"]);
-        const stsd = stbl && find(boxes(view, stbl.start, stbl.end), "stsd");
+        const stbl = descend(data, view, mdia, ["minf", "stbl"]);
+        const stsd = stbl && find(boxes(data, view, stbl.start, stbl.end), "stsd");
         if (!mdhd || !hdlr || !stsd) continue;
 
         const version = view.getUint8(tkhd.start);
@@ -232,8 +184,8 @@ function readFragmented(data: Uint8Array): Track[] {
         // eight before its payload.
         const anchor = moof.start - 8;
 
-        for (const traf of boxes(view, moof.start, moof.end).filter(box => box.type === "traf")) {
-            const parts = boxes(view, traf.start, traf.end);
+        for (const traf of boxes(data, view, moof.start, moof.end).filter(box => box.type === "traf")) {
+            const parts = boxes(data, view, traf.start, traf.end);
             const tfhd = find(parts, "tfhd");
             if (!tfhd) continue;
 
@@ -370,10 +322,10 @@ function spreadGaps(track: Track): void {
 function readPlainAudio(data: Uint8Array): Track[] {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
 
-    const moov = find(boxes(view, 0, data.length), "moov");
+    const moov = find(boxes(data, view, 0, data.length), "moov");
     if (!moov) return [];
 
-    const inside = boxes(view, moov.start, moov.end);
+    const inside = boxes(data, view, moov.start, moov.end);
     const mvhd = find(inside, "mvhd");
     if (!mvhd) return [];
 
@@ -384,17 +336,17 @@ function readPlainAudio(data: Uint8Array): Track[] {
     const found: Track[] = [];
 
     for (const trak of inside.filter(box => box.type === "trak")) {
-        const mdia = find(boxes(view, trak.start, trak.end), "mdia");
+        const mdia = find(boxes(data, view, trak.start, trak.end), "mdia");
         if (!mdia) continue;
 
-        const parts = boxes(view, mdia.start, mdia.end);
+        const parts = boxes(data, view, mdia.start, mdia.end);
         const mdhd = find(parts, "mdhd");
         const hdlr = find(parts, "hdlr");
-        const stbl = descend(view, mdia, ["minf", "stbl"]);
+        const stbl = descend(data, view, mdia, ["minf", "stbl"]);
         if (!mdhd || !hdlr || !stbl) continue;
         if (handlerType(view, hdlr) !== "soun") continue;
 
-        const tables = boxes(view, stbl.start, stbl.end);
+        const tables = boxes(data, view, stbl.start, stbl.end);
         const stsd = find(tables, "stsd");
         const stts = find(tables, "stts");
         const stsz = find(tables, "stsz");
@@ -471,7 +423,7 @@ function readPlainAudio(data: Uint8Array): Track[] {
          * would slide one voice against the others by however late they joined.
          */
         let offset = 0;
-        const elst = descend(view, trak, ["edts", "elst"]);
+        const elst = descend(data, view, trak, ["edts", "elst"]);
 
         if (elst) {
             const version = view.getUint8(elst.start);

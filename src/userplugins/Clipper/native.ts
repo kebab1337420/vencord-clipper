@@ -516,7 +516,7 @@ export function openClipDirectory(_: IpcMainInvokeEvent, dir: string): void {
     shell.openPath(target);
 }
 
-export interface PlatformInfo {
+interface PlatformInfo {
     platform: NodeJS.Platform;
     /** Wayland session: no window list, and OS-level keybinds do not fire. */
     wayland: boolean;

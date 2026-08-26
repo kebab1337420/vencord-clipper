@@ -433,7 +433,7 @@ export function trimMp4(data: Uint8Array, fromMs: number, toMs: number): Uint8Ar
 }
 
 /** An audio track a file declares, and the name its handler carries. */
-export interface AudioTrack {
+interface AudioTrack {
     id: number;
     /**
      * The `hdlr` box's trailing name.

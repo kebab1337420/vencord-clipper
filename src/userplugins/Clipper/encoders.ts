@@ -33,7 +33,7 @@ const logger = new Logger("Clipper");
 /** How long each container is given to produce bytes. */
 const RUN_MS = 600;
 
-export interface EncoderReport {
+interface EncoderReport {
     mimeType: string;
     ok: boolean;
     /** Bytes produced, when it produced any. */

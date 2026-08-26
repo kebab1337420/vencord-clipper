@@ -98,7 +98,7 @@ const HIGHPASS_HZ = 85;
  */
 const DUCK_MAX_DB = 12;
 
-export interface MicPlan {
+interface MicPlan {
     /** The id Discord holds, which is the native module's, not Chromium's. */
     discordDeviceId: string;
     /** What Discord calls that device, when its list can be read. */
@@ -181,7 +181,7 @@ function discordDeviceName(store: any, id: string): string {
  * store, they come and go between builds, and a missing one has to read as "use
  * the sensible default" rather than take the microphone down with it.
  */
-export function micPlan(): MicPlan | null {
+function micPlan(): MicPlan | null {
     const store = MediaEngineStore as any;
     if (typeof store?.getInputDeviceId !== "function") return null;
 

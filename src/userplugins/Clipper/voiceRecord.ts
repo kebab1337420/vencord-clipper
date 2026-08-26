@@ -79,7 +79,7 @@ interface Lane {
 }
 
 /** One person's own audio, cut to the saved window. */
-export interface VoiceLaneClip {
+interface VoiceLaneClip {
     userId: string;
     name: string;
     blob: Blob;

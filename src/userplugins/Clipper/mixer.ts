@@ -50,7 +50,7 @@ export interface MixerLevel {
 export interface MixerChannel extends MixerLevel {
     /** Stable id, used as the channel key in the recorder's graph. */
     id: string;
-    /** Shown on the slider: "Spotify", "Game", "Second mic". */
+    /** Shown on the slider: "Second mic", "Line in", "Loopback cable". */
     label: string;
     /** `MediaDeviceInfo.deviceId` of the input to open. */
     deviceId: string;

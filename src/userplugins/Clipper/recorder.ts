@@ -139,7 +139,7 @@ function evenSize(n: number): number {
 }
 
 /** What the last save produced, enough to cut it down or send it somewhere. */
-export interface SavedClip {
+interface SavedClip {
     name: string;
     path: string;
     blob: Blob;
@@ -1189,24 +1189,29 @@ class ClipRecorder {
 
         try {
             const harvested = await voiceBuffers.harvest(from, Date.now());
-            const written: VoiceFileMeta[] = [];
 
-            for (const lane of harvested) {
+            // One round trip per person, all in flight together: they are
+            // separate files with nothing to say to each other, and the toast
+            // that says the clip is saved waits for the last of them.
+            const saved = await Promise.all(harvested.map(async lane => {
                 try {
                     const data = new Uint8Array(await lane.blob.arrayBuffer());
                     const path = await Native.saveVoiceTrack(settings.store.saveDirectory, clip, lane.userId, data);
-                    if (!path) continue;
+                    if (!path) return null;
 
-                    written.push({
+                    return {
                         id: lane.userId,
                         name: lane.name,
                         file: path.split(/[\\/]/).pop() || "",
                         offset: lane.offset
-                    });
+                    };
                 } catch (e) {
                     logger.warn(`Could not save the voice track for ${lane.name}`, e);
+                    return null;
                 }
-            }
+            }));
+
+            const written = saved.filter((meta): meta is VoiceFileMeta => meta !== null);
 
             if (written.length) logger.info(`Saved ${written.length} voice track(s) beside ${clip}`);
 

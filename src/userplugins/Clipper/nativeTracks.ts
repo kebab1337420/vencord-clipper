@@ -38,12 +38,14 @@
 
 import { Logger } from "@utils/Logger";
 
+import { type Box, boxes, descend, find } from "./boxes";
+
 const logger = new Logger("Clipper");
 
 /** AAC sample rates, by the index an ADTS header carries. */
 const RATES = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
 
-export interface NativeTrack {
+interface NativeTrack {
     /** Discord's user id, or an empty string for a track that has no owner. */
     userId: string;
     /**
@@ -58,63 +60,6 @@ export interface NativeTrack {
     offset: number;
     /** The track's AAC frames, each behind an ADTS header. */
     adts: Uint8Array;
-}
-
-interface Box {
-    type: string;
-    start: number;
-    end: number;
-}
-
-function boxes(data: Uint8Array, view: DataView, from: number, to: number): Box[] {
-    const found: Box[] = [];
-
-    for (let at = from; at + 8 <= to;) {
-        let size = view.getUint32(at);
-        let header = 8;
-
-        if (size === 1) {
-            if (at + 16 > to) break;
-
-            // 64 bit sizes only matter for `mdat`, which is never walked into,
-            // but a box has to be stepped over correctly all the same.
-            const big = view.getBigUint64(at + 8);
-            if (big > BigInt(Number.MAX_SAFE_INTEGER)) break;
-
-            size = Number(big);
-            header = 16;
-        } else if (size === 0) {
-            size = to - at;
-        }
-
-        if (size < header || at + size > to) break;
-
-        found.push({
-            type: String.fromCharCode(data[at + 4], data[at + 5], data[at + 6], data[at + 7]),
-            start: at + header,
-            end: at + size
-        });
-
-        at += size;
-    }
-
-    return found;
-}
-
-function find(list: Box[], type: string): Box | undefined {
-    return list.find(box => box.type === type);
-}
-
-/** Walks a chain of single children, which is how every path in `moov` reads. */
-function descend(data: Uint8Array, view: DataView, box: Box, path: string[]): Box | undefined {
-    let current: Box | undefined = box;
-
-    for (const type of path) {
-        if (!current) return undefined;
-        current = find(boxes(data, view, current.start, current.end), type);
-    }
-
-    return current;
 }
 
 /**
@@ -136,10 +81,11 @@ function handlerName(data: Uint8Array, hdlr: Box): string {
 
 /** The sample entries of one track, as [offset, size] pairs into the file. */
 function samples(data: Uint8Array, view: DataView, stbl: Box): Array<[number, number]> {
-    const stsz = find(boxes(data, view, stbl.start, stbl.end), "stsz");
-    const stsc = find(boxes(data, view, stbl.start, stbl.end), "stsc");
-    const stco = find(boxes(data, view, stbl.start, stbl.end), "stco")
-        ?? find(boxes(data, view, stbl.start, stbl.end), "co64");
+    const tables = boxes(data, view, stbl.start, stbl.end);
+
+    const stsz = find(tables, "stsz");
+    const stsc = find(tables, "stsc");
+    const stco = find(tables, "stco") ?? find(tables, "co64");
 
     if (!stsz || !stsc || !stco) return [];
 

@@ -154,8 +154,9 @@ function Person({ person, level, meter, compact, onChange }: {
     );
 }
 
-function Voices({ compact, voices, onChange }: {
+function Voices({ compact, recording, voices, onChange }: {
     compact?: boolean;
+    recording?: boolean;
     voices: Record<string, MixerLevel>;
     onChange(userId: string, level: MixerLevel): void;
 }) {
@@ -188,10 +189,14 @@ function Voices({ compact, voices, onChange }: {
         };
     }, []);
 
-    // The activity buffer only runs while something is being recorded, so the
-    // meters cost nothing the rest of the time.
+    // The activity buffer only fills while something is being recorded, so the
+    // ten readings a second exist only then: the rest of the time there is no
+    // timer at all rather than one waking up to find nothing to show.
     useEffect(() => {
-        if (!people.length) return;
+        if (!recording || !people.length) {
+            setMeters(current => (Object.keys(current).length ? {} : current));
+            return;
+        }
 
         const timer = setInterval(() => {
             if (!voiceActivity.active) {
@@ -206,7 +211,7 @@ function Voices({ compact, voices, onChange }: {
         }, METER_MS);
 
         return () => clearInterval(timer);
-    }, [people]);
+    }, [recording, people]);
 
     if (!people.length) return null;
 
@@ -239,14 +244,15 @@ function sameIds(a: VoicePerson[], b: VoicePerson[]): boolean {
 }
 
 /** Mounted by the mixer, so both the settings panel and the studio get it. */
-export function VoicePanel({ compact, voices, onChange }: {
+export function VoicePanel({ compact, recording, voices, onChange }: {
     compact?: boolean;
+    recording?: boolean;
     voices: Record<string, MixerLevel>;
     onChange(userId: string, level: MixerLevel): void;
 }) {
     return (
         <ErrorBoundary message="The Clipper voice panel could not be rendered.">
-            <Voices compact={compact} voices={voices} onChange={onChange} />
+            <Voices compact={compact} recording={recording} voices={voices} onChange={onChange} />
         </ErrorBoundary>
     );
 }

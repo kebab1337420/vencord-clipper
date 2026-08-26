@@ -16,7 +16,10 @@ usually takes up a couple % of GPU usage
   settings: the input device Discord is set to, its input volume, echo
   cancellation, noise suppression and gain control, plus a noise gate that
   follows Discord's input sensitivity, so a clip taken alone carries your voice
-  and not the room around it or the speaker bleed people hear as echo
+  and not the room around it or the speaker bleed people hear as echo. The gate
+  raises its own threshold while the captured system sound is loud, so a noisy
+  game has to be shouted over rather than talked over, and a gentle compressor
+  after it evens out the voice the way Discord does on its own side
 - Settings grouped into sections — **Capture**, **Audio**, **Clips**,
   **Interface**, **Keybinds** — so every sound source sits under *Audio*
 - Sound mixer in the **Audio** section: one slider (0–300%) and one mute per
@@ -31,7 +34,12 @@ usually takes up a couple % of GPU usage
   step before the mix the loopback captures, so it lowers the music in the clip
   and in your headphones at the same time. That is the only place the music can
   be turned down separately: Windows hands out a single mixed stream and no
-  browser API takes it apart again. Windows only.
+  browser API takes it apart again. It only ever changes what gets recorded
+  next, for the same reason: a clip already on disk keeps the music that was
+  playing when it was taken, and muting the row while watching it in the studio
+  cannot take that back out. Every active output is written to rather than the
+  default one alone, so the mute also lands when Spotify is playing into a
+  second endpoint. Windows only.
 - Sound played when a clip is saved, built-in or any audio file of your own,
   with its own volume. The system channel is ducked for the length of it, so the
   sound confirms the clip without ending up inside it, and it never fires while
@@ -308,7 +316,10 @@ firing it only while Discord is focused.
   categories, not the clips.
 - **Mic processing is Chromium's.** Discord mints its input device ids in its own
   native voice module and `getUserMedia` refuses them, so the plugin matches
-  the device by name and falls back to the system default when no name matches.
+  the device by name - and to do that it opens a plain capture first, because
+  Chromium hands out no device names at all until the microphone has been
+  granted once, and Discord's own voice never asks for it. It falls back to the
+  system default when no name matches.
   **Check the microphone** in the plugin toolbox says which one it actually
   opened. The gate is the plugin's own: it reads Discord's input sensitivity but
   measures the level itself, so it opens and closes close to Discord's transmit

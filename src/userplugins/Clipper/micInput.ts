@@ -76,6 +76,28 @@ const SPEAKING_MS = 400;
 /** Nothing quieter than this is a sound. Keeps log(0) out of the arithmetic. */
 const FLOOR_DB = -110;
 
+/**
+ * Corner of the high-pass in front of everything.
+ *
+ * Below it there is no voice, only the desk the microphone stands on, the fan,
+ * the chair and the pops of breath - all of which are loud in dB terms and are
+ * exactly what walks the noise floor up until the gate stops trusting it.
+ */
+const HIGHPASS_HZ = 85;
+
+/**
+ * How far the speakers are allowed to push the gate's threshold up.
+ *
+ * The echo people hear in a clip is the game coming back out of the speakers
+ * and into the microphone. Chromium's echo cancellation cannot touch it: its
+ * reference is what Chromium itself plays, and the game is another process
+ * entirely. What the plugin does have is the captured system sound, one node
+ * away in the same graph - so when the room is loud the microphone has to be
+ * louder still before the gate believes it is a voice. Only the threshold
+ * moves; the signal itself is never touched, so nothing pumps.
+ */
+const DUCK_MAX_DB = 12;
+
 export interface MicPlan {
     /** The id Discord holds, which is the native module's, not Chromium's. */
     discordDeviceId: string;
@@ -85,6 +107,8 @@ export interface MicPlan {
     deviceId: string;
     /** How the two were tied together. */
     matched: "id" | "name" | "default" | "none";
+    /** What Chromium says it opened, once it has. Empty before that. */
+    openedLabel: string;
     /** Discord's input volume as a factor, 0 to 2. */
     volume: number;
     echoCancellation: boolean;
@@ -180,6 +204,7 @@ export function micPlan(): MicPlan | null {
             discordDeviceName: discordDeviceName(store, discordDeviceId),
             deviceId: "",
             matched: "none",
+            openedLabel: "",
             volume: Math.min(2, Math.max(0, (Number.isFinite(volume) ? volume : 100) / 100)),
             echoCancellation: asBoolean(store.getEchoCancellation?.(), true),
             noiseSuppression: asBoolean(store.getNoiseSuppression?.(), false) || asBoolean(store.getNoiseCancellation?.(), false),
@@ -213,20 +238,12 @@ function normalise(name: string): string {
 }
 
 /** Ties Discord's chosen device to one Chromium is willing to open. */
-async function resolveDevice(plan: MicPlan): Promise<MicPlan> {
+function resolveDevice(plan: MicPlan, devices: MediaDeviceInfo[]): MicPlan {
     const id = plan.discordDeviceId;
 
     // Discord's own word for "whatever the system is set to", which is also
     // what an empty constraint means. Asking for it by id is rejected outright.
     if (!id || id === "default" || id === "communications") return { ...plan, deviceId: "", matched: "default" };
-
-    let devices: MediaDeviceInfo[] = [];
-    try {
-        devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audioinput" && d.deviceId);
-    } catch (e) {
-        logger.warn("Could not list the input devices", e);
-        return { ...plan, deviceId: "", matched: "default" };
-    }
 
     // The web build has no native module, so the two id spaces are one.
     if (devices.some(d => d.deviceId === id)) return { ...plan, deviceId: id, matched: "id" };
@@ -253,23 +270,96 @@ function processing(plan: MicPlan): MediaTrackConstraints {
     return {
         echoCancellation: plan.echoCancellation,
         noiseSuppression: plan.noiseSuppression,
-        autoGainControl: plan.autoGainControl
+        autoGainControl: plan.autoGainControl,
+        // One microphone is one channel. Chromium will otherwise hand back a
+        // stereo pair for a mono capsule, and the empty side of it is hiss.
+        channelCount: 1
     };
 }
 
-/** Opens Discord's microphone, falling back down to something that works. */
-async function openStream(plan: MicPlan): Promise<MediaStream> {
-    const audio = processing(plan);
+/** What Chromium says the track it handed over is actually recording. */
+function openedLabel(stream: MediaStream, devices: MediaDeviceInfo[]): string {
+    const track = stream.getAudioTracks()[0];
+    if (!track) return "";
 
-    if (!plan.deviceId) return navigator.mediaDevices.getUserMedia({ audio });
+    const id = track.getSettings?.().deviceId ?? "";
+    const known = devices.find(d => d.deviceId === id)?.label;
+
+    return known || track.label || "";
+}
+
+/**
+ * Opens the microphone Discord is set to, and says which one that turned out
+ * to be.
+ *
+ * The order matters, and getting it wrong was the whole bug. `enumerateDevices`
+ * returns entries with **empty labels** until the origin has been granted
+ * microphone access, and Discord's own voice never goes through `getUserMedia`
+ * - the native module handles it - so the client can be in a call all day with
+ * the renderer still holding no permission at all. Matching a device by name
+ * against a list of blanks matches nothing, every time, and the fallback was
+ * the system default: a webcam array, a laptop lid microphone, whatever
+ * Windows happened to prefer. Distant, roomy, full of the speakers. The echo.
+ *
+ * So a plain capture is opened first, purely to hold the permission open while
+ * the list is read; the real device is picked from a list that now has names;
+ * and the throwaway is only dropped once its replacement is running, so the
+ * device is never released and reacquired in front of another application.
+ */
+async function openMic(plan: MicPlan): Promise<{ stream: MediaStream; plan: MicPlan; }> {
+    const audio = processing(plan);
+    const first = await navigator.mediaDevices.getUserMedia({ audio });
+
+    let devices: MediaDeviceInfo[] = [];
+    try {
+        devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audioinput" && d.deviceId);
+    } catch (e) {
+        logger.warn("Could not list the input devices", e);
+    }
+
+    const wanted = resolveDevice(plan, devices);
+    const already = first.getAudioTracks()[0]?.getSettings?.().deviceId ?? "";
+
+    if (!wanted.deviceId || wanted.deviceId === already) {
+        return { stream: first, plan: { ...wanted, openedLabel: openedLabel(first, devices) } };
+    }
 
     try {
-        return await navigator.mediaDevices.getUserMedia({ audio: { ...audio, deviceId: { exact: plan.deviceId } } });
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: { ...audio, deviceId: { exact: wanted.deviceId } }
+        });
+
+        first.getTracks().forEach(t => t.stop());
+
+        return { stream, plan: { ...wanted, openedLabel: openedLabel(stream, devices) } };
     } catch (e) {
         // Unplugged between the enumeration and now, or held exclusively by
         // something else. A clip with the wrong microphone beats a silent one.
-        logger.warn("Discord's input device would not open, falling back to the default one", e);
-        return navigator.mediaDevices.getUserMedia({ audio });
+        logger.warn("Discord's input device would not open, keeping the default one", e);
+
+        return {
+            stream: first,
+            plan: { ...wanted, deviceId: "", matched: "none", openedLabel: openedLabel(first, devices) }
+        };
+    }
+}
+
+/**
+ * Runs the whole opening once and throws the capture away again.
+ *
+ * For the report, and for nothing else: it asks for the microphone, so it only
+ * ever runs when somebody clicked the toolbox entry that says it will.
+ */
+async function probeMic(read: MicPlan): Promise<MicPlan> {
+    try {
+        const { stream, plan } = await openMic(read);
+        stream.getTracks().forEach(t => t.stop());
+
+        return plan;
+    } catch (e) {
+        logger.warn("Could not open the microphone for the check", e);
+
+        return { ...read, deviceId: "", matched: "none", openedLabel: "" };
     }
 }
 
@@ -288,6 +378,10 @@ let watchTimer: ReturnType<typeof setInterval> | null = null;
  */
 export class MicInput {
     private data: Float32Array<ArrayBuffer>;
+    private refData: Float32Array<ArrayBuffer> | null;
+
+    /** The node the reference analyser hangs off, so it can be unhooked again. */
+    private refSource: AudioNode | null = null;
     private timer: ReturnType<typeof setInterval> | null = null;
     private unsubscribe: (() => void) | null = null;
 
@@ -311,42 +405,52 @@ export class MicInput {
         private plan: MicPlan,
         private stream: MediaStream,
         private source: MediaStreamAudioSourceNode,
+        private readonly highpass: BiquadFilterNode,
         private readonly delay: DelayNode,
         private readonly gate: GainNode,
+        private readonly compressor: DynamicsCompressorNode,
+        private readonly makeup: GainNode,
         private readonly analyser: AnalyserNode,
-        private readonly tap: MediaStreamAudioDestinationNode
+        private readonly tap: MediaStreamAudioDestinationNode,
+        private readonly reference: AnalyserNode | null
     ) {
         this.data = new Float32Array(analyser.fftSize);
+        this.refData = reference ? new Float32Array(reference.fftSize) : null;
     }
 
-    static async open(ctx: AudioContext): Promise<MicInput | null> {
-        const read = micPlan();
-        const plan = read ? await resolveDevice(read) : null;
+    /**
+     * @param reference the captured system sound, when the recorder has it.
+     * Used to raise the gate's threshold while the speakers are loud - see
+     * DUCK_MAX_DB - and never mixed into anything.
+     */
+    static async open(ctx: AudioContext, reference?: AudioNode | null): Promise<MicInput | null> {
+        const read = micPlan() ?? {
+            discordDeviceId: "",
+            discordDeviceName: "",
+            deviceId: "",
+            matched: "default" as const,
+            openedLabel: "",
+            volume: 1,
+            echoCancellation: true,
+            noiseSuppression: false,
+            autoGainControl: true,
+            mode: "unknown" as const,
+            threshold: null,
+            selfMute: false
+        };
 
-        const stream = plan
-            ? await openStream(plan)
-            : await navigator.mediaDevices.getUserMedia({ audio: true });
+        const { stream, plan } = await openMic(read);
 
         if (!stream.getAudioTracks().length) {
             stream.getTracks().forEach(t => t.stop());
             return null;
         }
 
-        const resolved: MicPlan = plan ?? {
-            discordDeviceId: "",
-            discordDeviceName: "",
-            deviceId: "",
-            matched: "default",
-            volume: 1,
-            echoCancellation: true,
-            noiseSuppression: false,
-            autoGainControl: true,
-            mode: "unknown",
-            threshold: null,
-            selfMute: false
-        };
-
         const source = ctx.createMediaStreamSource(stream);
+
+        const highpass = ctx.createBiquadFilter();
+        highpass.type = "highpass";
+        highpass.frequency.value = HIGHPASS_HZ;
 
         const delay = ctx.createDelay(1);
         delay.delayTime.value = LOOKAHEAD_MS / 1000;
@@ -354,22 +458,63 @@ export class MicInput {
         const gate = ctx.createGain();
         gate.gain.value = 1;
 
+        /*
+         * A voice against a game is never loud enough in one place and always
+         * too loud in another: leaning into the microphone for a call-out, back
+         * in the chair for the rest. Discord evens that out on its own side and
+         * a clip had nothing, which is most of why the same voice sounded worse
+         * in a clip than in the call it came from.
+         *
+         * Gentle on purpose - 3:1 from -24 dB, which is a hand on the fader
+         * rather than a radio compressor - and after the gate, so what it
+         * brings up is a voice and never the silence between two of them.
+         */
+        const compressor = ctx.createDynamicsCompressor();
+        compressor.threshold.value = -24;
+        compressor.knee.value = 12;
+        compressor.ratio.value = 3;
+        compressor.attack.value = 0.005;
+        compressor.release.value = 0.15;
+
+        const makeup = ctx.createGain();
+        makeup.gain.value = 1.6;
+
         const analyser = ctx.createAnalyser();
         analyser.fftSize = 1024;
 
-        const mic = new MicInput(ctx, resolved, stream, source, delay, gate, analyser, ctx.createMediaStreamDestination());
+        let listen: AnalyserNode | null = null;
+        if (reference) {
+            try {
+                listen = ctx.createAnalyser();
+                listen.fftSize = 1024;
+                reference.connect(listen);
+            } catch (e) {
+                logger.warn("Could not listen to the system sound, the gate will not follow the speakers", e);
+                listen = null;
+            }
+        }
+
+        const mic = new MicInput(
+            ctx, plan, stream, source, highpass, delay, gate, compressor, makeup, analyser,
+            ctx.createMediaStreamDestination(), listen
+        );
+        mic.refSource = listen ? reference ?? null : null;
         mic.wire();
         mic.start();
 
         current = mic;
         logger.info(`Microphone: ${mic.describe()}`);
 
+        if (plan.matched === "none") {
+            logger.warn(`Discord is set to "${plan.discordDeviceName || plan.discordDeviceId}" but nothing in Chromium's list matches it; recording ${plan.openedLabel || "the system default"} instead`);
+        }
+
         return mic;
     }
 
-    /** Where the recorder takes the gated signal from. */
+    /** Where the recorder takes the gated, levelled signal from. */
     get node(): AudioNode {
-        return this.gate;
+        return this.makeup;
     }
 
     /**
@@ -395,19 +540,23 @@ export class MicInput {
             open: this.open,
             level: this.level,
             selfMute: this.plan.selfMute && this.call,
-            device: this.plan.discordDeviceName || (this.plan.deviceId ? "Discord's input device" : "System default input"),
+            // What is being recorded, not what Discord is set to: those are the
+            // same thing only when the match worked, and the row is the place
+            // that has to say so when it did not.
+            device: this.plan.openedLabel || this.plan.discordDeviceName || "System default input",
             mode: this.plan.mode
         };
     }
 
     /** One line for the log and the microphone check. */
     describe(): string {
-        const device = this.plan.discordDeviceName || this.plan.discordDeviceId || "the system default";
+        const wanted = this.plan.discordDeviceName || this.plan.discordDeviceId || "the system default";
+        const device = this.plan.openedLabel || wanted;
         const how = {
             id: "matched by id",
-            name: "matched by name",
+            name: `matched by name to Discord's ${wanted}`,
             default: "Discord is on the system default",
-            none: "no match, using the system default"
+            none: `no match for Discord's ${wanted}, using the system default`
         }[this.plan.matched];
 
         const track: MediaTrackSettings = this.stream.getAudioTracks()[0]?.getSettings?.() ?? {};
@@ -433,10 +582,16 @@ export class MicInput {
     }
 
     private wire(): void {
-        this.source.connect(this.delay);
-        this.source.connect(this.analyser);
+        // The high-pass sits in front of the detector as well as the signal:
+        // a gate that measures the rumble it is about to remove reads a noise
+        // floor that is not there and stops opening for the voice.
+        this.source.connect(this.highpass);
+        this.highpass.connect(this.delay);
+        this.highpass.connect(this.analyser);
         this.delay.connect(this.gate);
-        this.gate.connect(this.tap);
+        this.gate.connect(this.compressor);
+        this.compressor.connect(this.makeup);
+        this.makeup.connect(this.tap);
     }
 
     private start(): void {
@@ -484,13 +639,12 @@ export class MicInput {
             && read.autoGainControl === before.autoGainControl;
 
         if (read.discordDeviceId === before.discordDeviceId && sameProcessing) {
-            this.plan = { ...read, deviceId: before.deviceId, matched: before.matched };
+            this.plan = { ...read, deviceId: before.deviceId, matched: before.matched, openedLabel: before.openedLabel };
             return;
         }
 
         try {
-            const plan = await resolveDevice(read);
-            const stream = await openStream(plan);
+            const { stream, plan } = await openMic(read);
 
             if (!stream.getAudioTracks().length) {
                 stream.getTracks().forEach(t => t.stop());
@@ -502,14 +656,42 @@ export class MicInput {
 
             this.stream = stream;
             this.source = this.ctx.createMediaStreamSource(stream);
-            this.source.connect(this.delay);
-            this.source.connect(this.analyser);
+            this.source.connect(this.highpass);
 
             this.plan = plan;
             logger.info(`Microphone changed in Discord: ${this.describe()}`);
         } catch (e) {
             logger.warn("Could not follow the microphone Discord switched to", e);
         }
+    }
+
+    /**
+     * How much louder the microphone has to be right now, in dB, because of
+     * what the speakers are doing.
+     *
+     * Zero on headphones, where the system sound never reaches the capsule and
+     * the meter it is read from is the only thing that changes. Nothing here
+     * can tell the two apart, which is why the effect is capped: at worst a
+     * loud game costs the quietest sentences, and no amount of game moves the
+     * gate more than DUCK_MAX_DB.
+     */
+    private speakerDb(): number {
+        const { reference, refData } = this;
+        if (!reference || !refData) return 0;
+
+        reference.getFloatTimeDomainData(refData);
+
+        let sum = 0;
+        for (let i = 0; i < refData.length; i++) sum += refData[i] * refData[i];
+
+        const rms = Math.sqrt(sum / refData.length);
+        if (rms <= 0) return 0;
+
+        // -45 dBFS of system sound is a quiet menu and moves nothing; the scale
+        // is deliberately shallow, a third of a dB per dB of game.
+        const db = 20 * Math.log10(rms);
+
+        return Math.min(DUCK_MAX_DB, Math.max(0, (db + 45) / 3));
     }
 
     private tick = (): void => {
@@ -532,8 +714,9 @@ export class MicInput {
 
             const now = Date.now();
             const { threshold } = this.plan;
-            const openAt = threshold ?? this.floor + OPEN_MARGIN_DB;
-            const closeAt = threshold !== null ? threshold - 4 : this.floor + CLOSE_MARGIN_DB;
+            const duck = this.speakerDb();
+            const openAt = (threshold ?? this.floor + OPEN_MARGIN_DB) + duck;
+            const closeAt = (threshold !== null ? threshold - 4 : this.floor + CLOSE_MARGIN_DB) + duck;
 
             if (db >= openAt || now < this.speakingUntil) this.holdUntil = now + HOLD_MS;
             else if (this.open && db >= closeAt) this.holdUntil = Math.max(this.holdUntil, now + POLL_MS * 4);
@@ -571,8 +754,12 @@ export class MicInput {
 
         try {
             this.source.disconnect();
+            this.highpass.disconnect();
             this.delay.disconnect();
             this.gate.disconnect();
+            this.compressor.disconnect();
+            this.makeup.disconnect();
+            if (this.refSource && this.reference) this.refSource.disconnect(this.reference);
         } catch { /* the context is already closed */ }
 
         this.stream.getTracks().forEach(t => t.stop());
@@ -639,14 +826,19 @@ export async function micReport(): Promise<string> {
     const read = micPlan();
     if (!read) return "Discord's voice settings are not reachable from here; a clip would use the browser's default microphone.";
 
-    const plan = await resolveDevice(read);
-    const device = plan.discordDeviceName || plan.discordDeviceId || "the system default";
+    // Opened for real, briefly. Nothing short of that can answer the question
+    // the report exists for: the device list has no names until the microphone
+    // has been granted once, so a check that only reads settings would report
+    // a match that the recording then fails to make.
+    const plan = await probeMic(read);
+    const wanted = plan.discordDeviceName || plan.discordDeviceId || "the system default";
+    const device = plan.openedLabel || wanted;
 
     const how = {
         id: "which Chromium can open directly",
-        name: "matched to a Chromium device by name",
+        name: `matched by name to Discord's ${wanted}`,
         default: "which is the system default",
-        none: "which Chromium cannot match - a clip would record the system default instead"
+        none: `no match for Discord's ${wanted}, so a clip records the system default instead`
     }[plan.matched];
 
     const gate = settings.store.micGate === false
@@ -660,7 +852,7 @@ export async function micReport(): Promise<string> {
         : "";
 
     return [
-        `Discord is set to ${device}, ${how}.`,
+        `A clip would record ${device}, ${how}.`,
         `Processing: ${[
             plan.echoCancellation ? "echo cancellation" : "",
             plan.noiseSuppression ? "noise suppression" : "",

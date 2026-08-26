@@ -355,7 +355,7 @@ function Mixer({ compact }: { compact?: boolean; }) {
 
             <Paragraph style={{ marginTop: 6, fontSize: compact ? 12 : undefined, color: "var(--text-muted, #949ba4)" }}>
                 {compact
-                    ? "Levels the buffer records with. They apply to the clips saved from now on, not to what is already on the timeline - a segment's own volume is in the Segment tab."
+                    ? "Levels the buffer records with. They apply to the clips saved from now on, not to what is already on the timeline - a segment's own volume is in the Segment tab. Spotify included: Windows hands its music to the recording already mixed into the system sound, so muting it here silences the next clip and your headphones, and leaves this one exactly as it was recorded."
                     : "Balance of what goes into a clip. Sliders take effect immediately, so they can be set while the buffer is running. Windows hands out the captured source's sound as one stream, so the game, the people talking and the music arrive already mixed together: to give one of them its own slider, send that app to a virtual cable (VB-CABLE, Voicemeeter) and add the cable below as its own channel. Spotify gets a row of its own whenever it is playing here - that one is its volume in Windows rather than a channel in the clip, so it turns the music down in the recording and in your headphones at the same time."}
             </Paragraph>
 
@@ -372,7 +372,15 @@ function Mixer({ compact }: { compact?: boolean; }) {
             {spotify.present && (
                 <AppChannel
                     name="Spotify"
-                    note={spotify.playing ? "Playing on this machine" : "Running, silent"}
+                    // In the studio this row is the one thing on screen that
+                    // does not act on the clip being watched: the music was
+                    // mixed into the recording by Windows and no slider takes
+                    // it back out. Saying so is the only honest option, and it
+                    // is worth saying twice - a mute that visibly changes
+                    // nothing reads as a broken mute.
+                    note={compact
+                        ? "Volume in Windows - changes the next clip, never the one playing"
+                        : spotify.playing ? "Playing on this machine" : "Running, silent"}
                     audio={spotify}
                     compact={compact}
                     onVolume={level => guard("Setting Spotify's volume", () => setSpotifyVolume(level), undefined)}

@@ -84,7 +84,12 @@ using System.Text;
 namespace ClipperAudio {
 [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] public class Enumerator { }
 [Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-public interface IMMDeviceEnumerator { int Skip1(); int GetDefaultAudioEndpoint(int flow, int role, out IMMDevice device); }
+public interface IMMDeviceEnumerator {
+  int EnumAudioEndpoints(int flow, int mask, out IMMDeviceCollection devices);
+  int GetDefaultAudioEndpoint(int flow, int role, out IMMDevice device);
+}
+[Guid("0BD7A1BE-7A1A-44DB-8397-CC5392387B5E"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IMMDeviceCollection { int GetCount(out int count); int Item(int i, out IMMDevice device); }
 [Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
 public interface IMMDevice { int Activate(ref Guid iid, int ctx, IntPtr par, [MarshalAs(UnmanagedType.IUnknown)] out object o); }
 [Guid("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -93,7 +98,7 @@ public interface IManager { int Skip1(); int Skip2(); int GetSessionEnumerator(o
 public interface ISessions { int GetCount(out int count); int GetSession(int i, out IControl session); }
 [Guid("BFB7FF88-7239-4FC9-8FA2-07C950BE9C6D"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
 public interface IControl {
-  int Skip0(); int GetDisplayName([MarshalAs(UnmanagedType.LPWStr)] out string n);
+  int GetState(out int state); int GetDisplayName([MarshalAs(UnmanagedType.LPWStr)] out string n);
   int SetDisplayName([MarshalAs(UnmanagedType.LPWStr)] string v, ref Guid c);
   int GetIconPath([MarshalAs(UnmanagedType.LPWStr)] out string n);
   int SetIconPath([MarshalAs(UnmanagedType.LPWStr)] string v, ref Guid c);
@@ -113,54 +118,75 @@ public interface IMeter { int GetPeakValue(out float peak); }
 public static class Mixer {
   static Guid iid = new Guid("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F");
   static Guid none = Guid.Empty;
-  static ISessions Open() {
-    IMMDevice speakers;
-    Marshal.ThrowExceptionForHR(((IMMDeviceEnumerator)(new Enumerator())).GetDefaultAudioEndpoint(0, 1, out speakers));
-    object manager;
-    Marshal.ThrowExceptionForHR(speakers.Activate(ref iid, 1, IntPtr.Zero, out manager));
-    ISessions list;
-    Marshal.ThrowExceptionForHR(((IManager)manager).GetSessionEnumerator(out list));
-    return list;
+  static System.Collections.Generic.List<ISessions> Open() {
+    // Every active output, not just the default one: a headset on the front
+    // panel and speakers on the back are two endpoints, an application plays
+    // into whichever it was given, and a mute written to the wrong one is a
+    // mute the user watches do nothing.
+    IMMDeviceCollection outputs;
+    Marshal.ThrowExceptionForHR(((IMMDeviceEnumerator)(new Enumerator())).EnumAudioEndpoints(0, 1, out outputs));
+    int count;
+    Marshal.ThrowExceptionForHR(outputs.GetCount(out count));
+    System.Collections.Generic.List<ISessions> all = new System.Collections.Generic.List<ISessions>();
+    for (int i = 0; i < count; i++) {
+      IMMDevice device;
+      if (outputs.Item(i, out device) != 0) continue;
+      object manager;
+      if (device.Activate(ref iid, 1, IntPtr.Zero, out manager) != 0) continue;
+      ISessions list;
+      if (((IManager)manager).GetSessionEnumerator(out list) != 0) continue;
+      all.Add(list);
+    }
+    return all;
   }
   static string Name(uint pid) {
     try { return Process.GetProcessById((int)pid).ProcessName; } catch { return ""; }
   }
   static string Num(float value) { return value.ToString("0.###", CultureInfo.InvariantCulture); }
   public static string List() {
-    ISessions list = Open();
-    int count;
-    Marshal.ThrowExceptionForHR(list.GetCount(out count));
     StringBuilder text = new StringBuilder();
-    for (int i = 0; i < count; i++) {
-      IControl session;
-      if (list.GetSession(i, out session) != 0) continue;
-      uint pid;
-      if (session.GetProcessId(out pid) != 0 || pid == 0) continue;
-      string name = Name(pid);
-      if (name.Length == 0) continue;
-      float level = 0, peak = 0; bool muted = false;
-      IVolume volume = (IVolume)session;
-      volume.GetMasterVolume(out level); volume.GetMute(out muted);
-      ((IMeter)session).GetPeakValue(out peak);
-      text.Append(pid).Append('\t').Append(name).Append('\t').Append(Num(level))
-          .Append('\t').Append(muted ? 1 : 0).Append('\t').Append(Num(peak)).Append('\n');
+    foreach (ISessions list in Open()) {
+      int count;
+      if (list.GetCount(out count) != 0) continue;
+      for (int i = 0; i < count; i++) {
+        IControl session;
+        if (list.GetSession(i, out session) != 0) continue;
+        int state;
+        // Expired means the process that owned it is gone: the entry lingers
+        // for a while and would keep a row on screen with nothing behind it.
+        if (session.GetState(out state) == 0 && state == 2) continue;
+        uint pid;
+        if (session.GetProcessId(out pid) != 0 || pid == 0) continue;
+        string name = Name(pid);
+        if (name.Length == 0) continue;
+        float level = 0, peak = 0; bool muted = false;
+        IVolume volume = (IVolume)session;
+        volume.GetMasterVolume(out level); volume.GetMute(out muted);
+        ((IMeter)session).GetPeakValue(out peak);
+        text.Append(pid).Append('\t').Append(name).Append('\t').Append(Num(level))
+            .Append('\t').Append(muted ? 1 : 0).Append('\t').Append(Num(peak)).Append('\n');
+      }
     }
     return text.ToString();
   }
   public static int Apply(string process, float level, int mute) {
-    ISessions list = Open();
-    int count, touched = 0;
-    Marshal.ThrowExceptionForHR(list.GetCount(out count));
-    for (int i = 0; i < count; i++) {
-      IControl session;
-      if (list.GetSession(i, out session) != 0) continue;
-      uint pid;
-      if (session.GetProcessId(out pid) != 0 || pid == 0) continue;
-      if (!string.Equals(Name(pid), process, StringComparison.OrdinalIgnoreCase)) continue;
-      IVolume volume = (IVolume)session;
-      if (level >= 0) volume.SetMasterVolume(level, ref none);
-      if (mute >= 0) volume.SetMute(mute == 1, ref none);
-      touched++;
+    int touched = 0;
+    foreach (ISessions list in Open()) {
+      int count;
+      if (list.GetCount(out count) != 0) continue;
+      for (int i = 0; i < count; i++) {
+        IControl session;
+        if (list.GetSession(i, out session) != 0) continue;
+        int state;
+        if (session.GetState(out state) == 0 && state == 2) continue;
+        uint pid;
+        if (session.GetProcessId(out pid) != 0 || pid == 0) continue;
+        if (!string.Equals(Name(pid), process, StringComparison.OrdinalIgnoreCase)) continue;
+        IVolume volume = (IVolume)session;
+        if (level >= 0) volume.SetMasterVolume(level, ref none);
+        if (mute >= 0) volume.SetMute(mute == 1, ref none);
+        touched++;
+      }
     }
     return touched;
   }

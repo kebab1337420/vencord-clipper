@@ -456,14 +456,20 @@ class ClipRecorder {
         this.audioCtx = new AudioContext();
         this.destination = this.audioCtx.createMediaStreamDestination();
 
+        let systemSource: MediaStreamAudioSourceNode | null = null;
+
         if (displayTracks.length) {
-            const source = this.audioCtx.createMediaStreamSource(new MediaStream(displayTracks));
-            this.connectChannel(SYSTEM_CHANNEL, source, gainOf(mixer.system));
+            systemSource = this.audioCtx.createMediaStreamSource(new MediaStream(displayTracks));
+            this.connectChannel(SYSTEM_CHANNEL, systemSource, gainOf(mixer.system));
         }
 
         if (includeMic) {
             try {
-                this.mic = await MicInput.open(this.audioCtx);
+                // The system sound goes in as a reference, never as signal: the
+                // gate raises its threshold while the speakers are loud, which
+                // is the only defence against the game coming back in through
+                // the microphone. See ./micInput.
+                this.mic = await MicInput.open(this.audioCtx, systemSource);
 
                 // Discord's input volume slider is not part of the track, so it
                 // is folded into the channel's own level rather than lost.

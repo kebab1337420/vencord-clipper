@@ -12,9 +12,11 @@ usually takes up a couple % of GPU usage
 - Quality controls: video bitrate (1–50 Mbps), audio bitrate (64–320 kbps),
   resolution (source / 2160p → 480p), frame rate (24 / 30 / 60 / 120)
 - Container / codec choice: WebM VP9, WebM VP8, MP4 H.264
-- Optional microphone mixed into the clip audio, using the input device, volume,
-  echo cancellation, noise suppression and gain control already set in Discord's
-  voice settings
+- Optional microphone mixed into the clip audio, matched to Discord's own voice
+  settings: the input device Discord is set to, its input volume, echo
+  cancellation, noise suppression and gain control, plus a noise gate that
+  follows Discord's input sensitivity, so a clip taken alone carries your voice
+  and not the room around it or the speaker bleed people hear as echo
 - Settings grouped into sections — **Capture**, **Audio**, **Clips**,
   **Interface**, **Keybinds** — so every sound source sits under *Audio*
 - Sound mixer in the **Audio** section: one slider (0–300%) and one mute per
@@ -253,6 +255,7 @@ firing it only while Discord is focused.
 | `recorder.ts` | Capture, rolling buffer, saving |
 | `clips.ts` | Clip folder access: listing, loading, renaming, deleting, frame export |
 | `mixer.ts` | Audio channel levels and the input device list behind the sound mixer |
+| `micInput.ts` | Opens the microphone Discord is set to, and gates it the way Discord gates it |
 | `clipSound.ts` | The sound played on save, and the ducking that keeps it out of the clip |
 | `spotify.ts` | Spotify detection and volume, polled only while the mixer is on screen |
 | `appVolume.ts` | Main process: per-application volume through the Windows audio sessions |
@@ -303,12 +306,17 @@ firing it only while Discord is focused.
   title and may need refiling by hand. The categories live in
   `clipper-library.json` next to the clips: deleting that file loses the
   categories, not the clips.
-- **Mic processing is Chromium's.** The plugin reads Discord's voice settings and
-  asks `getUserMedia` for the same device, volume, echo cancellation, noise
-  suppression and gain control, so the clip matches what Discord sends. Krisp is
-  a separate native module Discord applies to its own voice connection only; it
-  is not part of the capture, so heavy background noise may survive into the clip
-  even when Krisp is on in Discord.
+- **Mic processing is Chromium's.** Discord mints its input device ids in its own
+  native voice module and `getUserMedia` refuses them, so the plugin matches
+  the device by name and falls back to the system default when no name matches.
+  **Check the microphone** in the plugin toolbox says which one it actually
+  opened. The gate is the plugin's own: it reads Discord's input sensitivity but
+  measures the level itself, so it opens and closes close to Discord's transmit
+  indicator rather than exactly with it. Krisp is a separate native module
+  Discord applies to its own voice connection only; it is not part of the
+  capture, so heavy background noise may survive into the clip even when Krisp
+  is on in Discord. The gate can be turned off in the settings, which records
+  everything the microphone hears.
 - **Memory use** scales with `clip length × video bitrate`. 300s at 50 Mbps is
   roughly 1.8 GB held in RAM — the defaults (30s at 8 Mbps) sit around 30 MB.
 - **MP4 recording** depends on the Chromium build shipped with your Discord

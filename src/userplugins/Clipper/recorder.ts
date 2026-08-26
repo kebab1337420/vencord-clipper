@@ -15,10 +15,11 @@
 import { showNotification } from "@api/Notifications";
 import { Logger } from "@utils/Logger";
 import type { PluginNative } from "@utils/types";
-import { MediaEngineStore, Toasts, UserStore } from "@webpack/common";
+import { Toasts, UserStore } from "@webpack/common";
 
 import { playClipSound } from "./clipSound";
 import { dropMeta, tagSavedClip } from "./library";
+import { MicInput } from "./micInput";
 import { gainOf, MIC_CHANNEL, type MixerLevel, readMixer, SYSTEM_CHANNEL } from "./mixer";
 import { probeAudioTracks } from "./mp4";
 import { muxNativeAudio } from "./mux";
@@ -167,7 +168,8 @@ class ClipRecorder {
     /** Poll that keeps that set level with the voice channel. */
     private consentTicker: ReturnType<typeof setInterval> | null = null;
     private stream: MediaStream | null = null;
-    private micStream: MediaStream | null = null;
+    /** Discord's microphone, gated the way Discord gates it. See ./micInput. */
+    private mic: MicInput | null = null;
     /** Loopback opened separately when the captured source carried no sound. */
     private systemStream: MediaStream | null = null;
     private audioCtx: AudioContext | null = null;
@@ -409,7 +411,7 @@ class ClipRecorder {
             // The microphone joins them, so the person recording is not the one
             // person a mute can silence.
             const me = UserStore.getCurrentUser();
-            if (this.micStream && me?.id) voiceBuffers.attach(this.micStream, me.id, (me as any).globalName || me.username || "You");
+            if (this.mic && me?.id) voiceBuffers.attach(this.mic.track, me.id, (me as any).globalName || me.username || "You");
 
             this.setState("recording");
             toast(`Clip buffer running - last ${settings.store.clipLength}s kept`, Toasts.Type.SUCCESS);
@@ -460,19 +462,12 @@ class ClipRecorder {
         }
 
         if (includeMic) {
-            const mic = discordMicSettings();
-
             try {
-                this.micStream = await captureMic(mic);
+                this.mic = await MicInput.open(this.audioCtx);
 
-                if (this.micStream.getAudioTracks().length) {
-                    const source = this.audioCtx.createMediaStreamSource(this.micStream);
-
-                    // Discord's input volume slider is not part of the track, so
-                    // it is folded into the channel's own level rather than lost.
-                    const device = Math.min(2, Math.max(0, (mic?.volume ?? 100) / 100));
-                    this.connectChannel(MIC_CHANNEL, source, gainOf(mixer.mic), device);
-                }
+                // Discord's input volume slider is not part of the track, so it
+                // is folded into the channel's own level rather than lost.
+                if (this.mic) this.connectChannel(MIC_CHANNEL, this.mic.node, gainOf(mixer.mic), this.mic.volume);
             } catch (e) {
                 logger.warn("Microphone unavailable, recording without it", e);
             }
@@ -1018,7 +1013,7 @@ class ClipRecorder {
         this.recordStream = null;
 
         this.stream?.getTracks().forEach(t => t.stop());
-        this.micStream?.getTracks().forEach(t => t.stop());
+        this.mic?.stop();
         this.systemStream?.getTracks().forEach(t => t.stop());
         this.extraStreams.forEach(s => s.getTracks().forEach(t => t.stop()));
         this.audioCtx?.close().catch(() => void 0);
@@ -1031,7 +1026,8 @@ class ClipRecorder {
 
         this.channels.clear();
         this.extraStreams = [];
-        this.stream = this.micStream = this.systemStream = null;
+        this.mic = null;
+        this.stream = this.systemStream = null;
         this.audioCtx = null;
         this.destination = null;
     }
@@ -1617,76 +1613,6 @@ export function setPickerOpener(open: (() => void) | null) {
 
 export function setStudioOpener(open: (() => void) | null) {
     studioOpener = open;
-}
-
-interface MicSettings {
-    /** Discord's selected input device, empty or "default" for the system one. */
-    deviceId: string;
-    /** Input volume slider, 0-200 in Discord's UI. */
-    volume: number;
-    echoCancellation: boolean;
-    noiseSuppression: boolean;
-    autoGainControl: boolean;
-}
-
-/**
- * Reads the voice settings the user already configured in Discord.
- *
- * Plain `getUserMedia({ audio: true })` grabs the system default device with the
- * browser defaults, which is why the mic track used to sound nothing like the
- * one in a call: wrong device when several exist, and no echo cancellation or
- * noise suppression.
- *
- * Krisp ("Noise Cancellation") runs inside Discord's native voice engine and
- * cannot be tapped from here, so it is folded into the WebRTC noise suppression
- * flag: the intent is the same, the algorithm is weaker.
- *
- * Returns null when the store is not around (web build, or Discord moved it),
- * and the caller then keeps the old behaviour.
- */
-function discordMicSettings(): MicSettings | null {
-    const store = MediaEngineStore as any;
-    if (typeof store?.getInputDeviceId !== "function") return null;
-
-    try {
-        return {
-            deviceId: store.getInputDeviceId() ?? "",
-            volume: typeof store.getInputVolume === "function" ? store.getInputVolume() : 100,
-            echoCancellation: store.getEchoCancellation?.() ?? true,
-            noiseSuppression: (store.getNoiseSuppression?.() ?? false) || (store.getNoiseCancellation?.() ?? false),
-            autoGainControl: store.getAutomaticGainControl?.() ?? true
-        };
-    } catch (e) {
-        logger.warn("Could not read Discord's voice settings, using the browser defaults", e);
-        return null;
-    }
-}
-
-/** Opens the microphone Discord is set to use, with Discord's processing. */
-async function captureMic(mic: MicSettings | null): Promise<MediaStream> {
-    if (!mic) return navigator.mediaDevices.getUserMedia({ audio: true });
-
-    const processing: MediaTrackConstraints = {
-        echoCancellation: mic.echoCancellation,
-        noiseSuppression: mic.noiseSuppression,
-        autoGainControl: mic.autoGainControl
-    };
-
-    // "default" is Chromium's own alias for the system device; asking for it by
-    // id is both pointless and rejected by some backends.
-    const wanted = mic.deviceId && mic.deviceId !== "default"
-        ? { ...processing, deviceId: { exact: mic.deviceId } }
-        : processing;
-
-    try {
-        return await navigator.mediaDevices.getUserMedia({ audio: wanted });
-    } catch (e) {
-        if (wanted === processing) throw e;
-
-        // The device was unplugged since Discord picked it.
-        logger.warn("Discord's input device is unavailable, falling back to the default one", e);
-        return navigator.mediaDevices.getUserMedia({ audio: processing });
-    }
 }
 
 /**

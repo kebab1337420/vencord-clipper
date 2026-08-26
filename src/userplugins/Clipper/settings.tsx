@@ -76,6 +76,11 @@ export const settings = definePluginSettings({
         type: OptionType.CUSTOM,
         default: false
     },
+    micGate: {
+        type: OptionType.BOOLEAN,
+        description: "Record the microphone only while Discord would be transmitting it: above the input sensitivity, and never while you are muted in Discord. Off records everything the microphone hears, the room and the speakers included",
+        default: true
+    },
     audioBitrate: {
         type: OptionType.CUSTOM,
         default: 128

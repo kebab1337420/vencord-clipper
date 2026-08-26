@@ -20,6 +20,7 @@ import { Paragraph } from "@components/Paragraph";
 import { Logger } from "@utils/Logger";
 import { useEffect, useState } from "@webpack/common";
 
+import { type MicStatus, micStatus, watchMic } from "../micInput";
 import {
     clampGain,
     DEFAULT_MIXER,
@@ -224,6 +225,20 @@ function AppChannel({ name, note, audio, compact, onVolume, onMute }: {
     );
 }
 
+/**
+ * What the microphone row says under its name.
+ *
+ * The gate is invisible otherwise: a slider that looks open while nothing is
+ * being recorded reads as a bug rather than as silence being kept out.
+ */
+function micNote(mic: MicStatus): string {
+    if (!mic.gated) return `${mic.device} - everything it hears`;
+    if (mic.selfMute) return `${mic.device} - muted in Discord, so the clip gets no voice either`;
+    if (!mic.live) return `${mic.device} - recorded while you speak`;
+
+    return mic.open ? `${mic.device} - recording your voice` : `${mic.device} - quiet, waiting for your voice`;
+}
+
 function Mixer({ compact }: { compact?: boolean; }) {
     const includeMic = settings.use(["includeMic"])?.includeMic ?? false;
     const [mixer, setMixer] = useState<MixerConfig>(() => guard("Reading the mixer", readMixer, DEFAULT_MIXER));
@@ -238,9 +253,20 @@ function Mixer({ compact }: { compact?: boolean; }) {
         peak: 0
     }));
 
+    const [mic, setMic] = useState<MicStatus>(() => guard("Reading the microphone", micStatus, {
+        live: false,
+        gated: true,
+        open: false,
+        level: null,
+        selfMute: false,
+        device: "Discord's input device",
+        mode: "unknown"
+    }));
+
     // Only while the panel is on screen: the reading behind it is a round trip
     // to a helper process, and it stops itself once nobody is watching.
     useEffect(() => guard("Watching Spotify", () => watchSpotify(setSpotify), () => void 0), []);
+    useEffect(() => guard("Watching the microphone", () => watchMic(setMic), () => void 0), []);
 
     useEffect(() => {
         const refresh = () => void listInputDevices().then(setDevices);
@@ -357,7 +383,7 @@ function Mixer({ compact }: { compact?: boolean; }) {
             <Channel
                 id={MIC_CHANNEL}
                 name="Microphone"
-                note={includeMic ? "Discord's input device" : "Microphone turned off in the settings"}
+                note={includeMic ? micNote(mic) : "Microphone turned off in the settings"}
                 compact={compact}
                 level={mixer.mic}
                 meter={levels[MIC_CHANNEL] ?? 0}

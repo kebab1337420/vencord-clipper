@@ -18,6 +18,7 @@ import { ClipperChatButton, ClipperIcon } from "./components/ClipperChatButton";
 import { ClipperOverlay } from "./components/ClipperOverlay";
 import { encoderSummary, probeEncoders } from "./encoders";
 import { runShortcut, startGlobalKeybinds, stopGlobalKeybinds, syncGlobalKeybinds } from "./globalKeybinds";
+import { micReport } from "./micInput";
 import { logger, recorder } from "./recorder";
 import { settings } from "./settings";
 import { stopSpotifyWatch } from "./spotify";
@@ -177,6 +178,20 @@ export default definePlugin({
                 type: Toasts.Type.MESSAGE,
                 options: { duration: 8000, position: Toasts.Position.BOTTOM }
             });
+        },
+        "Check the microphone": () => {
+            void (async () => {
+                const report = await micReport();
+
+                logger.info(`Microphone check\n${report}`);
+
+                Toasts.show({
+                    id: Toasts.genId(),
+                    message: report,
+                    type: Toasts.Type.MESSAGE,
+                    options: { duration: 12000, position: Toasts.Position.BOTTOM }
+                });
+            })();
         }
     },
 

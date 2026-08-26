@@ -2150,7 +2150,24 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         };
 
         setSources(list => [...list, source]);
-        commit(p => ({ ...p, segments: [...p.segments, segment] }));
+
+        /*
+         * The mixer's per-person levels travel with the clip.
+         *
+         * They were set while the buffer was running, which is when the call was
+         * still a set of separate tracks and the only moment somebody could be
+         * turned down on purpose; this is the first place anything can act on
+         * them. Levels already on the timeline win, because those were set here,
+         * on this montage, with the clip in front of the person setting them.
+         */
+        const saved = origin?.kind === "clip" ? meta[origin.name]?.levels : undefined;
+
+        commit(p => ({
+            ...p,
+            segments: [...p.segments, segment],
+            ...(saved ? { voiceLevels: { ...saved, ...p.voiceLevels } } : {})
+        }));
+
         setSelected(segment.id);
     };
 

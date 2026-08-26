@@ -8,7 +8,10 @@ usually takes up a couple % of GPU usage
 
 - Rolling in-memory buffer, configurable from 10s to 300s
 - Save keybind and start/stop keybind, both rebindable from the settings panel,
-  registered system-wide so they fire from inside a game
+  registered system-wide so they fire from inside a game. The picker takes
+  combinations: it shows the modifiers as they are held, and it hands the
+  system-wide binds back to the OS while it listens, so the combination being
+  replaced reaches the picker instead of being swallowed on its way
 - Quality controls: video bitrate (1–50 Mbps), audio bitrate (64–320 kbps),
   resolution (source / 2160p → 480p), frame rate (24 / 30 / 60 / 120)
 - Container / codec choice: WebM VP9, WebM VP8, MP4 H.264
@@ -27,6 +30,14 @@ usually takes up a couple % of GPU usage
   captured source, **Microphone** is your own voice, and any input device can be
   added as its own channel. Moving a slider is heard in the clip being buffered
   right now, not only in the next one
+- **One channel per person in the call**, under the same mixer, with a live
+  meter each. Everybody is recorded on a track of their own beside the clip, so
+  a level here is the level that person's own recording is added back at when
+  the clip is put together, and a mute leaves their track out of the sum rather
+  than filtering them out of a mix. It is saved with the clip and applied the
+  moment it is opened in the studio, where it can still be changed. Unlike
+  Discord's own per-user volume, none of it touches what you hear while you
+  play
 - **Spotify row in the mixer**, when Spotify is playing through this machine.
   Detection is the audio session on the output, not Discord's linked account,
   which follows whichever device is playing — including a phone in another room
@@ -198,10 +209,12 @@ What differs there:
   picker is empty there and says so — start the buffer and pick the source in
   the portal dialog. X11 lists screens and windows normally.
 - **No per-application audio.** Chromium hands out the captured source's sound
-  as one already-mixed loopback stream, so the game, the people talking and the
-  music cannot be told apart by the plugin. To give one app its own slider, send
-  it to a virtual cable (VB-CABLE, Voicemeeter) and add that cable as a channel
-  in the sound mixer.
+  as one already-mixed loopback stream, so the game and the music cannot be told
+  apart by the plugin. To give one app its own slider, send it to a virtual
+  cable (VB-CABLE, Voicemeeter) and add that cable as a channel in the sound
+  mixer. The people in a voice call are the exception, because they are also
+  recorded one track per person: they get a channel each, applied when the clip
+  is put back together rather than while the buffer runs.
 - **System audio is Windows-only** on this capture path. On Linux the clip has
   the microphone (enable **Include mic**) but no desktop audio.
 - **Wayland ignores application-registered hotkeys**, so the keybinds only fire
@@ -248,6 +261,12 @@ microphone in.
 Avoid binding `Ctrl+R` or `Ctrl+Shift+R`: Chromium reloads the client on those
 before any DOM listener runs, so the plugin never sees them.
 
+Combinations are picked by holding the modifiers and pressing the key. The
+picker shows what is held while it waits, and the plugin's system-wide binds are
+unregistered for as long as it is open — otherwise the OS swallows the
+combination that is already bound and the picker never sees the key it is being
+asked to replace.
+
 Keybinds are registered with the OS through Electron's `globalShortcut`, so they
 fire while a game is focused, not only inside Discord. Turn **Global keybinds**
 off in the settings to keep them Discord-only. A bind another application
@@ -277,6 +296,8 @@ firing it only while Discord is focused.
 | `components/ClipperOverlay.tsx` | Floating button, source picker, capture options |
 | `components/ClipStudio.tsx` | Clip library, categories, timeline, effects, captions, render |
 | `components/AudioMixer.tsx` | Sound mixer rows, in the settings and in the studio sidebar |
+| `components/VoicePanel.tsx` | One mixer channel per person in the call, with a live meter |
+| `voiceRecord.ts` | One rolling buffer per person, saved as tracks beside the clip |
 | `components/SettingsSection.tsx` | Section headers that group the settings panel |
 | `components/ClipperChatButton.tsx` | Chat bar button |
 | `components/KeybindInput.tsx` | Keybind picker used by the settings |

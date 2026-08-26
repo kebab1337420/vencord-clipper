@@ -18,7 +18,7 @@ import { Toasts } from "@webpack/common";
 
 import { logger, recorder } from "./recorder";
 import { settings } from "./settings";
-import { formatKeybind, toAccelerator } from "./utils";
+import { formatKeybind, toAccelerator, watchKeybindSuspension } from "./utils";
 
 const Native = VencordNative.pluginHelpers.Clipper as PluginNative<typeof import("./native")>;
 
@@ -70,6 +70,17 @@ export async function startGlobalKeybinds(): Promise<void> {
 
     await syncGlobalKeybinds();
 
+    // A picker cannot be shown a combination the OS is swallowing on our behalf,
+    // so the registration steps aside for as long as one is open.
+    watchKeybindSuspension(suspended => {
+        if (!suspended) {
+            void syncGlobalKeybinds();
+            return;
+        }
+
+        Native.unregisterShortcuts().catch(e => logger.warn("Could not free the global keybinds", e));
+    });
+
     if (running) return;
     running = true;
 
@@ -120,6 +131,7 @@ export async function syncGlobalKeybinds(): Promise<void> {
 export function stopGlobalKeybinds(): void {
     generation++;
     running = false;
+    watchKeybindSuspension(null);
 
     if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return;
     Native.unregisterShortcuts().catch(e => logger.warn("Could not drop the global keybinds", e));

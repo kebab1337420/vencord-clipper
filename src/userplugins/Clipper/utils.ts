@@ -215,3 +215,58 @@ export function formatTime(seconds: number): string {
 
     return `${minutes}:${rest.toFixed(1).padStart(4, "0")}`;
 }
+
+/*
+ * Whether a keybind is being picked right now.
+ *
+ * This lives here rather than beside the shortcuts themselves. The picker is a
+ * settings component and the shortcut module pulls in the recorder, so having
+ * the picker import it closes an import cycle around a module that builds a
+ * recorder as it loads. This one imports nothing, so both sides can depend on
+ * it.
+ *
+ * Counted rather than a flag: the settings panel holds three pickers, and
+ * opening a second one before the first has closed must not hand the binds back
+ * while the second is still listening.
+ */
+let suspensions = 0;
+let onSuspension: ((suspended: boolean) => void) | null = null;
+
+/**
+ * Follows the picker, so the OS-level binds can be freed while one is open.
+ *
+ * Set by the shortcut module, which is the only thing that can register and
+ * unregister them. Null unhooks it.
+ */
+export function watchKeybindSuspension(listener: ((suspended: boolean) => void) | null): void {
+    onSuspension = listener;
+}
+
+/** True while a keybind is being picked, so the shortcuts must not fire. */
+export function keybindsSuspended(): boolean {
+    return suspensions > 0;
+}
+
+/**
+ * Holds the shortcuts back until the returned function is called.
+ *
+ * A registered accelerator is swallowed by the OS before the renderer sees the
+ * key, which is exactly why a combination could not be assigned: pressing the
+ * one already bound produced no event at all. While a picker is open the
+ * registration is dropped and the in-client listener stands down, so every
+ * combination reaches the picker and none of them saves a clip on the way.
+ */
+export function suspendKeybinds(): () => void {
+    suspensions++;
+    if (suspensions === 1) onSuspension?.(true);
+
+    let released = false;
+
+    return () => {
+        if (released) return;
+        released = true;
+
+        suspensions = Math.max(0, suspensions - 1);
+        if (!suspensions) onSuspension?.(false);
+    };
+}

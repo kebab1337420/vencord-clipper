@@ -5,30 +5,40 @@
  */
 
 /*
- * Vencord Clipper - one slider per person in the call
+ * Vencord Clipper - one channel per person in the call
  *
- * The mixer above this panel balances whole sources; this one balances the
- * people inside the one source that carries a conversation. It drives Discord's
- * own per-user volume, which means two things worth stating plainly: it is the
- * same level the rest of the client uses, so it stays set after the recording,
- * and it has to be set *before* the clip is saved, because the call arrives at
- * this client already mixed and nothing can pull it apart afterwards.
+ * The rows above balance whole sources; these balance the people inside the one
+ * source that carries a conversation, and they are channels in the same sense:
+ * a slider and a mute of their own, stored with the rest of the mixer, applied
+ * to the clips saved from now on.
+ *
+ * What makes that possible is that the call is not only recorded as the mix
+ * that reaches this machine's output. Every participant is also recorded on a
+ * track of their own - by Discord's clip engine, or by `voiceRecord.ts` into
+ * files beside the clip - so a level here is not a filter fighting a mix: it is
+ * the level that person's own track is added back at when the clip is put
+ * together, and a mute simply leaves their track out of the sum.
+ *
+ * This used to drive Discord's per-user volume instead, which had the price of
+ * changing what you hear while you play. It no longer touches it: turning
+ * somebody down for a clip and turning them down in your headphones are two
+ * different wishes, and only one of them was being asked for here.
  */
 
+import { Button } from "@components/Button";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import { useEffect, useState } from "@webpack/common";
 
-import { localMuted, localVolume, setLocalMuted, setLocalVolume, voiceParticipants,type VoicePerson } from "../voice";
+import { clampGain, type MixerLevel } from "../mixer";
+import { voiceActivity, voiceParticipants, type VoicePerson } from "../voice";
 
 /** How often the panel re-reads the channel. Cheap: a few store lookups. */
 const REFRESH_MS = 2000;
 
-interface Level {
-    volume: number;
-    muted: boolean;
-}
+/** How often the meters are read while the buffer is running. */
+const METER_MS = 100;
 
 const ROW: React.CSSProperties = {
     display: "flex",
@@ -47,7 +57,7 @@ const AVATAR: React.CSSProperties = {
 };
 
 const VALUE: React.CSSProperties = {
-    width: 42,
+    width: 46,
     flex: "0 0 auto",
     textAlign: "right",
     fontSize: 13,
@@ -55,12 +65,43 @@ const VALUE: React.CSSProperties = {
     color: "var(--text-muted, #949ba4)"
 };
 
-function Person({ person, level, compact, onChange }: {
+const UNTOUCHED: MixerLevel = { gain: 1, muted: false };
+
+/** Green bar following how loud that person is right now. */
+function Meter({ level }: { level: number; }) {
+    return (
+        <div
+            style={{
+                width: 56,
+                height: 6,
+                flex: "0 0 auto",
+                overflow: "hidden",
+                borderRadius: 3,
+                background: "var(--background-tertiary, #1e1f22)"
+            }}
+        >
+            <div
+                style={{
+                    width: `${Math.round(Math.min(1, level) * 100)}%`,
+                    height: "100%",
+                    background: level > 0.9 ? "var(--status-danger, #da373c)" : "var(--green-360, #23a55a)",
+                    transition: "width .1s linear"
+                }}
+            />
+        </div>
+    );
+}
+
+function Person({ person, level, meter, compact, onChange }: {
     person: VoicePerson;
-    level: Level;
+    level: MixerLevel;
+    meter: number;
     compact?: boolean;
-    onChange(next: Level): void;
+    onChange(next: MixerLevel): void;
 }) {
+    // Your own voice reaches a clip through the microphone channel, which has
+    // its own slider, its own gate and its own device. A second one here would
+    // be a slider that moves nothing.
     const disabled = person.self;
 
     return (
@@ -79,7 +120,7 @@ function Person({ person, level, compact, onChange }: {
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap"
                 }}
-                title={disabled ? `${person.name} - your own voice comes from the microphone channel` : person.name}
+                title={disabled ? `${person.name} - your own voice is the microphone channel` : person.name}
             >
                 {person.name}
             </div>
@@ -87,49 +128,46 @@ function Person({ person, level, compact, onChange }: {
             <input
                 type="range"
                 min={0}
-                max={200}
+                max={300}
                 step={5}
-                value={level.muted ? 0 : level.volume}
+                value={Math.round(level.gain * 100)}
                 disabled={disabled}
-                style={{ flex: 1, minWidth: 70 }}
-                onChange={e => onChange({ volume: Number(e.currentTarget.value), muted: false })}
+                style={{ flex: 1, minWidth: 70, accentColor: "var(--brand-experiment, #5865f2)" }}
+                onChange={e => onChange({ ...level, gain: clampGain(Number(e.currentTarget.value) / 100) })}
             />
 
-            <span style={VALUE}>{disabled ? "-" : `${level.muted ? 0 : level.volume}%`}</span>
+            <span style={VALUE}>
+                {disabled ? "-" : level.muted ? "muted" : `${Math.round(level.gain * 100)}%`}
+            </span>
 
-            <button
-                type="button"
+            {!compact && <Meter level={disabled ? 0 : meter} />}
+
+            <Button
+                size="small"
+                variant={level.muted ? "primary" : "secondary"}
                 disabled={disabled}
-                title={level.muted ? "Let them back into the clip" : "Keep them out of the clip"}
-                style={{
-                    padding: "3px 8px",
-                    border: "none",
-                    borderRadius: 4,
-                    background: level.muted ? "var(--status-danger, #da373c)" : "var(--button-secondary-background, #4e5058)",
-                    color: "#fff",
-                    fontSize: 12,
-                    cursor: disabled ? "default" : "pointer",
-                    opacity: disabled ? 0.5 : 1
-                }}
                 onClick={() => onChange({ ...level, muted: !level.muted })}
             >
-                {level.muted ? "Muted" : "Mute"}
-            </button>
+                {level.muted ? "Unmute" : "Mute"}
+            </Button>
         </div>
     );
 }
 
-function Voices({ compact }: { compact?: boolean; }) {
+function Voices({ compact, voices, onChange }: {
+    compact?: boolean;
+    voices: Record<string, MixerLevel>;
+    onChange(userId: string, level: MixerLevel): void;
+}) {
     const [people, setPeople] = useState<VoicePerson[]>([]);
-    const [levels, setLevels] = useState<Record<string, Level>>({});
+    const [meters, setMeters] = useState<Record<string, number>>({});
 
     /*
      * The channel is polled rather than subscribed to.
      *
-     * Three different dispatches move this panel - someone joining, someone
-     * being muted somewhere else, a volume changed from their right-click menu -
-     * and a two second re-read costs a handful of store lookups against a list
-     * that is never longer than a voice channel.
+     * Two different dispatches move this list - somebody joining, somebody
+     * leaving - and a two second re-read costs a handful of store lookups
+     * against a list that is never longer than a voice channel.
      */
     useEffect(() => {
         let alive = true;
@@ -139,10 +177,6 @@ function Voices({ compact }: { compact?: boolean; }) {
 
             const found = voiceParticipants();
             setPeople(current => (sameIds(current, found) ? current : found));
-
-            const next: Record<string, Level> = {};
-            for (const person of found) next[person.id] = { volume: localVolume(person.id), muted: localMuted(person.id) };
-            setLevels(next);
         };
 
         refresh();
@@ -154,14 +188,25 @@ function Voices({ compact }: { compact?: boolean; }) {
         };
     }, []);
 
-    const apply = (id: string, next: Level) => {
-        // Written to the state first: the poll below would otherwise snap the
-        // slider back to the old value between the change and the next read.
-        setLevels(current => ({ ...current, [id]: next }));
+    // The activity buffer only runs while something is being recorded, so the
+    // meters cost nothing the rest of the time.
+    useEffect(() => {
+        if (!people.length) return;
 
-        setLocalMuted(id, next.muted);
-        if (!next.muted) setLocalVolume(id, next.volume);
-    };
+        const timer = setInterval(() => {
+            if (!voiceActivity.active) {
+                setMeters(current => (Object.keys(current).length ? {} : current));
+                return;
+            }
+
+            const next: Record<string, number> = {};
+            for (const person of people) next[person.id] = voiceActivity.levelNow(person.id);
+
+            setMeters(next);
+        }, METER_MS);
+
+        return () => clearInterval(timer);
+    }, [people]);
 
     if (!people.length) return null;
 
@@ -171,8 +216,8 @@ function Voices({ compact }: { compact?: boolean; }) {
 
             <Paragraph style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted, #949ba4)" }}>
                 {compact
-                    ? "Their level in this client, and so in the clips saved from now on. The call arrives already mixed, so this cannot be changed afterwards."
-                    : "Each person's level in this client, which is the level they are recorded at. Discord mixes the call before it reaches the browser, so nobody can be turned down after the fact - set them here while the buffer runs. These are the same volumes as the right-click menu, and they stay set."}
+                    ? "One channel per person, applied to the clips saved from now on - the clip on the timeline has its own levels in the Voices tab. Everybody is recorded on a track of their own, so a mute leaves them out of the mix rather than filtering them out of it, and your headphones are not touched."
+                    : "One channel per person in the call, saved with the clip and applied when it is put back together. Everybody is recorded on a track of their own beside the clip, so turning somebody down changes the level their own recording is added back at, and muting them leaves their track out of the sum - the others carry on over the hole where they were. None of this touches what you hear while you play, and any of it can still be changed afterwards in the studio."}
             </Paragraph>
 
             {people.map(person => (
@@ -180,8 +225,9 @@ function Voices({ compact }: { compact?: boolean; }) {
                     key={person.id}
                     person={person}
                     compact={compact}
-                    level={levels[person.id] ?? { volume: 100, muted: false }}
-                    onChange={next => apply(person.id, next)}
+                    level={voices[person.id] ?? UNTOUCHED}
+                    meter={meters[person.id] ?? 0}
+                    onChange={next => onChange(person.id, next)}
                 />
             ))}
         </section>
@@ -193,10 +239,14 @@ function sameIds(a: VoicePerson[], b: VoicePerson[]): boolean {
 }
 
 /** Mounted by the mixer, so both the settings panel and the studio get it. */
-export function VoicePanel({ compact }: { compact?: boolean; } = {}) {
+export function VoicePanel({ compact, voices, onChange }: {
+    compact?: boolean;
+    voices: Record<string, MixerLevel>;
+    onChange(userId: string, level: MixerLevel): void;
+}) {
     return (
         <ErrorBoundary message="The Clipper voice panel could not be rendered.">
-            <Voices compact={compact} />
+            <Voices compact={compact} voices={voices} onChange={onChange} />
         </ErrorBoundary>
     );
 }

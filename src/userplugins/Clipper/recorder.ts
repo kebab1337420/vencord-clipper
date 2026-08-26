@@ -20,7 +20,7 @@ import { Toasts, UserStore } from "@webpack/common";
 import { playClipSound } from "./clipSound";
 import { dropMeta, tagSavedClip } from "./library";
 import { MicInput } from "./micInput";
-import { gainOf, MIC_CHANNEL, type MixerLevel, readMixer, SYSTEM_CHANNEL } from "./mixer";
+import { gainOf, MIC_CHANNEL, type MixerLevel, readMixer, SYSTEM_CHANNEL, voiceLevelsFrom } from "./mixer";
 import { probeAudioTracks } from "./mp4";
 import { muxNativeAudio } from "./mux";
 import type { CaptureSource } from "./native";
@@ -1144,7 +1144,7 @@ class ClipRecorder {
 
             // File the clip under whatever is running now: after the save, the
             // player may already have alt-tabbed away.
-            await tagSavedClip(path, offsets, lanes.map(toMeta), tracks);
+            await tagSavedClip(path, offsets, lanes.map(toMeta), tracks, voiceLevelsFrom(readMixer()));
 
             // Best effort and off the critical path: the library falls back to a
             // placeholder for a clip that has no picture.
@@ -1452,7 +1452,7 @@ class ClipRecorder {
 
         this.lastSaved = { name: saved, path, blob, mimeType: "video/mp4", markers, voices };
 
-        await tagSavedClip(path, markers, voices.map(toMeta));
+        await tagSavedClip(path, markers, voices.map(toMeta), undefined, voiceLevelsFrom(readMixer()));
         void writeThumbnail(blob, saved);
 
         /*
@@ -1532,7 +1532,7 @@ class ClipRecorder {
             const markers = shift(last.markers, gone);
             const voices = shiftTracks(last.voices, gone);
 
-            await tagSavedClip(path, markers, voices.map(toMeta));
+            await tagSavedClip(path, markers, voices.map(toMeta), undefined, voiceLevelsFrom(readMixer()));
             void writeThumbnail(cut, saved);
 
             // Only once the replacement is safely on disk.

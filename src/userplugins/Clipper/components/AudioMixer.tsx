@@ -356,7 +356,7 @@ function Mixer({ compact }: { compact?: boolean; }) {
             <Paragraph style={{ marginTop: 6, fontSize: compact ? 12 : undefined, color: "var(--text-muted, #949ba4)" }}>
                 {compact
                     ? "Levels the buffer records with. They apply to the clips saved from now on, not to what is already on the timeline - a segment's own volume is in the Segment tab. Spotify included: Windows hands its music to the recording already mixed into the system sound, so muting it here silences the next clip and your headphones, and leaves this one exactly as it was recorded."
-                    : "Balance of what goes into a clip. Sliders take effect immediately, so they can be set while the buffer is running. Windows hands out the captured source's sound as one stream, so the game, the people talking and the music arrive already mixed together: to give one of them its own slider, send that app to a virtual cable (VB-CABLE, Voicemeeter) and add the cable below as its own channel. Spotify gets a row of its own whenever it is playing here - that one is its volume in Windows rather than a channel in the clip, so it turns the music down in the recording and in your headphones at the same time."}
+                    : "Balance of what goes into a clip. Sliders take effect immediately, so they can be set while the buffer is running. Windows hands out the captured source's sound as one stream, so the game, the people talking and the music arrive already mixed together: to give an application its own slider, send it to a virtual cable (VB-CABLE, Voicemeeter) and add the cable below as its own channel. The people in a voice call are the exception: they are recorded one track per person as well, so each of them gets a channel of their own at the bottom of this list. Spotify gets a row of its own whenever it is playing here - that one is its volume in Windows rather than a channel in the clip, so it turns the music down in the recording and in your headphones at the same time."}
             </Paragraph>
 
             <Channel
@@ -455,7 +455,11 @@ function Mixer({ compact }: { compact?: boolean; }) {
             )}
 
             {/* Draws nothing outside a call, so it costs an empty list check. */}
-            <VoicePanel compact={compact} />
+            <VoicePanel
+                compact={compact}
+                voices={mixer.voices}
+                onChange={(userId, level) => apply({ ...mixer, voices: { ...mixer.voices, [userId]: level } })}
+            />
         </section>
     );
 }

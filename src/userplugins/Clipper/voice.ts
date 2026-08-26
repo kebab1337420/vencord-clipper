@@ -88,21 +88,7 @@ export interface VoiceFileMeta {
  */
 export type VoiceLevels = Record<string, number>;
 
-/**
- * The bits of Discord's voice connection this module touches.
- *
- * Declared here rather than imported: the shape is small, and a type that only
- * exists to be called through is not worth depending on where the store's own
- * declaration file happens to keep it.
- */
-interface VoiceConnection {
-    context: string;
-    setLocalVolume(userId: string, volume: number): void;
-    setLocalMute(userId: string, muted: boolean): void;
-}
-
 interface VoiceEngine {
-    connections: Set<VoiceConnection>;
     on(event: string, listener: (...args: any[]) => void): unknown;
     off?(event: string, listener: (...args: any[]) => void): unknown;
     removeListener?(event: string, listener: (...args: any[]) => void): unknown;
@@ -114,19 +100,6 @@ function engine(): VoiceEngine | null {
     } catch (e) {
         logger.warn("Could not reach the media engine", e);
         return null;
-    }
-}
-
-/** The call's own connections, leaving out the ones behind a Go Live stream. */
-function connections(): VoiceConnection[] {
-    const found = engine()?.connections;
-    if (!found) return [];
-
-    try {
-        return [...found].filter(c => c.context === "default");
-    } catch (e) {
-        logger.warn("Could not read the voice connections", e);
-        return [];
     }
 }
 
@@ -193,52 +166,6 @@ export function voiceParticipants(): VoicePerson[] {
         if (a.self !== b.self) return a.self ? 1 : -1;
         return a.name.localeCompare(b.name);
     });
-}
-
-/** Someone's level in this client's mix, as a percentage. 100 is untouched. */
-export function localVolume(userId: string): number {
-    try {
-        const value = (MediaEngineStore as any)?.getLocalVolume?.(userId);
-        return Number.isFinite(value) ? Math.round(value) : 100;
-    } catch {
-        return 100;
-    }
-}
-
-/**
- * Moves someone's level, for this client only.
- *
- * The call is live, so what is being recorded right now changes with it - which
- * is the whole point, since the mix cannot be rebalanced once it is in a file.
- */
-export function setLocalVolume(userId: string, volume: number): void {
-    const clamped = Math.min(200, Math.max(0, Math.round(volume)));
-
-    for (const connection of connections()) {
-        try {
-            connection.setLocalVolume(userId, clamped);
-        } catch (e) {
-            logger.warn("Could not set the local volume", e);
-        }
-    }
-}
-
-export function localMuted(userId: string): boolean {
-    try {
-        return (MediaEngineStore as any)?.isLocalMute?.(userId) === true;
-    } catch {
-        return false;
-    }
-}
-
-export function setLocalMuted(userId: string, muted: boolean): void {
-    for (const connection of connections()) {
-        try {
-            connection.setLocalMute(userId, muted);
-        } catch (e) {
-            logger.warn("Could not set the local mute", e);
-        }
-    }
 }
 
 /** Packs samples for the metadata file: one byte each, base64'd. */
@@ -415,6 +342,23 @@ class VoiceActivityBuffer {
             this.names.set(userId, nameOf(userId));
             this.avatars.set(userId, avatarOf(userId));
         }
+    }
+
+    /**
+     * How loud somebody is right now, from 0 to 1.
+     *
+     * What the mixer's voice meters read. The bucket before the current one
+     * counts too: a bucket that has only just opened is empty for a fraction of
+     * a second, and a meter that blinks out between two syllables reads as a
+     * broken meter rather than as a pause.
+     */
+    levelNow(userId: string): number {
+        const track = this.levels.get(userId);
+        if (!track) return 0;
+
+        const bucket = Math.floor(Date.now() / BUCKET_MS);
+
+        return Math.max(track.get(bucket) ?? 0, track.get(bucket - 1) ?? 0) / 255;
     }
 
     /** Drops what has rolled out of the window, so the maps stay bounded. */

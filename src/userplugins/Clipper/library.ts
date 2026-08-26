@@ -26,7 +26,7 @@ import { RunningGameStore } from "@webpack/common";
 import { settings } from "./settings";
 // Its own logger rather than the recorder's: the recorder tags clips through
 // this module, and borrowing its logger would close an import cycle.
-import type { VoiceFileMeta, VoiceTrackMeta } from "./voice";
+import type { VoiceFileMeta, VoiceLevels, VoiceTrackMeta } from "./voice";
 
 const logger = new Logger("Clipper", "#f0b132");
 
@@ -66,6 +66,15 @@ export interface ClipMeta {
      * fraction of a second either side of the clip's.
      */
     tracks?: VoiceFileMeta[];
+    /**
+     * The per-person levels the mixer was set to when the clip was saved.
+     *
+     * A linear gain per user id, as the studio and the render use them: this is
+     * what makes the voice channels of the mixer mean something, since the sound
+     * itself can only be balanced when the separate tracks are put back together
+     * rather than while the buffer runs. Absent when nobody was turned down.
+     */
+    levels?: VoiceLevels;
 }
 
 interface LibraryDocument {
@@ -141,6 +150,14 @@ function entryOf(value: unknown): ClipMeta | null {
             }))
         : [];
 
+    const levels: VoiceLevels = {};
+    for (const [userId, value] of Object.entries((raw.levels ?? {}) as Record<string, unknown>)) {
+        const gain = Number(value);
+        if (!/^\d+$/.test(userId) || !Number.isFinite(gain)) continue;
+
+        levels[userId] = Math.min(3, Math.max(0, gain));
+    }
+
     const markers = Array.isArray(raw.markers)
         ? raw.markers
             .filter((m): m is number => typeof m === "number" && Number.isFinite(m) && m >= 0)
@@ -154,7 +171,8 @@ function entryOf(value: unknown): ClipMeta | null {
         ...(typeof raw.taggedAt === "number" && Number.isFinite(raw.taggedAt) ? { taggedAt: raw.taggedAt } : {}),
         ...(markers.length ? { markers } : {}),
         ...(voices.length ? { voices } : {}),
-        ...(tracks.length ? { tracks } : {})
+        ...(tracks.length ? { tracks } : {}),
+        ...(Object.keys(levels).length ? { levels } : {})
     };
 }
 
@@ -318,7 +336,13 @@ function detectGame(): string {
 }
 
 /** Tags a freshly saved clip with whatever was running when it was saved. */
-export async function tagSavedClip(path: string, markers?: number[], voices?: VoiceTrackMeta[], tracks?: VoiceFileMeta[]): Promise<void> {
+export async function tagSavedClip(
+    path: string,
+    markers?: number[],
+    voices?: VoiceTrackMeta[],
+    tracks?: VoiceFileMeta[],
+    levels?: VoiceLevels
+): Promise<void> {
     const name = path.split(/[\\/]/).pop();
     if (!name) return;
 
@@ -326,17 +350,19 @@ export async function tagSavedClip(path: string, markers?: number[], voices?: Vo
     const kept = markers?.filter(m => Number.isFinite(m) && m >= 0).sort((a, b) => a - b) ?? [];
     const lanes = voices?.filter(v => v.levels) ?? [];
     const files = tracks?.filter(t => t.file) ?? [];
+    const balance = Object.entries(levels ?? {}).filter(([, gain]) => Number.isFinite(gain) && gain !== 1);
 
     // Markers are worth writing on their own: a clip taken outside a game has no
     // category to record but its marks are still the reason it was saved.
-    if (!game && !kept.length && !lanes.length && !files.length) return;
+    if (!game && !kept.length && !lanes.length && !files.length && !balance.length) return;
 
     try {
         await setMeta(name, {
             ...(game ? { game } : {}),
             ...(kept.length ? { markers: kept } : {}),
             ...(lanes.length ? { voices: lanes } : {}),
-            ...(files.length ? { tracks: files } : {})
+            ...(files.length ? { tracks: files } : {}),
+            ...(balance.length ? { levels: Object.fromEntries(balance) } : {})
         });
     } catch (e) {
         logger.warn("Could not tag the saved clip", e);

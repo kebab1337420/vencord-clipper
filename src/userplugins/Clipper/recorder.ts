@@ -17,6 +17,7 @@ import { Logger } from "@utils/Logger";
 import type { PluginNative } from "@utils/types";
 import { MediaEngineStore, Toasts, UserStore } from "@webpack/common";
 
+import { playClipSound } from "./clipSound";
 import { dropMeta, tagSavedClip } from "./library";
 import { gainOf, MIC_CHANNEL, type MixerLevel, readMixer, SYSTEM_CHANNEL } from "./mixer";
 import { probeAudioTracks } from "./mp4";
@@ -178,6 +179,10 @@ class ClipRecorder {
 
     /** Live gain stage and meter of every channel in the mix, by channel id. */
     private channels = new Map<string, { gain: GainNode; meter: AnalyserNode; factor: number; data: Uint8Array<ArrayBuffer>; }>();
+
+    /** Set while the clip sound is playing, so it is not recorded. See duckSystem(). */
+    private duckTimer: ReturnType<typeof setTimeout> | null = null;
+    private duckedUntil = 0;
 
     /** First chunk emitted by the recorder: holds the container header. */
     private header: Blob | null = null;
@@ -553,6 +558,46 @@ class ClipRecorder {
         } catch {
             channel.gain.gain.value = target;
         }
+    }
+
+    /**
+     * Holds the machine's own output out of the mix for `ms`.
+     *
+     * For the clip sound, and only for it. The system channel is a loopback of
+     * everything the speakers play, so the notification tone would otherwise be
+     * recorded onto the end of the clip it announces and sit in the rolling
+     * buffer for the whole clip length after that. The cost is that fraction of
+     * a second of game audio, which is why the window comes from the sound's
+     * own length rather than from a fixed guess.
+     *
+     * Overlapping calls extend the silence rather than cutting it short: two
+     * clips in quick succession are two tones, and the second one must not be
+     * let through by the first one's timer.
+     */
+    duckSystem(ms: number): void {
+        const channel = this.channels.get(SYSTEM_CHANNEL);
+        if (!channel || !this.audioCtx || ms <= 0) return;
+
+        this.duckedUntil = Math.max(this.duckedUntil, Date.now() + ms);
+
+        try {
+            // Fast, but still a ramp: dropping a live gain to zero on an edge is
+            // an audible click in the clip that is being buffered right now.
+            channel.gain.gain.setTargetAtTime(0, this.audioCtx.currentTime, 0.005);
+        } catch {
+            channel.gain.gain.value = 0;
+        }
+
+        if (this.duckTimer != null) clearTimeout(this.duckTimer);
+
+        this.duckTimer = setTimeout(() => {
+            this.duckTimer = null;
+            this.duckedUntil = 0;
+
+            // Read back rather than remembered: the slider may have moved while
+            // the channel was down, and the mixer's value is the current truth.
+            this.setChannelLevel(SYSTEM_CHANNEL, readMixer().system);
+        }, Math.max(0, this.duckedUntil - Date.now()));
     }
 
     /**
@@ -978,6 +1023,12 @@ class ClipRecorder {
         this.extraStreams.forEach(s => s.getTracks().forEach(t => t.stop()));
         this.audioCtx?.close().catch(() => void 0);
 
+        // The graph it would put the level back on is gone, but the timer would
+        // still be pending: a buffer stopped mid-tone must not leave one behind.
+        if (this.duckTimer != null) clearTimeout(this.duckTimer);
+        this.duckTimer = null;
+        this.duckedUntil = 0;
+
         this.channels.clear();
         this.extraStreams = [];
         this.stream = this.micStream = this.systemStream = null;
@@ -997,6 +1048,18 @@ class ClipRecorder {
             toast("Nothing buffered yet, give it a second", Toasts.Type.FAILURE);
             return;
         }
+
+        /*
+         * Told out loud, before anything is written.
+         *
+         * A save takes as long as it takes - the engine, the flush, the repair,
+         * the mux - and feedback that arrives after all that has stopped being
+         * feedback. This fires on the keypress instead, and hands the recorder
+         * the window to mute the loopback for, so the sound stays out of the
+         * clip it is announcing. Never awaited: the file does not wait on a
+         * notification tone.
+         */
+        void playClipSound(ms => this.duckSystem(ms));
 
         this.setState("saving");
         const mine = this.generation;

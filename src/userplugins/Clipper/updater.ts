@@ -36,7 +36,7 @@ const logger = new Logger("Clipper");
  * release tag, so a build has to go out under the tag it names here: publish
  * this one as v3.1.0, or the clients already running it are offered it again.
  */
-export const CLIPPER_VERSION = "3.1.0";
+export const CLIPPER_VERSION = "3.2.0";
 
 export interface UpdateState {
     /** A check is in flight. */

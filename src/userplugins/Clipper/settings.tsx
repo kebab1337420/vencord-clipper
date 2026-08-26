@@ -11,6 +11,7 @@
 import { definePluginSettings } from "@api/Settings";
 import { OptionType } from "@utils/types";
 
+import { ClipSoundInput } from "./components/ClipSoundInput";
 import { KeybindInput } from "./components/KeybindInput";
 import { SaveDirectoryInput } from "./components/SaveDirectoryInput";
 import { SettingsSection } from "./components/SettingsSection";
@@ -119,6 +120,24 @@ export const settings = definePluginSettings({
         type: OptionType.BOOLEAN,
         description: "Show a desktop notification when a clip is saved",
         default: true
+    },
+    clipSound: {
+        type: OptionType.BOOLEAN,
+        description: "Play a sound the moment a clip is taken. It is the only feedback that reaches you inside a fullscreen game, and it is kept out of the clip itself: the recording mutes the machine's own sound for exactly as long as the tone lasts",
+        default: true
+    },
+    // Absolute path of a custom clip sound. Empty means the built-in blip.
+    clipSoundPath: {
+        type: OptionType.CUSTOM,
+        default: ""
+    },
+    clipSoundVolume: {
+        type: OptionType.CUSTOM,
+        default: 70
+    },
+    clipSoundInput: {
+        type: OptionType.COMPONENT,
+        component: ClipSoundInput
     },
     interfaceSection: {
         type: OptionType.COMPONENT,

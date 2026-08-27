@@ -262,6 +262,18 @@ let offeredAt = 0;
 let endedAfterOffer = 0;
 
 /**
+ * Whether the engine answered this arming by tearing the capture down.
+ *
+ * Not the same statement as `confirmed` being false. The engine only announces
+ * itself on the out-of-process path, so `confirmed` is false on every ordinary
+ * run, including the ones that write a clip with a track per person: it says
+ * nothing about whether the ring buffer is filling. An `ended` landing right
+ * behind an offer does say something, and what it says is final - the source
+ * cannot be captured, so the ring holds no video and will hold none.
+ */
+let torndown = false;
+
+/**
  * Keep offering the source until the engine admits it is recording.
  *
  * `setClipsRecordingEnabled(true)` goes back on the wire alongside it because a
@@ -326,6 +338,7 @@ function noteEnded(): void {
     endedAfterOffer++;
     if (endedAfterOffer < ENDED_LIMIT) return;
 
+    torndown = true;
     pauseOffering(`the engine ended the recording right after ${endedAfterOffer} offers in a row, so offering it again tears the capture down rather than starting it`);
 }
 
@@ -338,6 +351,16 @@ function pauseOffering(why: string): void {
     logger.info(`No longer re-offering the capture source: ${why}.`);
 }
 
+/**
+ * Whether the engine has given up on the source this buffer was armed with.
+ *
+ * The caller uses it to stop coming back: a teardown is not a bad moment, it is
+ * the engine's answer for this source, and the next save would get the same one.
+ */
+export function engineTornDown(): boolean {
+    return torndown;
+}
+
 /** Drop the heartbeat and everything it was keeping alive. */
 function stopOffering(): void {
     if (retry != null) clearInterval(retry);
@@ -347,6 +370,7 @@ function stopOffering(): void {
     offers = 0;
     offeredAt = 0;
     endedAfterOffer = 0;
+    torndown = false;
 }
 
 /*
@@ -757,6 +781,7 @@ export function arm(options: {
         offers = 0;
         offeredAt = 0;
         endedAfterOffer = 0;
+        torndown = false;
         heard.clear();
         source = {
             desktopDescription: {
@@ -908,6 +933,20 @@ function engineError(e: unknown): string {
 export async function saveNativeClip(filepath: string, seconds: number, metadata: Record<string, unknown> = {}): Promise<number> {
     const found = engine();
     if (!found?.saveClipEx) throw new Error("The native clip engine is not available.");
+
+    /*
+     * Nothing to ask for, so nothing is asked.
+     *
+     * When the engine tore its capture down on the source it was offered, its
+     * ring buffer holds no video and no window of it can be written. The four
+     * requests below would each come back
+     * `FinishedAddingTracks failed to find appropriate starting and ending
+     * timestamp`, which is the muxer's way of saying the ring was empty, and
+     * the caller would show the last of them to somebody who wanted a clip.
+     * The plugin's own buffer has been filling the whole time, so failing here
+     * immediately and plainly is what gets them that clip soonest.
+     */
+    if (torndown) throw new Error("the engine tore its capture down when it was given the source, so its buffer holds nothing");
 
     const at = now();
     if (at == null) throw new Error("The native clip engine has no clock.");

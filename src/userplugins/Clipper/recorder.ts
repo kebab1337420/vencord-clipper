@@ -27,7 +27,7 @@ import { gainOf, MIC_CHANNEL, type MixerLevel, readMixer, SYSTEM_CHANNEL, voiceL
 import { probeAudioTracks } from "./mp4";
 import { muxNativeAudio } from "./mux";
 import type { CaptureSource } from "./native";
-import { arm, canRecord, disarm, goLiveActive, nativeAvailability, saveNativeClip, setRecordUser, watchRecording } from "./nativeClips";
+import { arm, canRecord, disarm, engineTornDown, goLiveActive, nativeAvailability, saveNativeClip, setRecordUser, watchRecording } from "./nativeClips";
 import { hasVideoTrack } from "./nativeTracks";
 import { lengthBytes, repairBytes, trimBytes } from "./repair";
 import { Container, extensionFor, mimeTypeChain, settings } from "./settings";
@@ -204,6 +204,9 @@ export interface SavedClip {
 }
 
 class ClipRecorder {
+    /** Whether a save has already said out loud that the engine would not write. */
+    private nativeSaveWarned = false;
+
     /** Whether Discord's own clip engine is armed alongside our buffer. */
     private native = false;
 
@@ -1485,8 +1488,38 @@ class ClipRecorder {
                 try {
                     if (await this.saveNative(seconds)) return;
                 } catch (e) {
+                    /*
+                     * The whole of the engine's answer goes to the log, and one
+                     * sentence goes on screen.
+                     *
+                     * What the engine says when it refuses is a muxer error, a
+                     * verdict, an event name and an attempt count, and it used
+                     * to be shown verbatim to somebody who had just pressed a
+                     * key to save a clip - four lines of diagnostics over a
+                     * game, about a clip that was in fact saved. What they need
+                     * to know is what they lost, which is the track per person.
+                     */
                     logger.error("The native clip engine could not save, falling back to the plugin's own buffer", e);
-                    toast(`The native engine could not save (${errorMessage(e)}), used the plugin's buffer instead`, Toasts.Type.MESSAGE);
+
+                    if (!this.nativeSaveWarned) {
+                        this.nativeSaveWarned = true;
+                        toast("Clip saved with mixed sound: the clip engine would not write this one", Toasts.Type.MESSAGE);
+                    }
+
+                    /*
+                     * Its answer for this source, not a bad moment: every save
+                     * until the buffer is armed again would go the same way.
+                     *
+                     * Disarmed rather than merely ignored, because an arming
+                     * left standing keeps the helper process alive and keeps
+                     * this plugin's shield over the engine's teardown calls -
+                     * both of them held for a buffer that will never be read.
+                     */
+                    if (engineTornDown()) {
+                        logger.info("Leaving the native clip engine out for the rest of this buffer.");
+                        disarm();
+                        this.native = false;
+                    }
                 }
             }
 
@@ -1778,6 +1811,7 @@ class ClipRecorder {
         this.consentTicker ??= setInterval(() => this.grantConsent(), 3000);
 
         this.native = true;
+        this.nativeSaveWarned = false;
 
         /*
          * The same message either way, because the difference does not concern

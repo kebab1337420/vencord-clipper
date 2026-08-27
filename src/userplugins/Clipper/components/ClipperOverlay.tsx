@@ -79,7 +79,7 @@ const CSS = `
     position: absolute;
     bottom: calc(100% + 8px);
     left: 0;
-    min-width: 220px;
+    min-width: 248px;
     padding: 6px;
     border-radius: 8px;
     background: var(--background-floating, #111214);
@@ -98,6 +98,53 @@ const CSS = `
     text-align: left;
     cursor: pointer;
 }
+.vc-clipper-menu-row {
+    display: flex;
+    gap: 4px;
+    align-items: stretch;
+    margin-top: 4px;
+}
+.vc-clipper-menu-row button {
+    flex: 1 1 0;
+    padding: 7px 6px;
+    font-size: 13px;
+    text-align: center;
+    white-space: nowrap;
+}
+.vc-clipper-menu-row button.vc-clipper-menu-main {
+    flex: 1 1 auto;
+    font-size: 14px;
+    text-align: left;
+    font-weight: 500;
+    color: var(--text-normal, #dbdee1);
+    background: var(--background-modifier-hover, #35373c);
+}
+.vc-clipper-menu-row button.vc-clipper-menu-chip {
+    flex: 0 0 auto;
+    min-width: 40px;
+    font-size: 12px;
+    color: var(--text-muted, #949ba4);
+}
+.vc-clipper-menu-rule {
+    height: 1px;
+    margin: 6px 4px 2px;
+    background: var(--background-modifier-accent, #3f4147);
+}
+.vc-clipper-menu-foot {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 4px;
+}
+.vc-clipper-menu-foot button {
+    flex: 0 0 auto;
+}
+.vc-clipper-menu-foot .vc-clipper-menu-status {
+    padding: 0 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 .vc-clipper-menu button:hover:not(:disabled) {
     background: var(--brand-experiment, #5865f2);
     color: #fff;
@@ -107,7 +154,7 @@ const CSS = `
     cursor: default;
 }
 .vc-clipper-menu-label {
-    padding: 6px 10px 2px;
+    padding: 8px 10px 2px;
     font-size: 11px;
     font-weight: 600;
     color: var(--text-muted, #949ba4);
@@ -867,8 +914,13 @@ function ActionMenu({ recording, onClose, onPreview, onStudio }: {
         return () => clearInterval(id);
     }, [recording]);
 
-    const item = (label: string, action: () => void, disabled = false) => (
-        <button disabled={disabled} onClick={() => { onClose(); setTimeout(action, 0); }}>
+    const item = (label: string, action: () => void, disabled = false, className?: string, title?: string) => (
+        <button
+            className={className}
+            title={title}
+            disabled={disabled}
+            onClick={() => { onClose(); setTimeout(action, 0); }}
+        >
             {label}
         </button>
     );
@@ -883,36 +935,61 @@ function ActionMenu({ recording, onClose, onPreview, onStudio }: {
     return (
         <div className="vc-clipper-menu">
             {item(recording ? "Stop the clip buffer" : "Start the clip buffer", () => void recorder.toggle())}
-            {item(`Save the last ${settings.store.clipLength}s`, () => void recorder.save(), !recording)}
-            {cuts.map(n => (
-                <React.Fragment key={`save-${n}`}>
-                    {item(`Save only the last ${n}s`, () => void recorder.save(n), !recording || buffered < n)}
-                </React.Fragment>
-            ))}
-            {item("Watch the buffer before saving", onPreview, !recording || !buffered)}
-            {item(
-                recorder.markCount ? `Drop a marker (${recorder.markCount} so far)` : "Drop a marker",
-                () => recorder.mark(),
-                !recording
-            )}
-            {item("Clip everyone's angle in the call", () => void requestPov(), !recording)}
+
+            {/*
+              * The whole buffer and the short cuts on one line.
+              *
+              * They were a button each, so a menu offering two lengths carried
+              * three near-identical sentences one under the other and read as a
+              * wall rather than as a choice. The lengths differ by a number, so
+              * that is all the short ones say - they sit against the sentence
+              * they are a variation on, which is what makes them readable.
+              */}
+            <div className="vc-clipper-menu-row">
+                {item(`Save the last ${settings.store.clipLength}s`, () => void recorder.save(), !recording, "vc-clipper-menu-main")}
+                {cuts.map(n => (
+                    <React.Fragment key={`save-${n}`}>
+                        {item(`${n}s`, () => void recorder.save(n), !recording || buffered < n, "vc-clipper-menu-chip", `Save only the last ${n} seconds`)}
+                    </React.Fragment>
+                ))}
+            </div>
+
+            <div className="vc-clipper-menu-row">
+                {item("Watch buffer", onPreview, !recording || !buffered, undefined, "Watch the buffer before saving")}
+                {item(
+                    recorder.markCount ? `Marker (${recorder.markCount})` : "Marker",
+                    () => recorder.mark(),
+                    !recording,
+                    undefined,
+                    "Drop a marker on this moment"
+                )}
+                {item("Everyone", () => void requestPov(), !recording, undefined, "Ask everyone in the call to save their own angle")}
+            </div>
+
             {last && (
                 <>
-                    <div className="vc-clipper-menu-label">{last.name}</div>
-                    {item("Send it to this channel", () => void sendClipFitted(last.name))}
-                    {item("Post its ending as a GIF", () => void sendClipGif(last.name))}
-                    {cuts.map(n => (
-                        <React.Fragment key={n}>
-                            {item(`Keep only its last ${n}s`, () => void recorder.trimLastSaved(n))}
-                        </React.Fragment>
-                    ))}
+                    <div className="vc-clipper-menu-label" title={last.name}>{last.name}</div>
+                    <div className="vc-clipper-menu-row">
+                        {item("Send", () => void sendClipFitted(last.name), false, undefined, "Send it to this channel")}
+                        {item("GIF", () => void sendClipGif(last.name), false, undefined, "Post its ending as a GIF")}
+                        {cuts.map(n => (
+                            <React.Fragment key={n}>
+                                {item(`${n}s`, () => void recorder.trimLastSaved(n), false, "vc-clipper-menu-chip", `Keep only its last ${n} seconds`)}
+                            </React.Fragment>
+                        ))}
+                    </div>
                 </>
             )}
-            {CLIPS_AVAILABLE && item("Open the clip studio", onStudio)}
-            <div className="vc-clipper-menu-status">
-                {recording
-                    ? `Buffered: ${buffered}s / ${settings.store.clipLength}s - ${formatBytes(recorder.bufferedBytes)}`
-                    : "Buffer stopped - nothing to save"}
+
+            <div className="vc-clipper-menu-rule" />
+
+            <div className="vc-clipper-menu-foot">
+                {CLIPS_AVAILABLE && item("Clip studio", onStudio)}
+                <span className="vc-clipper-menu-status">
+                    {recording
+                        ? `${buffered}s / ${settings.store.clipLength}s - ${formatBytes(recorder.bufferedBytes)}`
+                        : "Buffer stopped"}
+                </span>
             </div>
         </div>
     );

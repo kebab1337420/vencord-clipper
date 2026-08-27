@@ -70,8 +70,26 @@ interface TimedChunk {
 /** Chunk interval, in ms. Smaller = finer trimming, more overhead. */
 const TIMESLICE = 1000;
 
-/** How often the renderer's memory is looked at while the buffer runs. */
-const HEAP_WATCH_MS = 60_000;
+/** How often the client's memory is looked at while the buffer runs. */
+const MEMORY_WATCH_MS = 60_000;
+
+/**
+ * How much the client has to have grown, in megabytes, to earn another line.
+ *
+ * A high water mark rather than a reading a minute: the point of the log is a
+ * shape over hours, and a client that breathes twenty megabytes either way says
+ * nothing worth a line.
+ */
+const MEMORY_STEP_MB = 128;
+
+/**
+ * A single process this big is the one about to take the client down with it.
+ *
+ * Well under what a 64-bit process can address, and well over anything a client
+ * that is merely busy reaches: the crashes this watches for arrive with one
+ * process far out ahead of the rest.
+ */
+const MEMORY_WARN_MB = 2_000;
 
 /** How long an automatic highlight save waits before it may fire again. */
 const AUTO_SAVE_MS = 120_000;
@@ -202,8 +220,8 @@ class ClipRecorder {
     private consented = new Set<string>();
     /** Poll that keeps that set level with the voice channel. */
     private consentTicker: ReturnType<typeof setInterval> | null = null;
-    /** Poll that writes down what the renderer is holding. See `watchHeap`. */
-    private heapTicker: ReturnType<typeof setInterval> | null = null;
+    /** Poll that writes down what the client is holding. See `watchMemory`. */
+    private memoryTicker: ReturnType<typeof setInterval> | null = null;
     private stream: MediaStream | null = null;
     /** Discord's microphone, gated the way Discord gates it. See ./micInput. */
     private mic: MicInput | null = null;
@@ -546,7 +564,7 @@ class ClipRecorder {
 
             // A game launched after the buffer moves the capture onto its screen.
             this.followGame();
-            this.watchHeap();
+            this.watchMemory();
 
             // And the room is listened to, so the moments nobody had a free hand
             // to mark get marked anyway.
@@ -1182,58 +1200,101 @@ class ClipRecorder {
     }
 
     /**
-     * Writes down what the renderer is holding while the buffer runs.
+     * Writes down what the client is holding while the buffer runs.
      *
      * Discord's renderer has been dying on `CrRendererMain` with
      * `EXCEPTION_BREAKPOINT`, and once with `E0000008`, which is the code
      * Chromium raises when an allocation fails: the client reloads itself and
-     * takes the console with it, so the only account of the minutes before a
-     * crash is what reached `renderer_js.log`. A high water mark there says
-     * whether the memory going missing is JavaScript's at all - a capture
-     * pipeline eats plenty outside the heap, and the two are fixed in very
-     * different places.
+     * takes the console with it, so the only account of the hours before a
+     * crash is what reached `renderer_js.log`.
      *
-     * Only ever the new worst is written, so an evening of buffering is a
-     * handful of lines rather than one a minute.
+     * The number that has to be in there is the per-process working set, not
+     * the JavaScript heap. This watch used to be a heap watch and it saw
+     * nothing: through the reloads the heap sat flat at 269 MB of a 4 GB limit
+     * while the renderer's working set walked from 502 MB to 719 MB, because a
+     * capture pipeline holds its frames, its surfaces and its encoder state
+     * outside the heap entirely. Worse, the process figures were only ever
+     * appended to a line that fired on a new heap peak, so on a flat heap they
+     * were never sampled at all.
+     *
+     * So: every process, every minute, from the main process, and a line only
+     * when the client as a whole has taken another `MEMORY_STEP_MB`. Each line
+     * names the process that has grown most since the buffer was armed and how
+     * fast, which is what tells a renderer leak apart from a GPU one or a media
+     * helper one - and those three are fixed in three different places.
      */
-    private watchHeap(): void {
-        this.stopHeapWatch();
+    private watchMemory(): void {
+        this.stopMemoryWatch();
 
-        // Chromium only, and only with the flag some builds ship: nothing to
-        // report is better than a line of undefineds.
-        const memory = (performance as any)?.memory as { usedJSHeapSize: number; jsHeapSizeLimit: number; } | undefined;
-        if (!memory || typeof memory.usedJSHeapSize !== "number") return;
+        // Electron only: `app.getAppMetrics` has no equivalent on the web.
+        if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return;
 
-        let peak = 0;
+        /** Each process as it stood on the first sample, to measure growth from. */
+        const first = new Map<string, number>();
 
-        this.heapTicker = setInterval(() => {
+        let startedAt = 0;
+
+        /** The client total behind the last line written, so only growth talks. */
+        let reported = 0;
+
+        this.memoryTicker = setInterval(() => {
             void (async () => {
-                const used = memory.usedJSHeapSize;
-                const limit = Math.max(1, memory.jsHeapSizeLimit);
+                let processes: Array<{ type: string; mb: number; }>;
 
-                // A tenth over the worst so far: below that it is the same reading.
-                if (used < peak * 1.1) return;
-                peak = used;
+                try {
+                    processes = await Native.getMemoryReport();
+                } catch {
+                    return;
+                }
 
-                const share = Math.round((used / limit) * 100);
-                const line = `Renderer heap: ${formatBytes(used)} of ${formatBytes(limit)} (${share}%), clip buffer holding ${formatBytes(this.bufferedBytes)}${await processMemory()}`;
+                if (!processes.length) return;
 
-                if (share >= 80) logger.warn(`${line} - close to the limit, a reload is what comes next`);
+                const at = Date.now();
+                const total = processes.reduce((sum, p) => sum + p.mb, 0);
+
+                if (!startedAt) {
+                    startedAt = at;
+                    for (const p of processes) first.set(p.type, p.mb);
+                }
+
+                // A process that has appeared since the first sample counts as
+                // having grown from nothing, which is exactly what it did.
+                const grown = processes
+                    .map(p => ({ type: p.type, mb: p.mb, grew: p.mb - (first.get(p.type) ?? 0) }))
+                    .sort((a, b) => b.grew - a.grew)[0];
+
+                const swollen = processes.find(p => p.mb >= MEMORY_WARN_MB);
+
+                // Growth, or a process already big enough to end the session.
+                if (!swollen && total < reported + MEMORY_STEP_MB) return;
+                reported = total;
+
+                const hours = Math.max(MEMORY_WATCH_MS / 3_600_000, (at - startedAt) / 3_600_000);
+                const biggest = processes.slice(0, 5).map(p => `${p.type} ${p.mb}MB`).join(", ");
+                const worst = grown && grown.grew > 0
+                    ? `, ${grown.type} up ${grown.grew}MB since arming (${Math.round(grown.grew / hours)}MB/h)`
+                    : "";
+
+                const line = `Client memory: ${total}MB over ${processes.length} processes`
+                    + `${jsHeap()}, clip buffer holding ${formatBytes(this.bufferedBytes)}`
+                    + ` | ${biggest}${worst}`;
+
+                if (swollen) logger.warn(`${line} - ${swollen.type} is the one about to go, a reload is what comes next`);
                 else logger.info(line);
             })();
-        }, HEAP_WATCH_MS);
+        }, MEMORY_WATCH_MS);
     }
 
-    private stopHeapWatch(): void {
-        if (this.heapTicker) clearInterval(this.heapTicker);
-        this.heapTicker = null;
+    private stopMemoryWatch(): void {
+        if (this.memoryTicker) clearInterval(this.memoryTicker);
+        this.memoryTicker = null;
     }
 
     private cleanup() {
         // Any start() still waiting on a stream is now stale.
         this.generation++;
 
-        this.stopHeapWatch();
+        this.stopMemoryWatch();
 
         // Detached before the stop, because stopping is what makes the encoder
         // hand over its last chunk. Dropping the reference is not enough: the
@@ -2205,24 +2266,22 @@ function resolveSource(sources: CaptureSource[]): CaptureSource | null {
 }
 
 /**
- * The client's processes and what they hold, as a tail for the heap line.
+ * The JavaScript heap, as a clause for the memory line.
  *
- * Empty when there is nothing to say - on the web build, or when Electron
- * declines the metrics - so the heap line reads the same either way.
+ * A footnote rather than the headline: it is one slice of one process, and on
+ * this pipeline it is the slice that does not move. It stays in the line only
+ * so a leak that really is JavaScript's can still be told apart at a glance.
+ *
+ * Empty where Chromium does not expose it, so the line reads the same either
+ * way.
  */
-async function processMemory(): Promise<string> {
-    if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return "";
+function jsHeap(): string {
+    const memory = (performance as any)?.memory as { usedJSHeapSize: number; jsHeapSizeLimit: number; } | undefined;
+    if (!memory || typeof memory.usedJSHeapSize !== "number") return "";
 
-    try {
-        const processes = await Native.getMemoryReport();
-        if (!processes.length) return "";
+    const share = Math.round((memory.usedJSHeapSize / Math.max(1, memory.jsHeapSizeLimit)) * 100);
 
-        // The biggest handful is the whole of the news: a client runs a dozen
-        // utility processes that never move.
-        return ` | ${processes.slice(0, 5).map(p => `${p.type} ${p.mb}MB`).join(", ")}`;
-    } catch {
-        return "";
-    }
+    return `, JS heap ${formatBytes(memory.usedJSHeapSize)} (${share}%)`;
 }
 
 interface Capture {

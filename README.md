@@ -60,6 +60,43 @@ usually takes up a couple % of GPU usage
   outline and position, then render the whole thing to a single file
   (480p–1440p, 24/30/60 FPS, audio optional). The timeline survives closing the
   studio and every edit can be undone with `Ctrl + Z`.
+- **Cut the silence out in one click.** The clip carries a recording of who
+  spoke and when, so the studio knows which stretches nobody said anything
+  over and drops them, leaving a short pad around every word. What is left is
+  the same montage with the dead air gone.
+- **The sound lane ducks under speech.** A song laid under a montage is pulled
+  down whenever somebody in the clip talks and let back up when they stop,
+  from the same recording of the voices, with the depth of the duck yours to
+  set.
+- **The picture can move.** A shot can hold keys of its own: a zoom and a
+  point to look at, at chosen moments, eased between. *Punch in on markers*
+  writes those keys from the highlight markers, so the frame pushes in exactly
+  where the moment was marked, and *Track the action* writes them from the
+  picture itself — it walks the shot, follows where the movement is, and keeps
+  the subject in frame.
+- **Real transitions.** Two shots can dissolve into one another instead of
+  cutting, over a length you choose. The last frame of the outgoing shot is
+  held and mixed into the incoming one, which also takes the black flash the
+  seek used to leave behind.
+- **Reframe for phones.** One button turns a montage 9:16 and crops to it
+  rather than adding pillar bars, and the moving framing above decides what
+  the crop keeps — by hand, or from the action tracker.
+- **Everybody's angle in one frame.** The angles the call posted in the
+  channel can be pulled onto a shot and composed with it, as a grid or as a
+  picture in picture. They are lined up automatically by cross-correlating how
+  loud each recording is over time, so the same instant lands on the same
+  frame, and a slider is there for when nothing in common can be found.
+- **Best of the evening.** One button builds a montage out of the markers of
+  every clip in the current view, taking moments in turn from each clip until
+  it reaches the length asked for, back in the order they happened, with
+  dissolves between them.
+- **Cuts on the beat.** The seams of a montage can be snapped onto the beats
+  of a chosen sound, without moving the sound itself; captions, overlays and
+  the other sounds follow the picture.
+- **The chat, burned into the picture.** What the channel said while the
+  buffer was running is recorded beside the video and stored with the clip, and
+  the render can draw the last lines over the frame, each one fading out a few
+  seconds after it was sent.
 - Clip categories: each clip is filed under the game Discord saw running when
   it was saved (the captured window's title as a fallback), stored in a
   `clipper-library.json` next to the clips. The studio filters the list by
@@ -319,6 +356,9 @@ firing it only while Discord is focused.
 | `gif.ts` | GIF89a encoder: median-cut palette, LZW, frame differencing |
 | `gifExport.ts` | Turns part of a clip into a GIF that comes in under the limit |
 | `multipov.ts` | Asks the call for everyone's angle, and answers the same request |
+| `angles.ts` | Finds the angles posted in the channel, and fetches one to compose with |
+| `chat.ts` | Rolling buffer of what the channel said, for the overlay burned into the render |
+| `audio.ts` | Decoding, beat detection, time stretching and the envelope alignment |
 | `components/BufferPreview.tsx` | Plays the live buffer and picks the window to save |
 | `components/ReplayCard.tsx` | The clip that was just saved, playing back in the corner |
 | `updater.ts` | Version check at launch, and the install that follows it |
@@ -350,9 +390,10 @@ firing it only while Discord is focused.
   untouched: their fragments need a different parser.
 - **The studio renders in real time**, because there is no muxer in the plugin:
   the timeline is played into one canvas and one audio mix, and a single MediaRecorder
-  records the run, so a 2-minute montage takes 2 minutes. Segments are cut, not
-  crossfaded — a fade out into a fade in is the transition on offer. Sources of
-  different shapes are letterboxed into the 16:9 output rather than stretched.
+  records the run, so a 2-minute montage takes 2 minutes. The preview plays one
+  file at a time, so a dissolve and the extra angles of a shot only appear in
+  the render. Sources of different shapes are letterboxed into the output
+  rather than stretched, unless the segment is set to crop.
   Keep the window visible while it renders: a hidden window stops painting
   frames while the audio keeps running, and the two drift apart.
 - **Imports are capped at 512 MB.** An imported file is read in the main

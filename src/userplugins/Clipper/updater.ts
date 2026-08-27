@@ -34,9 +34,9 @@ const logger = new Logger("Clipper");
  * Bumped by hand, and read back by scripts\build-prebuilt.ps1, which stamps
  * it into prebuilt\build-info.json. The check compares it against the newest
  * release tag, so a build has to go out under the tag it names here: publish
- * this one as v3.3.4, or the clients already running it are offered it again.
+ * this one as v4.0.0, or the clients already running it are offered it again.
  */
-export const CLIPPER_VERSION = "3.3.4";
+export const CLIPPER_VERSION = "4.0.0";
 
 interface UpdateState {
     /** A check is in flight. */

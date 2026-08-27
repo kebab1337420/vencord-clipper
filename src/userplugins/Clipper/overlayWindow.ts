@@ -90,7 +90,8 @@ export function hideOverlay(): void {
     if (going && !going.isDestroyed()) going.destroy();
 }
 
-function hideToast(): void {
+/** Takes the notice down, if it is up. Safe to call at any time. */
+export function hideToast(): void {
     if (toastTimer) {
         clearTimeout(toastTimer);
         toastTimer = null;
@@ -118,7 +119,7 @@ function cornerOf(corner: OverlayCorner, width: number, height: number): { x: nu
 }
 
 /** Writes a page into the plugin's own folder and hands back its path. */
-function writePage(name: string, html: string): string {
+export function writePage(name: string, html: string): string {
     const folder = join(app.getPath("userData"), "clipper-overlay");
     mkdirSync(folder, { recursive: true });
 
@@ -199,7 +200,7 @@ function head(extraStyle: string): string {
 
 // Embedded as JSON, and with the one sequence that could end the script early
 // taken out of it - a clip name is whatever the user typed.
-function value(data: unknown): string {
+export function embed(data: unknown): string {
     return JSON.stringify(data).replace(/</g, "\\u003c");
 }
 
@@ -229,10 +230,10 @@ ${head(`.card { background: #000; }
     <div class="tag" id="tag"></div>
 </div>
 <script>
-    var look = ${value(look)};
+    var look = ${embed(look)};
     var video = document.getElementById("video");
     var card = document.getElementById("card");
-    document.getElementById("tag").textContent = ${value(basename(path))};
+    document.getElementById("tag").textContent = ${embed(basename(path))};
 
     var leaving = false;
     function leave() {
@@ -256,7 +257,7 @@ ${head(`.card { background: #000; }
     video.volume = Math.max(0, Math.min(1, look.volume / 100));
     video.muted = look.volume <= 0;
 
-    video.src = ${value(pathToFileURL(path).href)};
+    video.src = ${embed(pathToFileURL(path).href)};
 
     // Autoplay with sound is only allowed after a gesture, and this window
     // never gets one. Muted playback is always allowed, so it is the fallback
@@ -294,8 +295,8 @@ ${head(`.card {
 </div>
 <script>
     var card = document.getElementById("card");
-    document.getElementById("title").textContent = ${value(title)};
-    document.getElementById("note").textContent = ${value(note)};
+    document.getElementById("title").textContent = ${embed(title)};
+    document.getElementById("note").textContent = ${embed(note)};
 
     requestAnimationFrame(function () { card.classList.add("up"); });
 

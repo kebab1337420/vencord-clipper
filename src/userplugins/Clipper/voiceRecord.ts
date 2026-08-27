@@ -28,7 +28,7 @@
 
 import { Logger } from "@utils/Logger";
 
-import { clipLength, repairClip } from "./repair";
+import { lengthBytes, repairBytes } from "./repair";
 import { settings } from "./settings";
 import { type VoiceTap, voiceTaps } from "./voiceTaps";
 
@@ -318,11 +318,6 @@ class VoiceBuffers {
             // without a rebase the lane claims to begin where the call did and
             // every player seeks into silence.
             let blob = raw;
-            try {
-                blob = await repairClip(raw, lane.mimeType);
-            } catch (e) {
-                logger.warn(`Could not rebase the voice track for ${name || userId}`, e);
-            }
 
             /*
              * The rebase drops whatever sits before the first clean cluster, so
@@ -331,20 +326,23 @@ class VoiceBuffers {
              * against the wrong frame, and a mute lands beside the words it was
              * meant to take out - the further the rebase had to walk, the
              * further off it is.
+             *
+             * One read of the lane, and the rebase and both measurements work
+             * on those bytes: a lane is a call's worth of audio, and reading it
+             * back three times copied all of it three times.
              */
             let cutOff = 0;
 
-            if (blob !== raw) {
-                try {
-                    const [before, after] = await Promise.all([
-                        clipLength(raw, lane.mimeType),
-                        clipLength(blob, lane.mimeType)
-                    ]);
+            try {
+                const bytes = new Uint8Array(await raw.arrayBuffer());
+                const fixed = repairBytes(bytes, lane.mimeType);
 
-                    cutOff = Math.max(0, before - after);
-                } catch (e) {
-                    logger.warn(`Could not measure the rebase of the voice track for ${name || userId}`, e);
+                if (fixed) {
+                    blob = new Blob([fixed as BlobPart], { type: lane.mimeType });
+                    cutOff = Math.max(0, lengthBytes(bytes, lane.mimeType) - lengthBytes(fixed, lane.mimeType));
                 }
+            } catch (e) {
+                logger.warn(`Could not rebase the voice track for ${name || userId}`, e);
             }
 
             return {

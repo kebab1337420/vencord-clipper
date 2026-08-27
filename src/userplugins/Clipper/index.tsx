@@ -17,7 +17,7 @@ import { createRoot, Toasts } from "@webpack/common";
 import { ClipperChatButton, ClipperIcon } from "./components/ClipperChatButton";
 import { ClipperOverlay } from "./components/ClipperOverlay";
 import { encoderSummary, probeEncoders } from "./encoders";
-import { hideGameOverlay, toggleGameOverlay } from "./gameOverlay";
+import { hideGameOverlay, toggleGameOverlay, watchLastClip } from "./gameOverlay";
 import { runShortcut, startGlobalKeybinds, stopGlobalKeybinds, syncGlobalKeybinds } from "./globalKeybinds";
 import { micReport } from "./micInput";
 import { installPovRequests, requestPov, uninstallPovRequests } from "./multipov";
@@ -176,7 +176,8 @@ export default definePlugin({
         "Save clip": () => recorder.save(),
         "Drop a marker": () => recorder.mark(),
         "Clip everyone's angle": () => void requestPov(),
-        "Watch the last clip over the game": () => void toggleGameOverlay(),
+        "Edit the last clip over the game": () => void toggleGameOverlay(),
+        "Watch the last clip over the game": () => void watchLastClip(),
         "Choose capture source": () => recorder.chooseSource(),
         "Open the clip studio": () => recorder.openStudio(),
         "Check the video encoders": () => {

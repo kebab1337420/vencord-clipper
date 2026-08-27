@@ -3270,6 +3270,22 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
 
         let frame = 0;
 
+        /*
+         * What the last painted frame was of.
+         *
+         * A paused preview is the same picture sixty times a second, and
+         * painting it is a full pass of the effects, the captions and the
+         * overlays. It is skipped while nothing that shows has moved: the
+         * playhead, an edit to the montage, a resize of the canvas. Four times
+         * a second it paints anyway, so an overlay image or an avatar that
+         * finished loading appears without waiting for the next click.
+         */
+        let paintedAt = 0;
+        let paintedTime = -1;
+        let paintedProject: unknown = null;
+        let paintedWidth = -1;
+        let paintedHeight = -1;
+
         const paint = () => {
             frame = requestAnimationFrame(paint);
 
@@ -3280,23 +3296,39 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
             const live = projectRef.current;
             const voices = lanesRef.current;
 
-            const shown: Frame | null = segment && video?.videoWidth
-                ? {
-                    segment,
-                    startsAt: segmentIndex >= 0 ? segmentStart(live, segmentIndex) : 0,
-                    captions: live.captions,
-                    style: live.captionStyle,
-                    overlays: live.overlays,
-                    images: imagesRef.current,
-                    voices,
-                    voiceLevels: live.voiceLevels,
-                    avatars: avatarsRef.current,
-                    showSpeakers: live.showSpeakers !== false,
-                    ...(live.showChat === true ? { chat: chatRef.current } : {})
-                }
-                : null;
+            const now = performance.now();
+            const still = video?.paused !== false
+                && video?.currentTime === paintedTime
+                && live === paintedProject
+                && width === paintedWidth
+                && height === paintedHeight
+                && now - paintedAt < 250;
 
-            paintFrame(ctx, video ?? null, width, height, shown);
+            if (!still) {
+                paintedAt = now;
+                paintedTime = video?.currentTime ?? -1;
+                paintedProject = live;
+                paintedWidth = width;
+                paintedHeight = height;
+
+                const shown: Frame | null = segment && video?.videoWidth
+                    ? {
+                        segment,
+                        startsAt: segmentIndex >= 0 ? segmentStart(live, segmentIndex) : 0,
+                        captions: live.captions,
+                        style: live.captionStyle,
+                        overlays: live.overlays,
+                        images: imagesRef.current,
+                        voices,
+                        voiceLevels: live.voiceLevels,
+                        avatars: avatarsRef.current,
+                        showSpeakers: live.showSpeakers !== false,
+                        ...(live.showChat === true ? { chat: chatRef.current } : {})
+                    }
+                    : null;
+
+                paintFrame(ctx, video ?? null, width, height, shown);
+            }
 
             /*
              * The montage's own mix, on the element's own volume.

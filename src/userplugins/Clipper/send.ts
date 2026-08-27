@@ -24,6 +24,7 @@ import { DraftType, Toasts, UploadHandler } from "@webpack/common";
 import { CLIPS_AVAILABLE, loadClipFile, typeOfClip } from "./clips";
 import { clipToGif, type GifRequest, saveGif } from "./gifExport";
 import { logger } from "./recorder";
+import { trimClip } from "./repair";
 import { shrinkVideo } from "./shrink";
 import { formatBytes } from "./utils";
 
@@ -54,24 +55,42 @@ function attach(file: File): boolean {
 /** A step of a long job, for a caller that has somewhere to show it. */
 export type Progress = (step: string) => void;
 
-/** Attaches a saved clip, by name, to the channel that is open. */
-export async function sendClip(name: string): Promise<boolean> {
+function toast(message: string, type: string) {
+    Toasts.show({ id: Toasts.genId(), message, type });
+}
+
+/**
+ * Attaches part of a clip, leaving the file on disk alone.
+ *
+ * The handles in the overlay over the game are a selection rather than an edit:
+ * what lands in the message box is the range that was picked, and the clip in
+ * the library is still the whole thing. The cut is lossless and happens in
+ * memory, so nothing is written and nothing is re-encoded.
+ */
+export async function sendClipRange(name: string, from: number, to: number): Promise<boolean> {
     if (!CLIPS_AVAILABLE) {
         toast("Clips are only readable in the desktop client", Toasts.Type.FAILURE);
         return false;
     }
 
     try {
-        return attach(await loadClipFile(name));
+        const file = await loadClipFile(name);
+        const type = typeOfClip(name);
+        const cut = await trimClip(file, type, from, to);
+
+        // Same blob back: the range covers the clip, or this container is not
+        // one the parser knows. Either way the whole file is the right answer.
+        if (cut === file) return attach(file);
+
+        const stem = name.replace(/\.[^.]+$/, "");
+        const extension = name.split(".").pop() || "webm";
+
+        return attach(new File([cut], `${stem}-cut.${extension}`, { type }));
     } catch (e) {
-        logger.error("Could not attach the clip", e);
+        logger.error("Could not attach the selection", e);
         toast("Could not read that clip", Toasts.Type.FAILURE);
         return false;
     }
-}
-
-function toast(message: string, type: string) {
-    Toasts.show({ id: Toasts.genId(), message, type });
 }
 
 /**

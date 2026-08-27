@@ -19,7 +19,7 @@
 import { React, useEffect, useMemo, useRef, useState } from "@webpack/common";
 
 import { CLIPS_AVAILABLE } from "../clips";
-import { hideGameOverlay, notifySaved } from "../gameOverlay";
+import { hideClipPlayback, notifySaved } from "../gameOverlay";
 import { requestPov } from "../multipov";
 import type { CaptureSource } from "../native";
 import { listCaptureSources, recorder, RecorderState, type SavedClip, setPickerOpener, setStudioOpener } from "../recorder";
@@ -964,7 +964,7 @@ export function ClipperOverlay() {
     }, [state]);
     useEffect(() => {
         setPickerOpener(() => setPicker(true));
-        setStudioOpener(() => setStudio({}));
+        setStudioOpener((name?: string) => setStudio({ initial: name }));
 
         return () => {
             setPickerOpener(null);
@@ -1018,7 +1018,7 @@ export function ClipperOverlay() {
                     clip={replay}
                     onStudio={name => setStudio({ initial: name })}
                     onRefresh={() => { shown.current = recorder.lastClip; setReplay(recorder.lastClip); }}
-                    onClose={() => { hideGameOverlay(); setReplay(null); }}
+                    onClose={() => { hideClipPlayback(); setReplay(null); }}
                 />
             )}
 

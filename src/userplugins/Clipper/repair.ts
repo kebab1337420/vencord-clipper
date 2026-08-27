@@ -39,15 +39,16 @@ function parserFor(mimeType: string): Parser | null {
     return null;
 }
 
-/** Repairs a clip assembled from the rolling buffer. */
-export async function repairClip(blob: Blob, mimeType: string): Promise<Blob> {
+/**
+ * The same repair, on bytes that are already in hand.
+ *
+ * Null when there was nothing to rebase, so a caller holding the original can
+ * keep it rather than being handed a copy of what it already has.
+ */
+export function repairBytes(data: Uint8Array, mimeType: string): Uint8Array | null {
     const parser = parserFor(mimeType);
-    if (!parser) return blob;
 
-    const data = new Uint8Array(await blob.arrayBuffer());
-    const fixed = parser.rebase(data);
-
-    return fixed ? new Blob([fixed as any], { type: mimeType }) : blob;
+    return parser ? parser.rebase(data) : null;
 }
 
 /**
@@ -61,10 +62,25 @@ export async function trimClip(blob: Blob, mimeType: string, from: number, to: n
     const parser = parserFor(mimeType);
     if (!parser || !(to > from)) return blob;
 
-    const data = new Uint8Array(await blob.arrayBuffer());
-    const cut = parser.trim(data, Math.max(0, from) * 1000, to * 1000);
+    const cut = trimBytes(new Uint8Array(await blob.arrayBuffer()), mimeType, from, to);
 
     return cut ? new Blob([cut as any], { type: mimeType }) : blob;
+}
+
+/**
+ * The same cut, on bytes that are already in hand.
+ *
+ * Reading a clip out of the library hands over a `Uint8Array`, and writing one
+ * back takes a `Uint8Array`: going through a `Blob` in between copies the whole
+ * clip twice for nothing, which for a few hundred megabytes is worth avoiding.
+ * Null means the container is not one this understands, or that the range
+ * already covers the whole clip.
+ */
+export function trimBytes(data: Uint8Array, mimeType: string, from: number, to: number): Uint8Array | null {
+    const parser = parserFor(mimeType);
+    if (!parser || !(to > from)) return null;
+
+    return parser.trim(data, Math.max(0, from) * 1000, to * 1000);
 }
 
 /**
@@ -73,9 +89,8 @@ export async function trimClip(blob: Blob, mimeType: string, from: number, to: n
  * Short by up to one timeslice, since it measures to the start of the last
  * fragment: enough to bound a trim, not to label the clip.
  */
-export async function clipLength(blob: Blob, mimeType: string): Promise<number> {
+export function lengthBytes(data: Uint8Array, mimeType: string): number {
     const parser = parserFor(mimeType);
-    if (!parser) return 0;
 
-    return parser.length(new Uint8Array(await blob.arrayBuffer()));
+    return parser ? parser.length(data) : 0;
 }

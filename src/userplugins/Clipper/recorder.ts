@@ -29,7 +29,7 @@ import { muxNativeAudio } from "./mux";
 import type { CaptureSource } from "./native";
 import { arm, canRecord, disarm, goLiveActive, nativeAvailability, saveNativeClip, setRecordUser, watchRecording } from "./nativeClips";
 import { hasVideoTrack } from "./nativeTracks";
-import { clipLength, repairClip, trimClip } from "./repair";
+import { lengthBytes, repairBytes, trimBytes } from "./repair";
 import { Container, extensionFor, mimeTypeChain, settings } from "./settings";
 import { writeThumbnail } from "./thumbnail";
 import { formatBytes, timestampName } from "./utils";
@@ -1330,15 +1330,23 @@ class ClipRecorder {
         const raw = new Blob([this.header, ...chunks.map(c => c.blob)], { type: this.mimeType });
 
         let blob = raw;
+        let cutOff = 0;
+
         try {
-            blob = await repairClip(raw, this.mimeType);
+            // One read of the buffer: the repair and the two lengths that say
+            // what it took off all work on those same bytes.
+            const bytes = new Uint8Array(await raw.arrayBuffer());
+            const fixed = repairBytes(bytes, this.mimeType);
+
+            // Whatever the repair took off the front moves the markers with it,
+            // and moves the instant the footage begins at by exactly as much.
+            if (fixed) {
+                blob = new Blob([fixed as BlobPart], { type: this.mimeType });
+                cutOff = droppedBytes(bytes, fixed, this.mimeType);
+            }
         } catch (e) {
             logger.warn("Could not rebase the preview's timeline, playing it as recorded", e);
         }
-
-        // Whatever the repair took off the front moves the markers with it, and
-        // moves the instant the footage begins at by exactly as much.
-        const cutOff = blob === raw ? 0 : await dropped(raw, blob, this.mimeType);
 
         return {
             blob,
@@ -1487,18 +1495,28 @@ class ClipRecorder {
             // Cluster timecodes are absolute, so the kept ones still carry the
             // time elapsed since the buffer started: without this the clip
             // claims to last as long as the whole session.
-            let blob = raw;
+            // One read of the buffer, and everything after it works on those
+            // same bytes: the repair, the measurement of what it dropped, the
+            // call muxed back in, the write. A clip is hundreds of megabytes,
+            // and each of those steps used to copy the whole of it again.
+            let bytes: Uint8Array<ArrayBufferLike> = new Uint8Array(await raw.arrayBuffer());
+            let cutOff = 0;
+
             try {
-                blob = await repairClip(raw, this.mimeType);
+                const fixed = repairBytes(bytes, this.mimeType);
+
+                // The repair drops everything before the first keyframe, which
+                // on a WebM is up to a few seconds. The markers were measured
+                // from the start of the buffer, so they move by exactly what it
+                // took off - otherwise every one of them points seconds early.
+                if (fixed) {
+                    cutOff = droppedBytes(bytes, fixed, this.mimeType);
+                    bytes = fixed;
+                }
             } catch (e) {
                 logger.warn("Could not rebase the clip timeline, saving it as recorded", e);
             }
 
-            // The repair drops everything before the first keyframe, which on a
-            // WebM is up to a few seconds. The markers were measured from the
-            // start of the buffer, so they move by exactly what it took off -
-            // otherwise every one of them points several seconds early.
-            const cutOff = blob === raw ? 0 : await dropped(raw, blob, this.mimeType);
             const offsets = shift(markers, cutOff);
             const lanes = shiftTracks(voices, cutOff);
             const chat = shiftChat(said, cutOff);
@@ -1513,9 +1531,10 @@ class ClipRecorder {
              * of the engine's - and it is the difference between a mute that
              * drops one voice and a duck that takes the whole call with it.
              */
-            blob = await this.muxNative(blob);
+            bytes = this.muxNative(bytes);
 
-            const path = await writeClip(blob, name);
+            const blob = new Blob([bytes as BlobPart], { type: this.mimeType });
+            const path = await writeClip(bytes, name, blob);
             const saved = path.split(/[\\/]/).pop() || name;
 
             this.lastSaved = { name: saved, path, blob, mimeType: this.mimeType, markers: offsets, voices: lanes, chat };
@@ -1731,7 +1750,7 @@ class ClipRecorder {
      * the clip exactly as it was, with one mixed soundtrack, which is what
      * every clip looked like before the native engine existed.
      */
-    private async muxNative(clip: Blob): Promise<Blob> {
+    private muxNative(clip: Uint8Array): Uint8Array {
         const native = this.nativeAudio;
         this.nativeAudio = null;
 
@@ -1760,10 +1779,9 @@ class ClipRecorder {
         }
 
         try {
-            const muxed = muxNativeAudio(new Uint8Array(await clip.arrayBuffer()), native);
-            if (!muxed) return clip;
+            const muxed = muxNativeAudio(clip, native);
 
-            return new Blob([muxed as BlobPart], { type: "video/mp4" });
+            return muxed || clip;
         } catch (e) {
             logger.error("Could not mux the call into the clip", e);
             return clip;
@@ -1915,6 +1933,17 @@ class ClipRecorder {
     }
 
     /**
+     * Forgets the clip the replay card is holding, by name.
+     *
+     * The card offers to trim, send and delete the file it is pointing at, so
+     * it has to let go of one that something else - the editor over the game -
+     * has just cut or deleted underneath it.
+     */
+    forgetSaved(name: string): void {
+        if (this.lastSaved?.name === name) this.lastSaved = null;
+    }
+
+    /**
      * Cuts the clip that was just saved down to its last `seconds`.
      *
      * The save takes the whole buffer because the length that was wanted is only
@@ -1932,7 +1961,11 @@ class ClipRecorder {
         if (!(seconds > 0)) return;
 
         try {
-            const total = await clipLength(last.blob, last.mimeType);
+            // Read once, then measure and cut on those same bytes. A clip is
+            // hundreds of megabytes and every parse of the blob used to copy
+            // the whole of it again.
+            const data = new Uint8Array(await last.blob.arrayBuffer());
+            const total = lengthBytes(data, last.mimeType);
             const from = total - seconds;
 
             // Shorter than the cut asked for: nothing to take off.
@@ -1941,19 +1974,21 @@ class ClipRecorder {
                 return;
             }
 
-            const cut = await trimClip(last.blob, last.mimeType, from, total + TIMESLICE / 1000);
-            if (cut === last.blob) {
+            const trimmed = trimBytes(data, last.mimeType, from, total + TIMESLICE / 1000);
+            if (!trimmed) {
                 toast("Nothing could be cut off that clip", Toasts.Type.FAILURE);
                 return;
             }
 
+            const cut = new Blob([trimmed as any], { type: last.mimeType });
+
             const base = last.name.replace(/\.[^.]+$/, "");
-            const path = await writeClip(cut, `${base}-last${Math.round(seconds)}s.${extensionFor(last.mimeType)}`);
+            const path = await writeClip(trimmed, `${base}-last${Math.round(seconds)}s.${extensionFor(last.mimeType)}`, cut);
             const saved = path.split(/[\\/]/).pop() || base;
 
             // The cut lands on a keyframe at or before the point asked for, so
             // measure what was really taken off rather than assuming.
-            const gone = total - await clipLength(cut, last.mimeType);
+            const gone = total - lengthBytes(trimmed, last.mimeType);
             const markers = shift(last.markers, gone);
             const voices = shiftTracks(last.voices, gone);
             const chat = shiftChat(last.chat ?? [], gone);
@@ -2001,13 +2036,13 @@ class ClipRecorder {
         pickerOpener();
     }
 
-    /** Asks the overlay to show the studio. */
-    openStudio(): void {
+    /** Asks the overlay to show the studio, on a clip when one is named. */
+    openStudio(name?: string): void {
         if (!studioOpener) {
             toast("Clipper: the overlay is not mounted", Toasts.Type.FAILURE);
             return;
         }
-        studioOpener();
+        studioOpener(name);
     }
 
     /** Re-arms the buffer so changed capture settings take effect. */
@@ -2038,13 +2073,13 @@ class ClipRecorder {
  * picker without importing any UI into this module.
  */
 let pickerOpener: (() => void) | null = null;
-let studioOpener: (() => void) | null = null;
+let studioOpener: ((name?: string) => void) | null = null;
 
 export function setPickerOpener(open: (() => void) | null) {
     pickerOpener = open;
 }
 
-export function setStudioOpener(open: (() => void) | null) {
+export function setStudioOpener(open: ((name?: string) => void) | null) {
     studioOpener = open;
 }
 
@@ -2057,7 +2092,7 @@ export function setStudioOpener(open: (() => void) | null) {
  * came from across the IPC boundary has to be dug into by hand, including the
  * non-enumerable properties an `Error` from another realm keeps its message in.
  */
-function errorMessage(e: unknown): string {
+export function errorMessage(e: unknown): string {
     if (e instanceof Error) return e.message || e.name;
     if (typeof e === "string") return e;
     if (e === null || e === undefined) return "no reason given";
@@ -2370,9 +2405,7 @@ async function getDesktopStream(sourceId: string, fps: number, resolution: numbe
     return stream;
 }
 
-async function writeClip(blob: Blob, name: string): Promise<string> {
-    const data = new Uint8Array(await blob.arrayBuffer());
-
+async function writeClip(data: Uint8Array, name: string, blob: Blob): Promise<string> {
     // Desktop: write straight to the configured folder through the native module.
     if (IS_DISCORD_DESKTOP || IS_VESKTOP) {
         try {
@@ -2399,9 +2432,9 @@ async function writeClip(blob: Blob, name: string): Promise<string> {
  * Both lengths are read from the container, from its first timestamp to its
  * last, so what changed between them is exactly the footage that was dropped.
  */
-async function dropped(before: Blob, after: Blob, mimeType: string): Promise<number> {
+function droppedBytes(before: Uint8Array, after: Uint8Array, mimeType: string): number {
     try {
-        return Math.max(0, await clipLength(before, mimeType) - await clipLength(after, mimeType));
+        return Math.max(0, lengthBytes(before, mimeType) - lengthBytes(after, mimeType));
     } catch (e) {
         logger.warn("Could not measure what the repair dropped, markers may be early", e);
         return 0;

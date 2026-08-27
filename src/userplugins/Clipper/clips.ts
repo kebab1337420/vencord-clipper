@@ -112,7 +112,23 @@ export function revealClip(name: string): Promise<void> {
 
 /** Writes an edited clip next to the others, never over an existing file. */
 export function writeClipCopy(blob: Blob, name: string): Promise<string> {
-    return blob.arrayBuffer().then(buf => Native.saveClip(settings.store.saveDirectory, name, new Uint8Array(buf), true));
+    return blob.arrayBuffer().then(buf => writeClipBytes(new Uint8Array(buf), name));
+}
+
+/**
+ * The bytes of a clip, as they are on disk.
+ *
+ * For work that only ever hands them to a parser or straight back to a writer:
+ * wrapping them in a `Blob` first and reading them out again is a copy of the
+ * whole clip each way.
+ */
+export function readClipBytes(name: string): Promise<Uint8Array> {
+    return Native.readClip(settings.store.saveDirectory, name);
+}
+
+/** Writes a clip that is already a byte array, never over an existing file. */
+export function writeClipBytes(data: Uint8Array, name: string): Promise<string> {
+    return Native.saveClip(settings.store.saveDirectory, name, data, true);
 }
 
 /**

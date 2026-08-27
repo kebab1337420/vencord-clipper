@@ -5,30 +5,43 @@
  */
 
 /*
- * Vencord Clipper - the clip played over the game, from this side
+ * Vencord Clipper - what goes over the game, from this side
  *
- * The windows themselves live in the main process (see ./overlayWindow); this
- * reads the settings, decides what to show and says once, rather than every
- * time, when the platform cannot do it at all.
+ * Three things, all in windows the main process owns: the editor the keybind
+ * opens (./studioOverlay), the clip played in a corner (./overlayWindow) and
+ * the line of text that says a clip was written. This side reads the settings,
+ * decides what to open on which clip, and says once - rather than every time -
+ * when the platform cannot put a window over a game at all.
  *
- * A clip only ever plays because the keybind was pressed. A save puts up a line
- * of text and nothing else: a video starting by itself over a game is in the
- * way, however good the clip is.
+ * Nothing here is opened by a save. A save puts up a line of text and nothing
+ * else: a video starting by itself over a game is in the way however good the
+ * clip is, and the editor takes the mouse, which mid-game is worse. Both only
+ * ever happen because the keybind was pressed.
+ *
+ * The editor's buttons come back the other way. The main process queues them,
+ * this module long-polls for them exactly as it polls for keybinds, hands them
+ * to ./overlayEdit and puts the answer back in the editor's status line.
  */
 
 import type { PluginNative } from "@utils/types";
 import { Toasts } from "@webpack/common";
 
-// Type only, so nothing of the main process module reaches the renderer bundle.
+import { readMeta } from "./library";
+import { runOverlayAction } from "./overlayEdit";
+// Type only, so nothing of the main process modules reaches the renderer bundle.
 import type { OverlayCorner } from "./overlayWindow";
 import { logger, recorder } from "./recorder";
 import { settings } from "./settings";
+import type { StudioAction } from "./studioOverlay";
 import { formatKeybind } from "./utils";
 
 const Native = VencordNative.pluginHelpers.Clipper as PluginNative<typeof import("./native")>;
 
 /** Widths in pixels behind the three sizes offered in the settings. */
 const WIDTHS: Record<string, number> = { small: 320, medium: 420, large: 560 };
+
+/** The same three sizes for the editor, which is worked in and so is bigger. */
+const EDITOR_WIDTHS: Record<string, number> = { small: 560, medium: 720, large: 900 };
 
 function look() {
     const { overlayCorner, overlaySize, overlayVolume, overlaySeconds } = settings.store;
@@ -40,6 +53,15 @@ function look() {
         width: WIDTHS[overlaySize] ?? WIDTHS.medium,
         volume: overlayVolume,
         seconds: overlaySeconds
+    };
+}
+
+function editorLook() {
+    const { overlaySize, overlayVolume } = settings.store;
+
+    return {
+        width: EDITOR_WIDTHS[overlaySize] ?? EDITOR_WIDTHS.medium,
+        volume: overlayVolume
     };
 }
 
@@ -60,6 +82,14 @@ function warnOnce(message: string): void {
 
 const UNSUPPORTED = "the game overlay needs Windows, macOS or X11 - it cannot place a window over anything here";
 
+function nothingSaved(): void {
+    Toasts.show({
+        id: Toasts.genId(),
+        message: "Clipper: no clip has been saved yet",
+        type: Toasts.Type.MESSAGE
+    });
+}
+
 /** Plays a clip over whatever is on screen. Asked for, never offered. */
 export async function showGameOverlay(name: string): Promise<void> {
     if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return;
@@ -73,38 +103,165 @@ export async function showGameOverlay(name: string): Promise<void> {
     }
 }
 
-/** The keybind: puts the last clip up, or takes down what is up. */
-export async function toggleGameOverlay(): Promise<void> {
-    if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return;
-
+/** Plays the last clip in a corner: the toolbox entry, not the keybind. */
+export async function watchLastClip(): Promise<void> {
     const clip = recorder.lastClip;
     if (!clip) {
-        Toasts.show({
-            id: Toasts.genId(),
-            message: "Clipper: no clip has been saved yet",
-            type: Toasts.Type.MESSAGE
-        });
+        nothingSaved();
         return;
     }
 
+    await showGameOverlay(clip.name);
+}
+
+/**
+ * Opens the editor over the game, on a clip.
+ *
+ * The markers come from the library when the clip has been tagged, and from the
+ * recorder when it was saved a moment ago and nothing has read the file back
+ * yet; they are the ticks under the scrub bar.
+ */
+export async function openClipEditor(name: string): Promise<void> {
+    if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return;
+    if (!name) return;
+
+    let markers: number[] = [];
     try {
-        const shown = await Native.toggleClipOverlay(settings.store.saveDirectory, clip.name, look());
-        if (!shown && !warned) {
-            // False also means "it was up and is now down", so the platform is
-            // asked rather than assumed.
-            const { overlay } = await Native.getPlatformInfo();
-            if (!overlay) warnOnce(UNSUPPORTED);
-        }
+        markers = (await readMeta())[name]?.markers ?? [];
     } catch (e) {
-        logger.warn("Could not toggle the clip over the game", e);
+        logger.warn("Could not read the markers of that clip", e);
+    }
+
+    if (!markers.length && recorder.lastClip?.name === name) markers = recorder.lastClip.markers ?? [];
+
+    try {
+        const shown = await Native.openStudioOverlay(settings.store.saveDirectory, name, markers, editorLook());
+        if (!shown) {
+            warnOnce(UNSUPPORTED);
+            return;
+        }
+
+        startPump();
+    } catch (e) {
+        logger.warn("Could not open the editor over the game", e);
     }
 }
 
-/** Takes the overlay down, wherever it was asked from. */
-export function hideGameOverlay(): void {
+/**
+ * The keybind: opens the editor on the last clip, or closes the open one.
+ *
+ * Closing it is what gives the pointer back to the game, so one key does both
+ * ways of the same thing.
+ */
+export async function toggleGameOverlay(): Promise<void> {
+    if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return;
+
+    try {
+        if (await Native.studioOverlayUp()) {
+            hideGameOverlay();
+            return;
+        }
+    } catch (e) {
+        logger.warn("Could not ask whether the editor is open", e);
+    }
+
+    const clip = recorder.lastClip;
+    if (!clip) {
+        nothingSaved();
+        return;
+    }
+
+    await openClipEditor(clip.name);
+}
+
+/**
+ * Takes the clip playing in the corner down, and nothing else.
+ *
+ * For the replay card: dismissing it in Discord means the clip it was about is
+ * done with, not that an editor somebody opened over their game should shut.
+ */
+export function hideClipPlayback(): void {
     if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return;
 
     Native.hideClipOverlay().catch(e => logger.warn("Could not take the clip overlay down", e));
+}
+
+/** Takes down everything this plugin has over the game, editor included. */
+export function hideGameOverlay(): void {
+    if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return;
+
+    stopPump();
+
+    Native.hideClipOverlay().catch(e => logger.warn("Could not take the clip overlay down", e));
+    Native.closeStudioOverlay().catch(e => logger.warn("Could not close the editor over the game", e));
+    Native.dropOverlayWaiters().catch(() => undefined);
+}
+
+/*
+ * The editor's buttons, coming back.
+ *
+ * Same shape as the keybind pump in ./globalKeybinds: each call parks in the
+ * main process until the editor asks for something, so an open editor nobody is
+ * touching costs nothing. The loop only runs while the editor is up.
+ */
+
+/** Bumped on every stop, so a loop left over from a previous editor exits. */
+let generation = 0;
+let running = false;
+
+function startPump(): void {
+    if (running) return;
+
+    running = true;
+    void pump(++generation);
+}
+
+function stopPump(): void {
+    generation++;
+    running = false;
+}
+
+async function pump(mine: number): Promise<void> {
+    while (mine === generation) {
+        let action: StudioAction | null = null;
+
+        try {
+            action = await Native.waitForOverlayAction();
+        } catch (e) {
+            logger.warn("The overlay editor listener failed", e);
+            break;
+        }
+
+        if (mine !== generation) return;
+
+        if (!action) {
+            // A timeout with the window gone is the editor having been closed
+            // from the page or by the keybind, and the end of the loop.
+            try {
+                if (!await Native.studioOverlayUp()) break;
+            } catch {
+                break;
+            }
+
+            continue;
+        }
+
+        const outcome = await runOverlayAction(action);
+
+        try {
+            await Native.answerOverlayAction(outcome.ok, outcome.message, outcome.close);
+        } catch (e) {
+            logger.warn("Could not answer the overlay editor", e);
+        }
+
+        if (mine !== generation) return;
+
+        // A cut replaces the file the editor was showing, so it reopens on what
+        // is now there rather than on a name that no longer exists.
+        if (outcome.next) await openClipEditor(outcome.next);
+    }
+
+    if (mine === generation) running = false;
 }
 
 /**
@@ -118,10 +275,10 @@ export function notifySaved(name: string): void {
     if (!settings.store.overlayNotice) return;
     if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return;
 
-    // The clip name when there is no bind to name: "Unbound to watch it" is
-    // what formatting an empty bind would otherwise put on screen.
+    // The clip name when there is no bind to name: "Unbound to edit it" is what
+    // formatting an empty bind would otherwise put on screen.
     const bind = settings.store.replayKeybind;
-    const note = bind ? `${formatKeybind(bind)} to watch it` : name;
+    const note = bind ? `${formatKeybind(bind)} to edit it` : name;
 
     Native.notifyClipSaved("Clip saved", note, settings.store.overlayCorner)
         .catch(e => logger.warn("Could not say that the clip was saved", e));

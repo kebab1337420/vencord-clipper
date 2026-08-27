@@ -17,7 +17,8 @@ import { accessSync, constants as fsConstants, existsSync, mkdirSync, readdirSyn
 import { get as httpsGet } from "https";
 import { basename, extname, isAbsolute, join } from "path";
 
-import { canOverlay, hideOverlay, type OverlayCorner, type OverlayLook, overlayUp, showOverlay, showToast } from "./overlayWindow";
+import { canOverlay, hideOverlay, type OverlayCorner, type OverlayLook, showOverlay, showToast } from "./overlayWindow";
+import { answerStudio, dropStudioWaiters, hideStudio, showStudio, type StudioAction, type StudioLook, studioUp, waitForStudioAction } from "./studioOverlay";
 // From utils rather than defined here: the renderer needs the same names and
 // cannot import this module, which pulls in fs and electron. Not re-exported
 // either - every value export of a native module must be an IPC handler.
@@ -923,16 +924,6 @@ export function showClipOverlay(_: IpcMainInvokeEvent, dir: string, name: string
     return showOverlay(path, safeLook(look));
 }
 
-/** Takes the overlay down, or puts the clip up when nothing is playing. */
-export function toggleClipOverlay(event: IpcMainInvokeEvent, dir: string, name: string, look?: Partial<OverlayLook>): boolean {
-    if (overlayUp()) {
-        hideOverlay();
-        return false;
-    }
-
-    return showClipOverlay(event, dir, name, look);
-}
-
 /**
  * Says that a clip was written, for a couple of seconds.
  *
@@ -941,6 +932,8 @@ export function toggleClipOverlay(event: IpcMainInvokeEvent, dir: string, name: 
  */
 export function notifyClipSaved(_: IpcMainInvokeEvent, title: string, note: string, corner?: string): boolean {
     if (BrowserWindow.getFocusedWindow()) return false;
+    // The editor is up and covers where this would go.
+    if (studioUp()) return false;
 
     return showToast(safeLine(title, 60), safeLine(note, 90), safeCorner(corner));
 }
@@ -948,6 +941,96 @@ export function notifyClipSaved(_: IpcMainInvokeEvent, title: string, note: stri
 /** Takes the overlay down. Does nothing when it is not up. */
 export function hideClipOverlay(_?: IpcMainInvokeEvent): void {
     hideOverlay();
+}
+
+/*
+ * ------------------------------------------------------ the editor overlay ---
+ *
+ * The same clip, in a window that can be worked in rather than only watched.
+ * ./studioOverlay owns it; what is here is the part that must not trust the
+ * renderer, and the two ends of the queue the page's buttons travel through.
+ */
+
+/** Most markers drawn on the scrub bar. Past this it is a solid line anyway. */
+const MAX_MARKERS = 200;
+
+function safeMarkers(markers: unknown): number[] {
+    if (!Array.isArray(markers)) return [];
+
+    return markers
+        .map(Number)
+        .filter(at => Number.isFinite(at) && at >= 0)
+        .slice(0, MAX_MARKERS);
+}
+
+function safeStudioLook(look: Partial<StudioLook> | undefined): StudioLook {
+    return {
+        width: clamp(look?.width, 360, 1600, 720),
+        volume: clamp(look?.volume, 0, 100, 0)
+    };
+}
+
+/**
+ * Opens the editor on a saved clip.
+ *
+ * Returns false when there is nothing to open - a clip that is not there, or a
+ * platform that cannot place a window over a game.
+ */
+export function openStudioOverlay(_: IpcMainInvokeEvent, dir: string, name: string, markers?: unknown, look?: Partial<StudioLook>): boolean {
+    const safe = clipName(name);
+    if (!safe) return false;
+
+    const path = join(resolveDirectory(dir), safe);
+    if (!existsSync(path)) return false;
+
+    return showStudio({ name: safe, path, markers: safeMarkers(markers) }, safeStudioLook(look));
+}
+
+/** Takes the editor down. Does nothing when it is not up. */
+export function closeStudioOverlay(_?: IpcMainInvokeEvent): void {
+    hideStudio();
+}
+
+/** Whether the editor is up, for a renderer deciding whether to poll. */
+export function studioOverlayUp(_?: IpcMainInvokeEvent): boolean {
+    return studioUp();
+}
+
+/**
+ * Resolves with the next thing the editor was asked to do, or null on timeout.
+ *
+ * Cutting, sending and opening the studio all need Discord itself, which only
+ * the renderer has, so the page's buttons come back out here the same way the
+ * global keybinds do.
+ */
+export function waitForOverlayAction(_: IpcMainInvokeEvent, timeoutMs = 30_000): Promise<StudioAction | null> {
+    return waitForStudioAction(clamp(timeoutMs, 1000, 120_000, 30_000));
+}
+
+/** Frees the parked polls, for a renderer that is going away. */
+export function dropOverlayWaiters(_?: IpcMainInvokeEvent): void {
+    dropStudioWaiters();
+}
+
+/** Puts the outcome of an action in the editor's status line. */
+export function answerOverlayAction(_: IpcMainInvokeEvent, ok: boolean, message: string, close?: boolean): void {
+    answerStudio({ ok: !!ok, message: safeLine(message, 120), close: !!close });
+}
+
+/**
+ * Brings the client to the front.
+ *
+ * For the one button in the editor whose whole point is to carry on in Discord:
+ * the window asked for is the one the caller is running in, so there is nothing
+ * to guess and nothing for a renderer to name.
+ */
+export function focusClient(event: IpcMainInvokeEvent): void {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) return;
+
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
 }
 
 /*

@@ -289,8 +289,8 @@ export const settings = definePluginSettings({
         default: "alt+F8",
         component: () => (
             <KeybindInput
-                title="Watch the last clip keybind"
-                note="Plays the clip you saved last over the game, and takes it down again on a second press. Works from inside a game, like the others."
+                title="Clip editor keybind"
+                note="Opens the clip you saved last in an editor over the game, and hands it the mouse: watch it, pick a range out of it, cut it, send it, delete it or take it to the full studio. A second press gives the mouse back to the game and closes it, and so does Escape."
                 value={settings.store.replayKeybind}
                 onChange={v => (settings.store.replayKeybind = v)}
             />

@@ -198,7 +198,12 @@ function offerRestart(info: UpdateInfo): void {
         body: "Discord has to restart to load it. Anything the capture buffer is holding right now is lost on restart, so save the clip first if there is one worth keeping.",
         confirmText: "Restart now",
         cancelText: "Later",
-        onConfirm: () => void Native.relaunchClient()
+        onConfirm: () => {
+            // Written down before it happens: a client that restarts by itself
+            // is otherwise indistinguishable, in the log, from one that crashed.
+            logger.info(`Restarting the client to load Clipper ${info.version}`);
+            void Native.relaunchClient();
+        }
     });
 }
 
@@ -265,5 +270,6 @@ export function restartClient(): void {
         return;
     }
 
+    logger.info("Restarting the client, asked for from the settings");
     void Native.relaunchClient();
 }

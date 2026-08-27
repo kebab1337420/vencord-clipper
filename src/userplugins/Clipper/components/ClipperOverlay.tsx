@@ -935,8 +935,26 @@ export function ClipperOverlay() {
      * back without reading the file again.
      */
     const wasSaving = useRef(false);
+    const shown = useRef<SavedClip | null>(null);
     useEffect(() => {
-        if (wasSaving.current && state !== "saving") setReplay(recorder.lastClip);
+        if (wasSaving.current && state !== "saving") {
+            /*
+             * Only a clip that has not been played back already.
+             *
+             * A save that comes to nothing - an empty window, a write that
+             * failed - still ends by going back to recording, and the last clip
+             * in hand is then the one before it. Showing that again would pass
+             * an old clip off as the moment that was just asked for, which is
+             * worse than showing nothing at all.
+             */
+            const clip = recorder.lastClip;
+
+            if (clip && clip !== shown.current) {
+                shown.current = clip;
+                setReplay(clip);
+            }
+        }
+
         wasSaving.current = state === "saving";
     }, [state]);
     useEffect(() => {
@@ -994,7 +1012,7 @@ export function ClipperOverlay() {
                 <ReplayCard
                     clip={replay}
                     onStudio={name => setStudio({ initial: name })}
-                    onRefresh={() => setReplay(recorder.lastClip)}
+                    onRefresh={() => { shown.current = recorder.lastClip; setReplay(recorder.lastClip); }}
                     onClose={() => setReplay(null)}
                 />
             )}

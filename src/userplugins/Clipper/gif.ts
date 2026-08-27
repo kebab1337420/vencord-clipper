@@ -235,12 +235,17 @@ function medianCut(cells: Cell[], want: number): Box[] {
 
         box.cells.sort((a, b) => channel(a.color, shift) - channel(b.color, shift));
 
-        // The median by pixel count, not by cell count: half the picture on
-        // each side, rather than half the distinct colours.
+        /*
+         * The median by pixel count, not by cell count: half the picture on
+         * each side, rather than half the distinct colours.
+         *
+         * The loop always takes at least one cell - a box is only ever picked
+         * for splitting when it holds more than one - so both sides come out
+         * non-empty without a guard for it.
+         */
         let seen = 0;
         let split = 0;
         for (; split < box.cells.length - 1 && seen * 2 < box.count; split++) seen += box.cells[split].count;
-        if (split === 0) split = 1;
 
         const left = box.cells.slice(0, split);
         const right = box.cells.slice(split);

@@ -273,8 +273,14 @@ class ClipRecorder {
      */
     private generation = 0;
 
-    /** Resolved by the next chunk, used to flush the recorder before a save. */
-    private nextChunk: (() => void) | null = null;
+    /**
+     * Resolved by the next chunk, used to flush the recorder before a save.
+     *
+     * A list rather than a slot: a preview opened while a save is running waits
+     * on the same chunk, and a single slot would leave the first of them parked
+     * until its own timeout instead of waking it with the chunk it asked for.
+     */
+    private nextChunk: Array<() => void> = [];
 
     /**
      * The containers left to try, best first, and where in that list we are.
@@ -394,6 +400,34 @@ class ClipRecorder {
         void this.save(Math.min(AUTO_SAVE_SECONDS, settings.store.clipLength));
     }
 
+    /**
+     * Puts the highlight watcher where the setting and the buffer say it should
+     * be, whenever either of them moves.
+     *
+     * Called from `start` and from the settings listener, because a watcher that
+     * is only ever armed on `start` leaves somebody who turns the setting on
+     * mid-game waiting for the next stop and start before anything is marked.
+     */
+    syncHighlights(): void {
+        // Not `isRecording`, which is false for the few seconds a save takes:
+        // stopping the watcher there would leave it stopped, since the state
+        // going back to "recording" afterwards passes through nothing that
+        // would start it again.
+        const running = this.state === "recording" || this.state === "saving";
+        const want = running && settings.store.autoHighlight;
+        if (want === highlights.active) return;
+
+        if (!want) {
+            highlights.stop();
+            return;
+        }
+
+        highlights.start({
+            channelLevel: id => this.channelLevel(id),
+            onHighlight: reason => this.markAuto(reason)
+        });
+    }
+
     subscribe(listener: Listener) {
         this.listeners.add(listener);
         return () => void this.listeners.delete(listener);
@@ -509,12 +543,7 @@ class ClipRecorder {
 
             // And the room is listened to, so the moments nobody had a free hand
             // to mark get marked anyway.
-            if (settings.store.autoHighlight) {
-                highlights.start({
-                    channelLevel: id => this.channelLevel(id),
-                    onHighlight: reason => this.markAuto(reason)
-                });
-            }
+            this.syncHighlights();
 
             // Last, and never awaited into the result: the native engine is a
             // bonus track layout, not a condition for the buffer to run.
@@ -726,7 +755,7 @@ class ClipRecorder {
 
     private onChunk(blob: Blob) {
         const notify = this.nextChunk;
-        this.nextChunk = null;
+        this.nextChunk = [];
 
         if (blob.size) {
             // The very first chunk carries the container header; every later save
@@ -739,7 +768,7 @@ class ClipRecorder {
             }
         }
 
-        notify?.();
+        for (const resolve of notify) resolve();
     }
 
     /**
@@ -761,11 +790,11 @@ class ClipRecorder {
             };
 
             const timer = setTimeout(() => {
-                if (this.nextChunk === settle) this.nextChunk = null;
+                this.nextChunk = this.nextChunk.filter(waiting => waiting !== settle);
                 settle();
             }, 500);
 
-            this.nextChunk = settle;
+            this.nextChunk.push(settle);
 
             try {
                 recorder.requestData();
@@ -1196,8 +1225,7 @@ class ClipRecorder {
             logger.warn("Error stopping recorder", e);
         }
 
-        this.nextChunk?.();
-        this.nextChunk = null;
+        for (const resolve of this.nextChunk.splice(0)) resolve();
 
         voiceActivity.stop();
         voiceBuffers.stop();
@@ -1215,6 +1243,10 @@ class ClipRecorder {
         this.header = null;
         this.chunks = [];
         this.marks = [];
+
+        // The next buffer is a new evening: a stop and a start within two
+        // minutes of an automatic clip should not swallow its first highlight.
+        this.autoSaveAfter = 0;
 
         this.relay?.();
         this.relay = null;
@@ -1313,6 +1345,16 @@ class ClipRecorder {
             return;
         }
 
+        // Before the sound rather than after it: a window picked in the preview
+        // can have rolled out of the buffer while it was being watched, and a
+        // clip that is never written should not be announced as one that was.
+        // The buffer is checked again below, once the flush and the prune have
+        // moved it, but by then this has caught the ordinary case.
+        if (window && window.to <= this.bufferStart) {
+            toast("That part of the buffer has already rolled past", Toasts.Type.FAILURE);
+            return;
+        }
+
         /*
          * Told out loud, before anything is written.
          *
@@ -1337,8 +1379,13 @@ class ClipRecorder {
              * ducking the whole montage. Everything below it stays as the
              * fallback: our own buffer has been filling all along, so an engine
              * that refuses at the last moment costs the layout, not the clip.
+             *
+             * Not for a window picked in the preview: the engine saves its own
+             * last N seconds and has no way to be pointed at a moment further
+             * back, so it would answer a precise request with a different clip
+             * and report success.
              */
-            if (this.native) {
+            if (this.native && !window) {
                 try {
                     if (await this.saveNative(seconds)) return;
                 } catch (e) {
@@ -1362,9 +1409,31 @@ class ClipRecorder {
              * Older chunks are simply left out: they are self-contained
              * fragments, and the repair below rebases what is left onto zero
              * exactly as it does for a full save.
+             *
+             * A window is checked against the buffer first. It points at the
+             * buffer as it stood when the preview opened, and the buffer has
+             * been rolling since - `prune` drops whatever falls off the back of
+             * it - so left alone the "never empty" fallback in `chunksIn` would
+             * quietly write the newest second instead of the moment that was
+             * asked for.
              */
-            const kept = window
-                ? this.chunksIn(window.from, window.to)
+            let picked = window;
+            if (picked) {
+                const oldest = this.bufferStart;
+
+                if (picked.to <= oldest) {
+                    toast("That part of the buffer has already rolled past", Toasts.Type.FAILURE);
+                    return;
+                }
+
+                if (picked.from < oldest) {
+                    toast("The start of that window has rolled past - saved what is left of it", Toasts.Type.MESSAGE);
+                    picked = { from: oldest, to: picked.to };
+                }
+            }
+
+            const kept = picked
+                ? this.chunksIn(picked.from, picked.to)
                 : seconds ? this.chunksSince(Date.now() - seconds * 1000) : this.chunks;
 
             const raw = new Blob([this.header, ...kept.map(c => c.blob)], { type: this.mimeType });
@@ -1372,9 +1441,19 @@ class ClipRecorder {
 
             // Read before the write, because the buffer keeps moving underneath.
             const start = kept[0].at - TIMESLICE;
-            const end = window ? Math.min(window.to, kept[kept.length - 1].at) : Date.now();
+            const end = picked ? Math.min(picked.to, kept[kept.length - 1].at) : Date.now();
             const length = Math.round((end - start) / 1000);
-            const markers = this.marks.map(m => Math.max(0, (m - start) / 1000));
+            /*
+             * Only the markers that fall inside what is being written.
+             *
+             * Clamping the older ones to zero, as this used to, put a tick on
+             * the first frame of every trimmed clip - one per marker dropped -
+             * and a window that ends before the buffer does would otherwise
+             * carry ticks past its own last frame.
+             */
+            const markers = this.marks
+                .filter(m => m >= start && m <= end)
+                .map(m => (m - start) / 1000);
             const voices = voiceActivity.slice(start, end);
 
             // Cluster timecodes are absolute, so the kept ones still carry the

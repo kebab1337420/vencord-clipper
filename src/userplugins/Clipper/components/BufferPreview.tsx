@@ -140,12 +140,20 @@ export function BufferPreview({ onClose }: { onClose(): void; }) {
                                 controls
                                 autoPlay
                                 onLoadedMetadata={e => {
-                                    // A rebased fragment stream can report an
-                                    // infinite duration until it has been seeked.
+                                    /*
+                                     * Wall-clock first, the container second.
+                                     *
+                                     * The handles are read back as an offset
+                                     * from `buffered.start`, so the scale they
+                                     * are drawn on has to be the one the save
+                                     * cuts by. A rebased fragment stream also
+                                     * reports an infinite duration until it has
+                                     * been seeked, which is the other half of
+                                     * why the container is not the authority.
+                                     */
                                     const video = e.currentTarget;
-                                    const length = Number.isFinite(video.duration)
-                                        ? video.duration
-                                        : buffered ? (buffered.end - buffered.start) / 1000 : 0;
+                                    const wall = buffered ? (buffered.end - buffered.start) / 1000 : 0;
+                                    const length = wall || (Number.isFinite(video.duration) ? video.duration : 0);
 
                                     setSpan(length);
                                     setFrom(0);

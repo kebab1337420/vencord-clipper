@@ -70,8 +70,16 @@ function toast(message: string, type: string, duration = 5000) {
     });
 }
 
+/*
+ * What the message claims is what the sender can actually see.
+ *
+ * It used to say everyone had saved their angle, which is a thing this client
+ * has no way of knowing: a receiver may have the plugin off, the buffer off or
+ * the setting off, and the message would have said otherwise in their own chat.
+ * So it says what it is - a request - and leaves the claiming to the clips.
+ */
 function requestText(seconds: number): string {
-    return `🎬 **Clip that.** Everyone in the call running Clipper just saved their own angle of the last ${seconds} seconds. \`multi-pov ${seconds}s\``;
+    return `🎬 **Clip that.** Asking everyone in the call running Clipper to save the last ${seconds} seconds. \`multi-pov ${seconds}s\``;
 }
 
 function myId(): string {
@@ -103,11 +111,17 @@ export async function requestPov(): Promise<void> {
     const { clipLength } = settings.store;
     const seconds = Math.round(clipLength);
 
-    void recorder.save();
+    // Ours first, and only if there is anything to take it from: asking the
+    // call is worth doing either way, but saying a clip was saved while the
+    // buffer was off sends somebody looking for a file that was never written.
+    const mine = recorder.isRecording;
+    if (mine) void recorder.save();
 
     const others = voiceParticipants().filter(p => !p.self);
     if (!others.length) {
-        toast("Not in a call with anyone - saved your own clip", Toasts.Type.MESSAGE);
+        toast(mine
+            ? "Not in a call with anyone - saved your own clip"
+            : "Not in a call with anyone, and your clip buffer is off", Toasts.Type.MESSAGE);
         return;
     }
 
@@ -116,7 +130,9 @@ export async function requestPov(): Promise<void> {
     // its own chat, and a call in a DM is that DM.
     const channelId = channelOf();
     if (!channelId) {
-        toast("Could not tell which call you are in - saved your own clip", Toasts.Type.MESSAGE);
+        toast(mine
+            ? "Could not tell which call you are in - saved your own clip"
+            : "Could not tell which call you are in, and your clip buffer is off", Toasts.Type.MESSAGE);
         return;
     }
 
@@ -125,7 +141,9 @@ export async function requestPov(): Promise<void> {
         toast(`Asked ${others.length === 1 ? "the other person" : `the ${others.length} others`} in the call for their angle`, Toasts.Type.SUCCESS);
     } catch (e) {
         logger.error("Could not ask the call for a clip", e);
-        toast("Saved your clip, but the call could not be asked", Toasts.Type.FAILURE);
+        toast(mine
+            ? "Saved your clip, but the call could not be asked"
+            : "The call could not be asked", Toasts.Type.FAILURE);
     }
 }
 

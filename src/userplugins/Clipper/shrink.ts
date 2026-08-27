@@ -122,37 +122,43 @@ export async function shrinkVideo(url: string, { limit, fps = 30, onProgress }: 
     let best: ShrinkResult | null = null;
     let squeeze = 1;
 
-    for (let attempt = 0; attempt < TRIES; attempt++) {
-        const budget = (limit * 8 * MARGIN * squeeze) / seconds;
-        const bitrate = Math.max(MIN_VIDEO_BITS, Math.round(budget - AUDIO_BITS));
+    // Held open across the attempts and closed whichever way this ends: an
+    // AudioContext that leaks takes the video element and its decoder with it,
+    // and a few failed sends are enough to notice.
+    try {
+        for (let attempt = 0; attempt < TRIES; attempt++) {
+            const budget = (limit * 8 * MARGIN * squeeze) / seconds;
+            const bitrate = Math.max(MIN_VIDEO_BITS, Math.round(budget - AUDIO_BITS));
 
-        // How much picture that bitrate can carry, expressed as a fraction of
-        // the clip's own width.
-        const carried = bitrate / (video.videoWidth * video.videoHeight * fps * BITS_PER_PIXEL);
-        const scale = Math.min(1, Math.max(.35, Math.sqrt(carried)));
+            // How much picture that bitrate can carry, expressed as a fraction
+            // of the clip's own width.
+            const carried = bitrate / (video.videoWidth * video.videoHeight * fps * BITS_PER_PIXEL);
+            const scale = Math.min(1, Math.max(.35, Math.sqrt(carried)));
 
-        const width = even(video.videoWidth * scale);
-        const height = even(video.videoHeight * scale);
+            const width = even(video.videoWidth * scale);
+            const height = even(video.videoHeight * scale);
 
-        onProgress?.(attempt
-            ? `Still too big - re-encoding at ${width}p wide`
-            : `Re-encoding at ${Math.round(bitrate / 1000)} kbps (about ${Math.ceil(seconds)}s)`);
+            onProgress?.(attempt
+                ? `Still too big - re-encoding at ${width}p wide`
+                : `Re-encoding at ${Math.round(bitrate / 1000)} kbps (about ${Math.ceil(seconds)}s)`);
 
-        const blob = await transcode(video, { width, height, fps, bitrate, type, seconds, sink, from: range.start });
+            const blob = await transcode(video, { width, height, fps, bitrate, type, seconds, sink, from: range.start });
 
-        best = { blob, mimeType: type, width, height, bitrate, fits: blob.size <= limit };
-        logger.info(`Re-encode came out at ${blob.size} bytes for a ${limit} byte limit`);
+            best = { blob, mimeType: type, width, height, bitrate, fits: blob.size <= limit };
+            logger.info(`Re-encode came out at ${blob.size} bytes for a ${limit} byte limit`);
 
-        if (best.fits) break;
+            if (best.fits) break;
 
-        // Aim at what the last attempt actually achieved rather than at the
-        // limit again: the encoder overshot, so ask for less than it overshot by.
-        squeeze *= Math.min(.8, (limit / blob.size) * MARGIN);
+            // Aim at what the last attempt actually achieved rather than at the
+            // limit again: the encoder overshot, so ask for less than it
+            // overshot by.
+            squeeze *= Math.min(.8, (limit / blob.size) * MARGIN);
+        }
+    } finally {
+        void audio.close();
+        video.src = "";
     }
 
-    void audio.close();
-
-    video.src = "";
     return best!;
 }
 

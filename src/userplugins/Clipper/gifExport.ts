@@ -177,17 +177,22 @@ async function grabFrames(url: string, { from, to, fps = DEFAULT_FPS, width = DE
     const total = Math.max(1, Math.floor((end - start) / step));
     const frames: ImageData[] = [];
 
-    for (let i = 0; i < total; i++) {
-        const at = start + i * step;
+    // Released whichever way this ends: a clip that fails to decode halfway
+    // through otherwise leaves its decoder holding the whole file.
+    try {
+        for (let i = 0; i < total; i++) {
+            const at = start + i * step;
 
-        await seek(video, at);
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        frames.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+            await seek(video, at);
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            frames.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
 
-        if (i % 10 === 0) onProgress?.(`Reading the clip (${i + 1}/${total})`);
+            if (i % 10 === 0) onProgress?.(`Reading the clip (${i + 1}/${total})`);
+        }
+    } finally {
+        video.src = "";
     }
 
-    video.src = "";
     return frames;
 }
 

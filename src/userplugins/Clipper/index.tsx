@@ -61,30 +61,50 @@ function onKeyDown(e: KeyboardEvent) {
     }
 }
 
-/** Keeps the OS-level binds in sync with what the settings hold. */
-const KEYBIND_SETTINGS = ["saveKeybind", "toggleKeybind", "markKeybind", "povKeybind", "globalKeybinds"] as const;
+/**
+ * Settings that something outside the settings panel has to be told about, and
+ * what to tell.
+ *
+ * The keybinds go to the OS-level registration. The highlight watcher listens
+ * to the call, and has to start or stop the moment it is asked to rather than at
+ * the next start of the buffer - somebody who turns it on mid-game means now.
+ */
+const WATCHED: Array<readonly [string, () => void]> = [
+    ["saveKeybind", () => void syncGlobalKeybinds()],
+    ["toggleKeybind", () => void syncGlobalKeybinds()],
+    ["markKeybind", () => void syncGlobalKeybinds()],
+    ["povKeybind", () => void syncGlobalKeybinds()],
+    ["globalKeybinds", () => void syncGlobalKeybinds()],
+    ["autoHighlight", () => recorder.syncHighlights()]
+];
 
 /**
  * Kept so the listeners can be dropped again on stop(): toggling the plugin off
  * and on otherwise stacks a new set on every start, and each settings change
  * then re-registers the binds once per stacked listener.
  */
-const keybindWatchers: Array<() => void> = [];
+const settingsWatchers: Array<() => void> = [];
 
-function watchKeybindSettings() {
-    unwatchKeybindSettings();
+function watchSettings() {
+    unwatchSettings();
 
-    for (const name of KEYBIND_SETTINGS) {
+    for (const [name, act] of WATCHED) {
         const path = `plugins.Clipper.${name}` as any;
-        const listener = () => void syncGlobalKeybinds();
+        const listener = () => {
+            try {
+                act();
+            } catch (e) {
+                logger.warn(`Could not act on a change to ${name}`, e);
+            }
+        };
 
         SettingsStore.addChangeListener(path, listener);
-        keybindWatchers.push(() => SettingsStore.removeChangeListener(path, listener));
+        settingsWatchers.push(() => SettingsStore.removeChangeListener(path, listener));
     }
 }
 
-function unwatchKeybindSettings() {
-    for (const drop of keybindWatchers.splice(0)) {
+function unwatchSettings() {
+    for (const drop of settingsWatchers.splice(0)) {
         try {
             drop();
         } catch (e) {
@@ -215,7 +235,7 @@ export default definePlugin({
 
         window.addEventListener("keydown", onKeyDown, true);
         void startGlobalKeybinds();
-        watchKeybindSettings();
+        watchSettings();
         mountOverlay();
 
         if (settings.store.autoStart) recorder.start();
@@ -226,7 +246,7 @@ export default definePlugin({
 
     stop() {
         window.removeEventListener("keydown", onKeyDown, true);
-        unwatchKeybindSettings();
+        unwatchSettings();
         stopGlobalKeybinds();
         unmountOverlay();
         recorder.stop();

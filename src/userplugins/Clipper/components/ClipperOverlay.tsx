@@ -105,7 +105,12 @@ const CSS = `
     margin-top: 4px;
 }
 .vc-clipper-menu-row button {
+    /* The block rule above is full width, which a row cell must not inherit:
+       a flex basis of auto reads that width, so every cell would ask for the
+       whole row and the ones past the first would be pushed out of the menu. */
+    width: auto;
     flex: 1 1 0;
+    min-width: 0;
     padding: 7px 6px;
     font-size: 13px;
     text-align: center;
@@ -138,6 +143,7 @@ const CSS = `
     margin-top: 4px;
 }
 .vc-clipper-menu-foot button {
+    width: auto;
     flex: 0 0 auto;
 }
 .vc-clipper-menu-foot .vc-clipper-menu-status {

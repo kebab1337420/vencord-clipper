@@ -146,15 +146,6 @@ interface ClipsSource {
 }
 
 /**
- * The window the native buffer is asked to save.
- *
- * All four times are on the engine's own steady clock, not on the wall clock:
- * `now()` below is the only correct source for them. `trim*` is the part that
- * ends up in the file, `start`/`end` the part the engine is asked to hold on
- * to - Discord keeps them apart so its editor can widen a clip afterwards, and
- * the plugin simply asks for the same span twice.
- */
-/**
  * What `saveClipEx` takes, and all four times are genuinely optional.
  *
  * The module's own signature says so - `Engine::SaveClip(std::string,

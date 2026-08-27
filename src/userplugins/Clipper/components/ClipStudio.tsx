@@ -1700,30 +1700,26 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
 
     const voiceNodesRef = useRef<{ source: AudioBufferSourceNode; gain: GainNode; band: VoiceBand; } | null>(null);
 
-    /**
-     * The preview's own speech notch, opened only if a level is ever moved.
-     *
-     * `createMediaElementSource` is a one-way door - it takes the element's
-     * sound out of the page and into the graph for the life of the context, and
-     * it may only be called once per element - so it is not opened for a clip
-     * nobody touches. Until then the preview plays the way it always has,
-     * straight out of the element on its own volume.
-     */
-    /**
-     * The preview's notch, and the element it belongs to.
-     *
-     * The element is not decoration. `createMediaElementSource` binds a source
-     * node to one element for good, and the preview does not keep one element:
-     * it gets a new `<video>` whenever the montage moves to a clip from another
-     * file. The routing was cached without recording who it was for, so after
-     * that swap the notch was still there, still being driven, still reporting
-     * a mute - attached to an element nobody was listening to, while the new
-     * one played straight out of the page at full volume. A mute that does
-     * nothing at all, which is exactly what it looked like.
-     */
     /** Whether the notch was open on the previous frame, for the log line. */
     const duckWasOpenRef = useRef(false);
 
+    /**
+     * The preview's notch, and the element it belongs to.
+     *
+     * Opened only if a level is ever moved: `createMediaElementSource` is a
+     * one-way door, taking the element's sound out of the page and into the
+     * graph for the life of the context, and it may only be called once per
+     * element. Until then the preview plays straight out of the element.
+     *
+     * The element is not decoration. That call binds a source node to one
+     * element for good, and the preview does not keep one element: it gets a
+     * new `<video>` whenever the montage moves to a clip from another file. The
+     * routing was cached without recording who it was for, so after that swap
+     * the notch was still there, still being driven, still reporting a mute -
+     * attached to an element nobody was listening to, while the new one played
+     * straight out of the page at full volume. A mute that does nothing at all,
+     * which is exactly what it looked like.
+     */
     const previewBandRef = useRef<{ el: HTMLMediaElement; source: MediaElementAudioSourceNode; band: VoiceBand; } | null>(null);
 
     /*
@@ -2672,13 +2668,6 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
     };
 
     /**
-     * Adds sounds to the lane, each one landing at the playhead.
-     *
-     * At the playhead rather than at zero: a sting is placed against something
-     * that happens in the montage, and the playhead is where the user was
-     * already looking.
-     */
-    /**
      * Decodes a sound off disk and lays it on the timeline.
      *
      * Split out of the picker so the shelf can use it too: placing a saved
@@ -2736,6 +2725,13 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         setPickedOverlay(overlay.id);
     };
 
+    /**
+     * Adds sounds to the lane, each one landing at the playhead.
+     *
+     * At the playhead rather than at zero: a sting is placed against something
+     * that happens in the montage, and the playhead is where the user was
+     * already looking.
+     */
     const onImportSound = async () => {
         setError("");
 

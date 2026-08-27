@@ -99,16 +99,20 @@ function envelope(buffer: AudioBuffer): number[] {
 }
 
 /**
- * Decodes a file into a timeline source.
+ * Decodes a file into a timeline source, taking the bytes with it.
  *
  * The context is only borrowed for the decode: `decodeAudioData` resamples to
  * the context's own rate, which is what makes every source line up in the mix
  * later without a single resampler of our own.
+ *
+ * The buffer is consumed rather than copied - `decodeAudioData` detaches what
+ * it is handed - so it has to be one nothing else reads afterwards. `loadAudio-
+ * File` already hands over a buffer of its own, the blob behind the URL holding
+ * its own snapshot of the same bytes, and a copy here would only be a second
+ * full-length one of a file that can run to a few megabytes.
  */
 export async function decodeSource(ctx: BaseAudioContext, id: string, name: string, data: ArrayBuffer, url: string, path?: string): Promise<AudioSource> {
-    // Decoded from a copy: `decodeAudioData` detaches the buffer it is given,
-    // and the caller still owns the bytes it read off disk.
-    const buffer = await ctx.decodeAudioData(data.slice(0));
+    const buffer = await ctx.decodeAudioData(data);
 
     return { id, name, url, path, duration: buffer.duration, buffer, peaks: envelope(buffer) };
 }

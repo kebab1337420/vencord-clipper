@@ -107,7 +107,8 @@ export async function fetchAngle(angle: PostedAngle): Promise<{ url: string; byt
 
     const bytes = await response.arrayBuffer();
 
-    // One copy for the element to play and one for the alignment to decode:
-    // decoding detaches the buffer it is handed, and the element needs it after.
-    return { url: URL.createObjectURL(new Blob([bytes.slice(0)], { type: response.headers.get("content-type") || "video/mp4" })), bytes };
+    // The blob keeps its own snapshot of the bytes, so the buffer can still be
+    // handed to the alignment afterwards - which detaches it - and the element
+    // will go on playing from a copy the decode never touched.
+    return { url: URL.createObjectURL(new Blob([bytes], { type: response.headers.get("content-type") || "video/mp4" })), bytes };
 }

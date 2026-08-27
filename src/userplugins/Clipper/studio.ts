@@ -1011,14 +1011,12 @@ function filterFor(effects: Effects): string {
     return parts.join(" ") || "none";
 }
 
-/**
- * Where a frame lands inside the output.
- *
- * The timeline mixes sources of different shapes - a 16:9 clip next to a phone
- * recording - so each one is fitted inside the frame rather than stretched, and
- * the zoom crops into the source instead of scaling the drawing, which keeps the
- * letterboxing untouched.
- */
+/** Smoothstep, so a move leaves and arrives at rest. */
+function ease(ratio: number): number {
+    const t = Math.min(1, Math.max(0, ratio));
+    return t * t * (3 - 2 * t);
+}
+
 /**
  * A framing eased between its two nearest keys.
  *
@@ -1026,11 +1024,6 @@ function filterFor(effects: Effects): string {
  * which reads as a camera being yanked. This one leaves and arrives at rest,
  * which is what a push looks like when somebody does it on purpose.
  */
-function ease(ratio: number): number {
-    const t = Math.min(1, Math.max(0, ratio));
-    return t * t * (3 - 2 * t);
-}
-
 export function framingAt(segment: Segment, seconds: number): { zoom: number; x: number; y: number; } {
     const still = {
         zoom: Math.max(1, segment.effects.zoom),
@@ -1256,6 +1249,14 @@ export async function trackAction(video: HTMLVideoElement, segment: Segment, opt
     return keys.length > 1 ? keys : [];
 }
 
+/**
+ * Where a frame lands inside the output.
+ *
+ * The timeline mixes sources of different shapes - a 16:9 clip next to a phone
+ * recording - so each one is fitted inside the frame rather than stretched, and
+ * the zoom crops into the source instead of scaling the drawing, which keeps the
+ * letterboxing untouched.
+ */
 function fitted(video: HTMLVideoElement, width: number, height: number, zoom: number, x = 0.5, y = 0.5, fill = false) {
     const vw = video.videoWidth || width;
     const vh = video.videoHeight || height;

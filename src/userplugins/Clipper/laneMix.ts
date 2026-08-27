@@ -544,11 +544,22 @@ function matchGain(bed: Float32Array, lane: Float32Array, alone: Float32Array, f
     return Math.min(MATCH_MAX, Math.max(MATCH_MIN, ratios[ratios.length >> 1]));
 }
 
+/**
+ * Decodes one track, consuming the bytes it is given.
+ *
+ * `decodeAudioData` detaches the buffer it is handed, so it never gets a view
+ * onto a buffer anything else still holds: a track carved out of a larger read
+ * is copied out first. A view that already spans a buffer of its own is passed
+ * straight through, and every caller here hands one over - a track built frame
+ * by frame by `nativeTracks.ts`, a file read off disk, a clip read back over
+ * its own URL. That last one is the whole recording, so the copy this skips was
+ * a second few hundred megabytes for no reader at all.
+ */
 async function decode(ctx: BaseAudioContext, data: Uint8Array): Promise<AudioBuffer> {
-    // decodeAudioData detaches what it is handed, so it never gets a view onto
-    // a buffer anything else still holds.
-    const copy = data.slice();
-    return await ctx.decodeAudioData(copy.buffer as ArrayBuffer);
+    const whole = data.byteOffset === 0 && data.byteLength === data.buffer.byteLength;
+    const own = whole ? data : data.slice();
+
+    return await ctx.decodeAudioData(own.buffer as ArrayBuffer);
 }
 
 /** Schedules one buffer where its offset puts it on the clip's clock. */

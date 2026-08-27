@@ -696,20 +696,24 @@ export function muxNativeAudio(video: Uint8Array, native: Uint8Array): Uint8Arra
         );
 
         const mdatAt = ftyp.length;
-        const media = new Uint8Array(payload);
+        const mediaAt = mdatAt + 8;
         const offsets: number[][] = [];
 
+        /*
+         * Where every sample lands in the finished file, worked out before a
+         * byte is moved.
+         *
+         * The chunk table needs those offsets and nothing else about the
+         * payload, and the sizes are all already known, so the tables can be
+         * written first and the samples copied once, straight into the file.
+         */
         let at = 0;
 
         for (const track of tracks) {
             const where: number[] = [];
 
             for (const sample of track.samples) {
-                media.set(track.source.subarray(sample.at, sample.at + sample.size), at);
-
-                // Where the sample lands in the finished file, which is what
-                // the chunk table has to say.
-                where.push(mdatAt + 8 + at);
+                where.push(mediaAt + at);
                 at += sample.size;
             }
 
@@ -731,14 +735,35 @@ export function muxNativeAudio(video: Uint8Array, native: Uint8Array): Uint8Arra
                 u32(tracks.length + 1)),
             ...tracks.map((track, i) => trackBox(track, i + 1, offsets[i])));
 
-        const mdat = new Uint8Array(8 + media.length);
-        new DataView(mdat.buffer).setUint32(0, mdat.length);
-        for (let i = 0; i < 4; i++) mdat[4 + i] = "mdat".charCodeAt(i);
-        mdat.set(media, 8);
+        /*
+         * One buffer for the whole file.
+         *
+         * The payload used to be gathered into an array of its own, copied into
+         * an `mdat` with a header written on the front of it, and copied a
+         * third time as the boxes were concatenated - three allocations the
+         * size of the recording, on a file that is written exactly once, for a
+         * clip that runs to hundreds of megabytes.
+         */
+        const out = new Uint8Array(mediaAt + payload + moov.length);
+
+        out.set(ftyp, 0);
+        new DataView(out.buffer).setUint32(mdatAt, 8 + payload);
+        for (let i = 0; i < 4; i++) out[mdatAt + 4 + i] = "mdat".charCodeAt(i);
+
+        let writeAt = mediaAt;
+
+        for (const track of tracks) {
+            for (const sample of track.samples) {
+                out.set(track.source.subarray(sample.at, sample.at + sample.size), writeAt);
+                writeAt += sample.size;
+            }
+        }
+
+        out.set(moov, mediaAt + payload);
 
         logger.info(`Muxed the call into the clip: ${tracks.length} tracks, ${Math.round(longest)}s`);
 
-        return concat([ftyp, mdat, moov]);
+        return out;
     } catch (e) {
         logger.error("Could not mux the native call audio into the clip", e);
         return null;

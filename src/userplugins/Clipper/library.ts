@@ -12,17 +12,16 @@
  * document next to the clips - name, game, free-form tags - so the editor can
  * group them by what was on screen.
  *
- * The game is read from Discord itself at save time. Discord already detects
- * running games for the activity status, so `RunningGameStore` knows the name
- * of what is running without any image analysis; the captured window's title is
- * the fallback when Discord has no game (a browser game, a source picked by
- * hand, activity detection turned off).
+ * The game is read from Discord itself at save time, through `game.ts`: no
+ * image analysis, just the name Discord already detects for the activity
+ * status. The captured window's title is the fallback when Discord has no game
+ * (a browser game, a source picked by hand, activity detection turned off).
  */
 
 import { Logger } from "@utils/Logger";
 import type { PluginNative } from "@utils/types";
-import { RunningGameStore } from "@webpack/common";
 
+import { runningGame } from "./game";
 import { settings } from "./settings";
 // Its own logger rather than the recorder's: the recorder tags clips through
 // this module, and borrowing its logger would close an import cycle.
@@ -323,16 +322,7 @@ function categoryFromTitle(title: string): string {
  * captured source's title is the fallback.
  */
 function detectGame(): string {
-    try {
-        const games = RunningGameStore?.getRunningGames?.() as { name?: string; }[] | undefined;
-        const running = games?.map(g => g?.name).find(name => typeof name === "string" && name.trim());
-
-        if (running) return running.trim().slice(0, 60);
-    } catch (e) {
-        logger.warn("Could not read Discord's running games", e);
-    }
-
-    return categoryFromTitle(settings.store.sourceName || "");
+    return runningGame() || categoryFromTitle(settings.store.sourceName || "");
 }
 
 /** Tags a freshly saved clip with whatever was running when it was saved. */

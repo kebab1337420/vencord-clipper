@@ -54,7 +54,12 @@ export async function loadClipUrl(name: string): Promise<string> {
 
 /** Media type a clip's name implies. WebM is the fallback, as it always was. */
 export function typeOfClip(name: string): string {
-    return name.toLowerCase().endsWith(".mp4") ? "video/mp4" : "video/webm";
+    const lower = name.toLowerCase();
+
+    if (lower.endsWith(".mp4")) return "video/mp4";
+    if (lower.endsWith(".gif")) return "image/gif";
+
+    return "video/webm";
 }
 
 /**

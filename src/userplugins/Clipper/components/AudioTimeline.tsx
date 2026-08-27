@@ -17,10 +17,11 @@
  * it by eye, which is the whole point of a lane.
  */
 
-import { useEffect, useRef, useState } from "@webpack/common";
+import { useRef, useState } from "@webpack/common";
 
 import { type AudioClip, type AudioSource, clipLengthOf, PEAKS } from "../audio";
 import { formatTime } from "../utils";
+import { useDragWindow } from "./dragWindow";
 
 /** Height of the drawn wave, in the SVG's own units. */
 const WAVE = 28;
@@ -99,25 +100,22 @@ export function AudioTimeline({ clips, sources, length, playhead, disabled, onCh
     const [drag, setDrag] = useState<Drag | null>(null);
     const span = Math.max(1, length);
 
+    /** Project time under a pointer, in seconds. */
+    const seconds = (clientX: number): number => {
+        const box = laneRef.current?.getBoundingClientRect();
+        if (!box?.width) return 0;
+
+        return ((clientX - box.left) / box.width) * span;
+    };
+
     /*
-     * The drag lives on the window rather than on the block.
-     *
-     * A pointer moving faster than React re-renders leaves the element behind,
-     * and a mouse released outside the modal would otherwise never end the drag,
-     * leaving a block stuck to the cursor.
+     * The drag lives on the window rather than on the block: a pointer moving
+     * faster than React re-renders leaves the element behind, and a mouse
+     * released outside the modal would never end the drag.
      */
-    useEffect(() => {
-        if (!drag) return;
-
-        const seconds = (e: MouseEvent) => {
-            const box = laneRef.current?.getBoundingClientRect();
-            if (!box?.width) return 0;
-
-            return ((e.clientX - box.left) / box.width) * span;
-        };
-
-        const move = (e: MouseEvent) => {
-            const at = seconds(e);
+    useDragWindow(drag && {
+        move: (e: MouseEvent) => {
+            const at = seconds(e.clientX);
             const moved = at - drag.grabbedAt;
             const clip = clips.find(c => c.id === drag.id);
             if (!clip) return;
@@ -140,17 +138,8 @@ export function AudioTimeline({ clips, sources, length, playhead, disabled, onCh
 
             const to = Math.max(clip.from + 0.1, Math.min(duration, drag.startedTo + moved));
             onChange(drag.id, { to }, `trim-${drag.id}`);
-        };
-
-        const up = () => setDrag(null);
-
-        window.addEventListener("mousemove", move);
-        window.addEventListener("mouseup", up);
-
-        return () => {
-            window.removeEventListener("mousemove", move);
-            window.removeEventListener("mouseup", up);
-        };
+        },
+        up: () => setDrag(null)
     }, [drag, clips, sources, span]);
 
     const grab = (e: React.MouseEvent, clip: AudioClip) => {

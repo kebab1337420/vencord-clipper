@@ -88,6 +88,41 @@ function find(boxes: Box[], type: string): Box | undefined {
     return boxes.find(b => b.type === type);
 }
 
+interface Trak {
+    /** Track id, from `tkhd`. */
+    id: number;
+    /** The track's `mdia`, which is where its timescale and handler live. */
+    mdia: Box;
+}
+
+/**
+ * Every readable track of a `moov`, as its id and its `mdia`.
+ *
+ * A `trak` missing either box is skipped rather than guessed at: everything
+ * asked of a track anywhere in this file is read out of one or the other.
+ */
+function traks(view: DataView, data: Uint8Array, moov: Box): Trak[] {
+    const found: Trak[] = [];
+
+    for (const trak of children(view, data, moov.body, moov.end)) {
+        if (trak.type !== "trak") continue;
+
+        const parts = children(view, data, trak.body, trak.end);
+
+        const tkhd = find(parts, "tkhd");
+        const mdia = find(parts, "mdia");
+        if (!tkhd || !mdia) continue;
+
+        // Version 1 widens the two timestamps before the track id from 4 bytes
+        // to 8; the flags byte the version sits in comes first either way.
+        const wide = data[tkhd.body] === 1;
+
+        found.push({ id: view.getUint32(tkhd.body + 4 + (wide ? 16 : 8)), mdia });
+    }
+
+    return found;
+}
+
 interface TrackInfo {
     /** Ticks per second, for turning decode times into milliseconds. */
     timescale: number;
@@ -105,20 +140,7 @@ interface TrackInfo {
 function readTracks(view: DataView, data: Uint8Array, moov: Box): Map<number, TrackInfo> {
     const tracks = new Map<number, TrackInfo>();
 
-    for (const trak of children(view, data, moov.body, moov.end)) {
-        if (trak.type !== "trak") continue;
-
-        const parts = children(view, data, trak.body, trak.end);
-
-        const tkhd = find(parts, "tkhd");
-        const mdia = find(parts, "mdia");
-        if (!tkhd || !mdia) continue;
-
-        // Version 1 widens the two timestamps before the track id from 4 bytes
-        // to 8; the flags byte the version sits in comes first either way.
-        const wide = data[tkhd.body] === 1;
-        const id = view.getUint32(tkhd.body + 4 + (wide ? 16 : 8));
-
+    for (const { id, mdia } of traks(view, data, moov)) {
         const inner = children(view, data, mdia.body, mdia.end);
 
         const mdhd = find(inner, "mdhd");
@@ -487,26 +509,11 @@ export function probeAudioTracks(data: Uint8Array): AudioTrack[] | null {
 
     const found: AudioTrack[] = [];
 
-    for (const trak of children(view, data, moov.body, moov.end)) {
-        if (trak.type !== "trak") continue;
-
-        const parts = children(view, data, trak.body, trak.end);
-
-        const tkhd = find(parts, "tkhd");
-        const mdia = find(parts, "mdia");
-        if (!tkhd || !mdia) continue;
-
+    for (const { id, mdia } of traks(view, data, moov)) {
         const hdlr = find(children(view, data, mdia.body, mdia.end), "hdlr");
         if (!hdlr || typeOf(data, hdlr.body + 8) !== "soun") continue;
 
-        // Version 1 widens the two timestamps before the track id from 4 bytes
-        // to 8, exactly as it does everywhere else in this file.
-        const wide = data[tkhd.body] === 1;
-
-        found.push({
-            id: view.getUint32(tkhd.body + 4 + (wide ? 16 : 8)),
-            handler: handlerName(data, hdlr)
-        });
+        found.push({ id, handler: handlerName(data, hdlr) });
     }
 
     return found;

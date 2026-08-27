@@ -73,6 +73,15 @@ const CLOSE_MARGIN_DB = 6;
 /** How long one SPEAKING dispatch keeps the gate open on its own. */
 const SPEAKING_MS = 400;
 
+/**
+ * How long a microphone that refused to open is left alone.
+ *
+ * Discord fires a burst of voice-settings changes for one device switch, and
+ * the plan is only updated on success, so without this every one of them asks
+ * the same refusing device again.
+ */
+const MIC_RETRY_MS = 30_000;
+
 /** Nothing quieter than this is a sound. Keeps log(0) out of the arithmetic. */
 const FLOOR_DB = -110;
 
@@ -396,6 +405,16 @@ export class MicInput {
     private call = inCall();
     private callAt = 0;
 
+    /** True while a device swap is in flight, so a burst cannot start several. */
+    private resyncing = false;
+
+    /** A device asked for while a swap was in flight, answered once it lands. */
+    private missed = "";
+
+    /** The device that last refused to open, and when, so it is not asked again at once. */
+    private refused = "";
+    private refusedAt = 0;
+
     /** How much of the run the gate spent open, for the microphone report. */
     private openMs = 0;
     private totalMs = 0;
@@ -643,12 +662,44 @@ export class MicInput {
             return;
         }
 
+        /*
+         * A device that cannot be opened is not asked again straight away.
+         *
+         * The plan is only updated once a device is actually open, which is
+         * what keeps the gate reading the settings it is running under - but it
+         * also means a refusal leaves the mismatch that caused this in place.
+         * One device switch reaches here a dozen times, and every one of them
+         * used to ask the same refusing device again and log the same warning.
+         */
+        const target = [
+            read.discordDeviceId,
+            read.echoCancellation,
+            read.noiseSuppression,
+            read.autoGainControl
+        ].join("|");
+
+        /*
+         * A change arriving mid-swap is held rather than dropped: the settings
+         * are only read at the top of this method, so returning here would
+         * leave the mismatch in place until Discord happened to fire again.
+         */
+        if (this.resyncing) {
+            this.missed = target;
+            return;
+        }
+
+        if (target === this.refused && Date.now() - this.refusedAt < MIC_RETRY_MS) return;
+
+        this.resyncing = true;
+
         try {
             const { stream, plan } = await openMic(read);
 
+            // A stream with no audio track is a refusal like any other: without
+            // this it is one that never stops being retried.
             if (!stream.getAudioTracks().length) {
                 stream.getTracks().forEach(t => t.stop());
-                return;
+                throw new Error("The microphone opened with no audio track");
             }
 
             this.source.disconnect();
@@ -659,10 +710,28 @@ export class MicInput {
             this.source.connect(this.highpass);
 
             this.plan = plan;
+            this.refused = "";
+
             logger.info(`Microphone changed in Discord: ${this.describe()}`);
         } catch (e) {
-            logger.warn("Could not follow the microphone Discord switched to", e);
+            const again = target !== this.refused;
+
+            this.refused = target;
+            this.refusedAt = Date.now();
+
+            // Only the first refusal of a device is worth a line: the rest say
+            // the same thing about the same device.
+            if (again) logger.warn(`Could not follow the microphone Discord switched to; leaving it alone for ${MIC_RETRY_MS / 1000}s`, e);
+        } finally {
+            this.resyncing = false;
         }
+
+        // Whatever was asked for during the swap is answered now, and only when
+        // it wants something other than what just opened.
+        const { missed } = this;
+        this.missed = "";
+
+        if (missed && missed !== target) await this.resync();
     }
 
     /**

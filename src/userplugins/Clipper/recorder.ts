@@ -18,6 +18,8 @@ import type { PluginNative } from "@utils/types";
 import { Toasts, UserStore } from "@webpack/common";
 
 import { playClipSound } from "./clipSound";
+import { runningGame, watchRunningGame } from "./game";
+import { highlights } from "./highlights";
 import { dropMeta, tagSavedClip } from "./library";
 import { MicInput } from "./micInput";
 import { gainOf, MIC_CHANNEL, type MixerLevel, readMixer, SYSTEM_CHANNEL, voiceLevelsFrom } from "./mixer";
@@ -37,6 +39,27 @@ export const logger = new Logger("Clipper", "#f0b132");
 
 export type RecorderState = "idle" | "starting" | "recording" | "saving";
 
+/** A slice of the buffer picked by hand, as epoch milliseconds. */
+export interface ClipWindow {
+    from: number;
+    to: number;
+}
+
+/**
+ * The buffer handed over as something playable, written nowhere.
+ *
+ * `start` is the instant the footage begins at, which is what turns a position
+ * in the player back into a window of the buffer, and the markers are already
+ * relative to it so the preview can draw them without doing that sum again.
+ */
+export interface BufferPreview {
+    blob: Blob;
+    mimeType: string;
+    start: number;
+    end: number;
+    marks: number[];
+}
+
 interface TimedChunk {
     blob: Blob;
     /** Timestamp (ms) at which the chunk was handed to us. */
@@ -45,6 +68,15 @@ interface TimedChunk {
 
 /** Chunk interval, in ms. Smaller = finer trimming, more overhead. */
 const TIMESLICE = 1000;
+
+/** How often the renderer's memory is looked at while the buffer runs. */
+const HEAP_WATCH_MS = 60_000;
+
+/** How long an automatic highlight save waits before it may fire again. */
+const AUTO_SAVE_MS = 120_000;
+
+/** How much of the buffer an automatic save keeps, in seconds. */
+const AUTO_SAVE_SECONDS = 30;
 
 type Listener = (state: RecorderState) => void;
 
@@ -139,7 +171,7 @@ function evenSize(n: number): number {
 }
 
 /** What the last save produced, enough to cut it down or send it somewhere. */
-interface SavedClip {
+export interface SavedClip {
     name: string;
     path: string;
     blob: Blob;
@@ -167,6 +199,8 @@ class ClipRecorder {
     private consented = new Set<string>();
     /** Poll that keeps that set level with the voice channel. */
     private consentTicker: ReturnType<typeof setInterval> | null = null;
+    /** Poll that writes down what the renderer is holding. See `watchHeap`. */
+    private heapTicker: ReturnType<typeof setInterval> | null = null;
     private stream: MediaStream | null = null;
     /** Discord's microphone, gated the way Discord gates it. See ./micInput. */
     private mic: MicInput | null = null;
@@ -185,6 +219,30 @@ class ClipRecorder {
     /** Set while the clip sound is playing, so it is not recorded. See duckSystem(). */
     private duckTimer: ReturnType<typeof setTimeout> | null = null;
     private duckedUntil = 0;
+
+    /**
+     * The source the running capture is on, which is not always the picked one.
+     *
+     * A game moves the capture onto a screen for as long as it runs, and the
+     * native engine has to be pointed at what is really being recorded rather
+     * than at what the settings remember.
+     */
+    private activeSource: CaptureSource | null = null;
+
+    /** Drops the running-game listener; set only while the buffer runs. */
+    private gameWatch: (() => void) | null = null;
+
+    /**
+     * Set when the source was picked by hand, so a game does not overrule it.
+     *
+     * Somebody who picks a window in the middle of a game means that window.
+     * A game *starting* clears it again: that is a new context, and following
+     * it is the whole point of the setting.
+     */
+    private pickedByHand = false;
+
+    /** Not before this instant does a highlight save another clip by itself. */
+    private autoSaveAfter = 0;
 
     /** First chunk emitted by the recorder: holds the container header. */
     private header: Blob | null = null;
@@ -308,6 +366,34 @@ class ClipRecorder {
         toast(`Marker at ${at}s (${this.marks.length} in the buffer)`, Toasts.Type.MESSAGE);
     }
 
+    /**
+     * A marker nobody pressed a key for, from the highlight watcher.
+     *
+     * Silent on purpose: the player is in a game, there is one of these every
+     * couple of minutes at most, and a toast for each is noise on top of the
+     * moment it is trying to catch. The overlay's counter is where they show up.
+     */
+    private markAuto(reason: string): void {
+        if (!this.isRecording) return;
+
+        this.marks.push(Date.now());
+        this.prune();
+
+        logger.info(`Marked by itself - ${reason} (${this.marks.length} in the buffer)`);
+
+        if (!settings.store.autoHighlightSave) return;
+
+        // Rarer than the markers by a long way: a marker costs nothing and a
+        // clip costs a file, so a lively evening must not fill the folder.
+        const now = Date.now();
+        if (now < this.autoSaveAfter) return;
+
+        this.autoSaveAfter = now + AUTO_SAVE_MS;
+
+        toast(`Saving a clip: ${reason}`, Toasts.Type.MESSAGE);
+        void this.save(Math.min(AUTO_SAVE_SECONDS, settings.store.clipLength));
+    }
+
     subscribe(listener: Listener) {
         this.listeners.add(listener);
         return () => void this.listeners.delete(listener);
@@ -334,7 +420,7 @@ class ClipRecorder {
         try {
             const { fps, resolution, container } = settings.store;
 
-            const stream = await acquireStream(fps, resolution);
+            const { stream, source } = await acquireStream(fps, resolution, !this.pickedByHand);
 
             // Stopped while the source was being acquired: drop what we just got.
             if (mine !== this.generation) {
@@ -343,6 +429,7 @@ class ClipRecorder {
             }
 
             this.stream = stream;
+            this.activeSource = source;
 
             const [videoTrack] = stream.getVideoTracks();
             if (!videoTrack) throw new Error("The picked source returned no video track");
@@ -415,6 +502,19 @@ class ClipRecorder {
 
             this.setState("recording");
             toast(`Clip buffer running - last ${settings.store.clipLength}s kept`, Toasts.Type.SUCCESS);
+
+            // A game launched after the buffer moves the capture onto its screen.
+            this.followGame();
+            this.watchHeap();
+
+            // And the room is listened to, so the moments nobody had a free hand
+            // to mark get marked anyway.
+            if (settings.store.autoHighlight) {
+                highlights.start({
+                    channelLevel: id => this.channelLevel(id),
+                    onHighlight: reason => this.markAuto(reason)
+                });
+            }
 
             // Last, and never awaited into the result: the native engine is a
             // bonus track layout, not a condition for the buffer to run.
@@ -674,6 +774,29 @@ class ClipRecorder {
                 settle();
             }
         });
+    }
+
+    /**
+     * The buffered chunks handed over after `at`, oldest first.
+     *
+     * Never empty: a window shorter than one timeslice still has to write
+     * something, and the last chunk is the closest thing to it.
+     */
+    private chunksSince(at: number): TimedChunk[] {
+        const kept = this.chunks.filter(c => c.at > at);
+        return kept.length ? kept : this.chunks.slice(-1);
+    }
+
+    /**
+     * The buffered chunks overlapping a window, oldest first.
+     *
+     * A chunk handed over at T covers the timeslice ending at T, so one is in
+     * the window as soon as any part of it is. Never empty for the same reason
+     * as `chunksSince`: a save has to write something.
+     */
+    private chunksIn(from: number, to: number): TimedChunk[] {
+        const kept = this.chunks.filter(c => c.at > from && c.at - TIMESLICE < to);
+        return kept.length ? kept : this.chunks.slice(-1);
     }
 
     private prune() {
@@ -979,12 +1102,93 @@ class ClipRecorder {
 
         this.cleanup();
         this.setState("idle");
+        this.pickedByHand = false;
         toast("Clip buffer stopped", Toasts.Type.MESSAGE);
+    }
+
+    /**
+     * Moves the capture onto a game's screen when one starts.
+     *
+     * Only when one starts. A game closing leaves a screen capture running,
+     * which records the desktop perfectly well, whereas restarting there would
+     * throw away the buffer holding the last minute of the game that just
+     * ended - which is the footage somebody who has just quit a match wants.
+     */
+    private followGame(): void {
+        this.gameWatch?.();
+        this.gameWatch = null;
+
+        if (!settings.store.followGame) return;
+
+        this.gameWatch = watchRunningGame(game => {
+            if (!game || !settings.store.followGame) return;
+            if (this.state !== "recording") return;
+
+            // Already on a screen: a second game, or Discord noticing the same
+            // one under another name, is not worth cutting the buffer for.
+            if (this.activeSource?.id.startsWith("screen:")) return;
+
+            logger.info(`${game} started, moving the capture onto its screen`);
+            this.pickedByHand = false;
+
+            // Out of the store's own dispatch: the restart drops this listener.
+            queueMicrotask(() => void this.restart());
+        });
+    }
+
+    /**
+     * Writes down what the renderer is holding while the buffer runs.
+     *
+     * Discord's renderer has been dying on `CrRendererMain` with
+     * `EXCEPTION_BREAKPOINT`, and once with `E0000008`, which is the code
+     * Chromium raises when an allocation fails: the client reloads itself and
+     * takes the console with it, so the only account of the minutes before a
+     * crash is what reached `renderer_js.log`. A high water mark there says
+     * whether the memory going missing is JavaScript's at all - a capture
+     * pipeline eats plenty outside the heap, and the two are fixed in very
+     * different places.
+     *
+     * Only ever the new worst is written, so an evening of buffering is a
+     * handful of lines rather than one a minute.
+     */
+    private watchHeap(): void {
+        this.stopHeapWatch();
+
+        // Chromium only, and only with the flag some builds ship: nothing to
+        // report is better than a line of undefineds.
+        const memory = (performance as any)?.memory as { usedJSHeapSize: number; jsHeapSizeLimit: number; } | undefined;
+        if (!memory || typeof memory.usedJSHeapSize !== "number") return;
+
+        let peak = 0;
+
+        this.heapTicker = setInterval(() => {
+            void (async () => {
+                const used = memory.usedJSHeapSize;
+                const limit = Math.max(1, memory.jsHeapSizeLimit);
+
+                // A tenth over the worst so far: below that it is the same reading.
+                if (used < peak * 1.1) return;
+                peak = used;
+
+                const share = Math.round((used / limit) * 100);
+                const line = `Renderer heap: ${formatBytes(used)} of ${formatBytes(limit)} (${share}%), clip buffer holding ${formatBytes(this.bufferedBytes)}${await processMemory()}`;
+
+                if (share >= 80) logger.warn(`${line} - close to the limit, a reload is what comes next`);
+                else logger.info(line);
+            })();
+        }, HEAP_WATCH_MS);
+    }
+
+    private stopHeapWatch(): void {
+        if (this.heapTicker) clearInterval(this.heapTicker);
+        this.heapTicker = null;
     }
 
     private cleanup() {
         // Any start() still waiting on a stream is now stale.
         this.generation++;
+
+        this.stopHeapWatch();
 
         try {
             if (this.recorder && this.recorder.state !== "inactive") this.recorder.stop();
@@ -1030,6 +1234,12 @@ class ClipRecorder {
         this.duckTimer = null;
         this.duckedUntil = 0;
 
+        highlights.stop();
+
+        this.gameWatch?.();
+        this.gameWatch = null;
+        this.activeSource = null;
+
         this.channels.clear();
         this.extraStreams = [];
         this.mic = null;
@@ -1038,8 +1248,60 @@ class ClipRecorder {
         this.destination = null;
     }
 
-    /** Writes the buffered footage to disk. Capture keeps running. */
-    async save(): Promise<void> {
+    /**
+     * The buffer as it stands, playable, written nowhere.
+     *
+     * The same assembly a save does, minus the file: the fragments are glued to
+     * the header and the timeline is rebased so the result starts at zero. It
+     * exists so that "save the last thirty seconds" can become "save that bit,
+     * the one I am looking at" - the buffer is watched before it is written,
+     * and what is written is a window picked in the player rather than a guess
+     * made from a keypress.
+     */
+    async preview(): Promise<BufferPreview | null> {
+        if (!this.isRecording || !this.header || !this.chunks.length) return null;
+
+        await this.flush();
+        this.prune();
+
+        const { chunks } = this;
+        if (!chunks.length) return null;
+
+        const start = chunks[0].at - TIMESLICE;
+        const raw = new Blob([this.header, ...chunks.map(c => c.blob)], { type: this.mimeType });
+
+        let blob = raw;
+        try {
+            blob = await repairClip(raw, this.mimeType);
+        } catch (e) {
+            logger.warn("Could not rebase the preview's timeline, playing it as recorded", e);
+        }
+
+        // Whatever the repair took off the front moves the markers with it, and
+        // moves the instant the footage begins at by exactly as much.
+        const cutOff = blob === raw ? 0 : await dropped(raw, blob, this.mimeType);
+
+        return {
+            blob,
+            mimeType: this.mimeType,
+            start: start + cutOff * 1000,
+            end: Date.now(),
+            marks: this.marks.map(m => (m - start) / 1000 - cutOff).filter(m => m >= 0)
+        };
+    }
+
+    /**
+     * Writes the buffered footage to disk. Capture keeps running.
+     *
+     * @param seconds How much of the tail to keep, or nothing for the whole
+     * buffer. Asking for less writes the shorter clip directly rather than
+     * writing the long one and cutting it afterwards, which is a full copy of
+     * footage nobody wanted.
+     * @param window A slice picked in the preview, which wins over `seconds`.
+     * Cut at chunk boundaries, so the edges land within a timeslice of what was
+     * asked for - the container is only cut where it can be cut.
+     */
+    async save(seconds?: number, window?: ClipWindow): Promise<void> {
         if (this.state === "saving") return;
 
         if (!this.isRecording) {
@@ -1078,7 +1340,7 @@ class ClipRecorder {
              */
             if (this.native) {
                 try {
-                    if (await this.saveNative()) return;
+                    if (await this.saveNative(seconds)) return;
                 } catch (e) {
                     logger.error("The native clip engine could not save, falling back to the plugin's own buffer", e);
                     toast(`The native engine could not save (${errorMessage(e)}), used the plugin's buffer instead`, Toasts.Type.MESSAGE);
@@ -1094,14 +1356,26 @@ class ClipRecorder {
                 return;
             }
 
-            const seconds = Math.round(this.bufferedSeconds);
-            const raw = new Blob([this.header, ...this.chunks.map(c => c.blob)], { type: this.mimeType });
+            /*
+             * The tail that was asked for, which is the whole buffer by default.
+             *
+             * Older chunks are simply left out: they are self-contained
+             * fragments, and the repair below rebases what is left onto zero
+             * exactly as it does for a full save.
+             */
+            const kept = window
+                ? this.chunksIn(window.from, window.to)
+                : seconds ? this.chunksSince(Date.now() - seconds * 1000) : this.chunks;
+
+            const raw = new Blob([this.header, ...kept.map(c => c.blob)], { type: this.mimeType });
             const name = `${timestampName()}.${extensionFor(this.mimeType)}`;
 
             // Read before the write, because the buffer keeps moving underneath.
-            const start = this.bufferStart;
+            const start = kept[0].at - TIMESLICE;
+            const end = window ? Math.min(window.to, kept[kept.length - 1].at) : Date.now();
+            const length = Math.round((end - start) / 1000);
             const markers = this.marks.map(m => Math.max(0, (m - start) / 1000));
-            const voices = voiceActivity.slice(start, Date.now());
+            const voices = voiceActivity.slice(start, end);
 
             // Cluster timecodes are absolute, so the kept ones still carry the
             // time elapsed since the buffer started: without this the clip
@@ -1153,11 +1427,11 @@ class ClipRecorder {
             if (settings.store.notifications) {
                 showNotification({
                     title: "Clip saved",
-                    body: `${seconds}s - ${formatBytes(blob.size)}\n${path}`,
+                    body: `${length}s - ${formatBytes(blob.size)}\n${path}`,
                     onClick: () => copy(path)
                 });
             } else {
-                toast(`Clip saved (${seconds}s, ${formatBytes(blob.size)})`, Toasts.Type.SUCCESS);
+                toast(`Clip saved (${length}s, ${formatBytes(blob.size)})`, Toasts.Type.SUCCESS);
             }
         } catch (e) {
             logger.error("Failed to save clip", e);
@@ -1233,7 +1507,14 @@ class ClipRecorder {
     private async armNative(): Promise<void> {
         if (!settings.store.nativeEngine) return;
 
-        const { sourceId, sourceName, clipLength, resolution, fps } = settings.store;
+        const { clipLength, resolution, fps } = settings.store;
+
+        // What is being recorded, which is the picked window until a game moves
+        // the capture onto a screen. The engine only takes windows, so following
+        // a game is one of the ways it declines below - and declining is right:
+        // it would otherwise record the window the game is hiding.
+        const sourceId = this.activeSource?.id ?? settings.store.sourceId;
+        const sourceName = this.activeSource?.name ?? settings.store.sourceName;
 
         /*
          * Said out loud, every time, whichever way it goes.
@@ -1387,11 +1668,14 @@ class ClipRecorder {
      * on a different clock: the engine hands back the length it managed, and
      * the clip therefore ends now and starts that far back.
      */
-    private async saveNative(): Promise<boolean> {
+    private async saveNative(want?: number): Promise<boolean> {
         const name = `${timestampName()}.mp4`;
         const path = await Native.reserveClipPath(settings.store.saveDirectory, name);
 
-        const reported = await saveNativeClip(path, settings.store.clipLength, { application: "Clipper" });
+        // The engine holds the same window we do, so asking for more than the
+        // buffer is worth is asking for footage nobody kept.
+        const wanted = Math.min(want || settings.store.clipLength, settings.store.clipLength);
+        const reported = await saveNativeClip(path, wanted, { application: "Clipper" });
 
         // The engine answers in milliseconds, but older builds answered in
         // seconds and the buffer is capped well under 600s either way, so the
@@ -1492,6 +1776,30 @@ class ClipRecorder {
         }
 
         return true;
+    }
+
+    /**
+     * Throws away the clip that was just saved.
+     *
+     * The other half of watching a clip straight after saving it: most of what
+     * a rolling buffer writes is not worth keeping, and a folder nobody ever
+     * prunes is how a clip library becomes unusable. It goes to the trash, not
+     * to the void - the native delete is the same one the library uses.
+     */
+    async discardLastSaved(): Promise<void> {
+        const last = this.lastSaved;
+        if (!last) return;
+
+        try {
+            await Native.deleteClip(settings.store.saveDirectory, last.name);
+            await dropMeta(last.name);
+
+            this.lastSaved = null;
+            toast("Clip deleted", Toasts.Type.MESSAGE);
+        } catch (e) {
+            logger.error("Could not delete the clip", e);
+            toast(`Could not delete the clip: ${errorMessage(e)}`, Toasts.Type.FAILURE);
+        }
     }
 
     /**
@@ -1601,6 +1909,7 @@ class ClipRecorder {
     /** Remembers a source picked in the overlay and re-arms the buffer if it was running. */
     useSource(source: CaptureSource): void {
         rememberSource(source);
+        this.pickedByHand = true;
         toast(`Clip source: ${source.name}`, Toasts.Type.SUCCESS);
         void this.restart();
     }
@@ -1744,6 +2053,59 @@ function resolveSource(sources: CaptureSource[]): CaptureSource | null {
 }
 
 /**
+ * The client's processes and what they hold, as a tail for the heap line.
+ *
+ * Empty when there is nothing to say - on the web build, or when Electron
+ * declines the metrics - so the heap line reads the same either way.
+ */
+async function processMemory(): Promise<string> {
+    if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return "";
+
+    try {
+        const processes = await Native.getMemoryReport();
+        if (!processes.length) return "";
+
+        // The biggest handful is the whole of the news: a client runs a dozen
+        // utility processes that never move.
+        return ` | ${processes.slice(0, 5).map(p => `${p.type} ${p.mb}MB`).join(", ")}`;
+    } catch {
+        return "";
+    }
+}
+
+interface Capture {
+    stream: MediaStream;
+    /** What the stream is of, or null when the client picked it for us. */
+    source: CaptureSource | null;
+}
+
+/**
+ * The screen to record while a game is running, or null.
+ *
+ * A game in exclusive fullscreen cannot be captured as a window: Windows hands
+ * back whatever is behind it, which is why those clips come out showing the
+ * desktop. A screen has neither problem, and it is also the only thing Chromium
+ * gives loopback audio for, so the game's own sound comes with it.
+ *
+ * The screen the cursor is on rather than the first one: a second monitor is
+ * usually where the browser is, and the game is usually where the hands are.
+ */
+async function gameScreen(sources: CaptureSource[], allowed: boolean): Promise<CaptureSource | null> {
+    if (!allowed || !settings.store.followGame || !runningGame() || !sources.length) return null;
+
+    const screens = sources.filter(s => s.id.startsWith("screen:"));
+    if (!screens.length) return null;
+
+    try {
+        const id = await Native.getActiveScreen();
+        return screens.find(s => s.id === id) ?? screens[0];
+    } catch (e) {
+        logger.warn("Could not tell which screen the game is on, taking the first", e);
+        return screens[0];
+    }
+}
+
+/**
  * Grabs a screen / window stream.
  *
  * Preferred path: a display-media request handler is installed in the main
@@ -1758,41 +2120,46 @@ function resolveSource(sources: CaptureSource[]): CaptureSource | null {
  * for the rest of the session, so there the legacy constraints are used
  * instead, with Vesktop's own picker as the last resort.
  */
-async function acquireStream(fps: number, resolution: number): Promise<MediaStream> {
+async function acquireStream(fps: number, resolution: number, follow: boolean): Promise<Capture> {
     const video: MediaTrackConstraints = {
         frameRate: { ideal: fps, max: fps },
         ...(resolution ? { height: { ideal: resolution } } : {})
     };
 
     if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) {
-        return navigator.mediaDevices.getDisplayMedia({ video, audio: true });
+        return { stream: await navigator.mediaDevices.getDisplayMedia({ video, audio: true }), source: null };
     }
 
     const sources = await listCaptureSources();
-    const source = sources.length ? resolveSource(sources) : null;
-    if (source) rememberSource(source);
+    const following = await gameScreen(sources, follow);
+    const source = following ?? (sources.length ? resolveSource(sources) : null);
+
+    // Only a source the user picked is remembered: the screen a game is played
+    // on is borrowed for as long as the game runs, not chosen.
+    if (source && !following) rememberSource(source);
+    if (following) logger.info(`Recording ${following.name} while ${runningGame()} is running`);
 
     // Wayland returns no sources at all: the portal picks the source itself.
-    if (!source) return navigator.mediaDevices.getDisplayMedia({ video, audio: true });
+    if (!source) return { stream: await navigator.mediaDevices.getDisplayMedia({ video, audio: true }), source: null };
 
     if (IS_VESKTOP) {
         try {
-            return await getDesktopStream(source.id, fps, resolution);
+            return { stream: await getDesktopStream(source.id, fps, resolution), source };
         } catch (e) {
             logger.warn("Desktop constraints failed, falling back to Vesktop's own picker", e);
-            return navigator.mediaDevices.getDisplayMedia({ video, audio: true });
+            return { stream: await navigator.mediaDevices.getDisplayMedia({ video, audio: true }), source: null };
         }
     }
 
     let armed = false;
     try {
         armed = await Native.armDisplayMedia(source.id, true);
-        if (!armed) return await getDesktopStream(source.id, fps, resolution);
+        if (!armed) return { stream: await getDesktopStream(source.id, fps, resolution), source };
 
-        return await navigator.mediaDevices.getDisplayMedia({ video, audio: true });
+        return { stream: await navigator.mediaDevices.getDisplayMedia({ video, audio: true }), source };
     } catch (e) {
         logger.warn("getDisplayMedia failed, falling back to the legacy desktop constraints", e);
-        return getDesktopStream(source.id, fps, resolution);
+        return { stream: await getDesktopStream(source.id, fps, resolution), source };
     } finally {
         // The handler is only needed for the one call above; leaving it installed
         // would hijack any other display capture in the client.

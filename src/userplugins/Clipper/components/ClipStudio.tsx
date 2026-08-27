@@ -61,7 +61,7 @@ import {
 } from "../library";
 import { logger } from "../recorder";
 import { trimClip } from "../repair";
-import { sendClip } from "../send";
+import { sendClipFitted } from "../send";
 import { Container, extensionFor, pickMimeType } from "../settings";
 import {
     type AvatarCache,
@@ -1134,6 +1134,33 @@ export const STUDIO_CSS = `
 }
 `;
 
+/**
+ * Follows the preview's transport.
+ *
+ * `start` runs on everything that means the element is playing again - a seek
+ * included, because what was scheduled for the old position is not the sound
+ * for this one - and `stop` on the two events that mean it is not. Hands back
+ * the cleanup, so an effect can return it as it is.
+ */
+function followPlayback(video: HTMLVideoElement, start: () => void, stop: () => void): () => void {
+    video.addEventListener("play", start);
+    video.addEventListener("playing", start);
+    video.addEventListener("seeked", start);
+    video.addEventListener("pause", stop);
+    video.addEventListener("ended", stop);
+
+    return () => {
+        video.removeEventListener("play", start);
+        video.removeEventListener("playing", start);
+        video.removeEventListener("seeked", start);
+        video.removeEventListener("pause", stop);
+        video.removeEventListener("ended", stop);
+    };
+}
+
+/** How many thumbnail sidecars are read at once when a folder is listed. */
+const THUMB_READS = 4;
+
 function toast(message: string, type: string) {
     Toasts.show({ id: Toasts.genId(), message, type });
 }
@@ -1899,17 +1926,22 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
     const restore = async (saved: SavedProject) => {
         setNote("Restoring the last timeline…");
 
-        const loaded: StudioSource[] = [];
-        for (const entry of saved.sources) {
-            if (!entry.origin) continue;
+        // All of them at once: each one is a file read over IPC, and a timeline
+        // of a dozen sources used to open them one after another with the modal
+        // sitting on "Restoring…" throughout.
+        const opened = await Promise.all(saved.sources.map(async (entry): Promise<StudioSource | null> => {
+            if (!entry.origin) return null;
 
             try {
                 const { url } = await openSource(entry.origin);
-                loaded.push({ id: entry.id, name: entry.name, url, origin: entry.origin });
+                return { id: entry.id, name: entry.name, url, origin: entry.origin };
             } catch (e) {
                 logger.warn("Could not restore a timeline source", e);
+                return null;
             }
-        }
+        }));
+
+        const loaded = opened.filter((source): source is StudioSource => source !== null);
 
         // A clip deleted since the project was saved takes its segments with it
         // rather than leaving holes the renderer would skip silently.
@@ -1934,26 +1966,28 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
          * it: a clip pointing at a source that is not there renders as silence,
          * which looks like a bug rather than like a missing file.
          */
-        const decoded: AudioSource[] = [];
-        for (const entry of saved.sounds ?? []) {
-            try {
-                const { name, url, data } = track(await loadAudioFile(entry.path));
-                decoded.push(await decodeSource(audioContext(), entry.id, name || entry.name, data, url, entry.path));
-            } catch (e) {
-                logger.warn("Could not restore a timeline sound", e);
-            }
-        }
+        const [decoded, pictures] = await Promise.all([
+            Promise.all((saved.sounds ?? []).map(async (entry): Promise<AudioSource | null> => {
+                try {
+                    const { name, url, data } = track(await loadAudioFile(entry.path));
+                    return await decodeSource(audioContext(), entry.id, name || entry.name, data, url, entry.path);
+                } catch (e) {
+                    logger.warn("Could not restore a timeline sound", e);
+                    return null;
+                }
+            })).then(list => list.filter((sound): sound is AudioSource => sound !== null)),
 
-        // Pictures, on the same terms as the sounds above.
-        const pictures: ImageSource[] = [];
-        for (const entry of saved.images ?? []) {
-            try {
-                const { name, url } = track(await loadImageFile(entry.path));
-                pictures.push(await decodeImage(entry.id, name || entry.name, url, audioContext(), entry.path));
-            } catch (e) {
-                logger.warn("Could not restore a timeline picture", e);
-            }
-        }
+            // Pictures, on the same terms as the sounds above.
+            Promise.all((saved.images ?? []).map(async (entry): Promise<ImageSource | null> => {
+                try {
+                    const { name, url } = track(await loadImageFile(entry.path));
+                    return await decodeImage(entry.id, name || entry.name, url, audioContext(), entry.path);
+                } catch (e) {
+                    logger.warn("Could not restore a timeline picture", e);
+                    return null;
+                }
+            })).then(list => list.filter((picture): picture is ImageSource => picture !== null))
+        ]);
 
         if (!aliveRef.current) return;
 
@@ -2055,32 +2089,48 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         if (!clips?.length) return;
 
         void (async () => {
-            for (const clip of clips) {
-                if (!clip.thumb || thumbs[clip.name]) continue;
+            const pending = clips.filter(clip => clip.thumb && !thumbs[clip.name]);
+            let next = 0;
 
-                const url = await loadThumbUrl(clip);
-                if (!url) continue;
+            /*
+             * A few reads in flight rather than one.
+             *
+             * A folder of two hundred clips used to be two hundred IPC reads in
+             * single file before the last picture appeared. All of them at once
+             * would hand the main process the whole folder in one breath, which
+             * is the opposite mistake, so the reads share a handful of slots.
+             */
+            const worker = async () => {
+                for (let i = next++; i < pending.length; i = next++) {
+                    if (!aliveRef.current) return;
 
-                // The modal may have closed during the read, in which case this
-                // URL has already missed the unmount's sweep.
-                if (!aliveRef.current) {
-                    URL.revokeObjectURL(url);
-                    return;
-                }
+                    const clip = pending[i];
+                    const url = await loadThumbUrl(clip);
+                    if (!url) continue;
 
-                // Checked again inside the setter: two listings in flight would
-                // otherwise both read the same sidecar and one URL would be
-                // stranded until the modal closes.
-                setThumbs(current => {
-                    if (current[clip.name]) {
+                    // The modal may have closed during the read, in which case
+                    // this URL has already missed the unmount's sweep.
+                    if (!aliveRef.current) {
                         URL.revokeObjectURL(url);
-                        return current;
+                        return;
                     }
 
-                    urlsRef.current.add(url);
-                    return { ...current, [clip.name]: url };
-                });
-            }
+                    // Checked again inside the setter: two listings in flight
+                    // would otherwise both read the same sidecar and one URL
+                    // would be stranded until the modal closes.
+                    setThumbs(current => {
+                        if (current[clip.name]) {
+                            URL.revokeObjectURL(url);
+                            return current;
+                        }
+
+                        urlsRef.current.add(url);
+                        return { ...current, [clip.name]: url };
+                    });
+                }
+            };
+
+            await Promise.all(Array.from({ length: Math.min(THUMB_READS, pending.length) }, worker));
         })();
     }, [clips]);
 
@@ -2989,19 +3039,11 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
             );
         };
 
-        video.addEventListener("play", start);
-        video.addEventListener("playing", start);
-        video.addEventListener("seeked", start);
-        video.addEventListener("pause", stop);
-        video.addEventListener("ended", stop);
+        const unfollow = followPlayback(video, start, stop);
 
         return () => {
             stop();
-            video.removeEventListener("play", start);
-            video.removeEventListener("playing", start);
-            video.removeEventListener("seeked", start);
-            video.removeEventListener("pause", stop);
-            video.removeEventListener("ended", stop);
+            unfollow();
         };
     }, [segment, segmentIndex, soundsById, project.audioClips, project.overlays, imagesById]);
 
@@ -3065,11 +3107,7 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
 
         if (!video.paused) start();
 
-        video.addEventListener("play", start);
-        video.addEventListener("playing", start);
-        video.addEventListener("seeked", start);
-        video.addEventListener("pause", stop);
-        video.addEventListener("ended", stop);
+        const unfollow = followPlayback(video, start, stop);
 
         return () => {
             stop();
@@ -3078,11 +3116,7 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
             // afterwards would be a preview with no sound at all.
             if (video.volume === 0) video.volume = 1;
 
-            video.removeEventListener("play", start);
-            video.removeEventListener("playing", start);
-            video.removeEventListener("seeked", start);
-            video.removeEventListener("pause", stop);
-            video.removeEventListener("ended", stop);
+            unfollow();
         };
     }, [voiceMix, segment, segmentIndex]);
 
@@ -3433,7 +3467,7 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
 
     /** Puts the clip in the message box of the channel behind the studio. */
     const onSend = async (name: string) => {
-        if (await sendClip(name)) onClose();
+        if (await sendClipFitted(name)) onClose();
     };
 
     const slider = (label: string, value: number, min: number, max: number, step: number, onChange: (v: number) => void, suffix = "") => (

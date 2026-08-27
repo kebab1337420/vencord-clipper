@@ -19,6 +19,7 @@ import { ClipperOverlay } from "./components/ClipperOverlay";
 import { encoderSummary, probeEncoders } from "./encoders";
 import { runShortcut, startGlobalKeybinds, stopGlobalKeybinds, syncGlobalKeybinds } from "./globalKeybinds";
 import { micReport } from "./micInput";
+import { installPovRequests, requestPov, uninstallPovRequests } from "./multipov";
 import { logger, recorder } from "./recorder";
 import { settings } from "./settings";
 import { checkAtLaunch, checkNow } from "./updater";
@@ -38,12 +39,13 @@ function onKeyDown(e: KeyboardEvent) {
     // that keystroke belongs to the picker, not to the recorder.
     if (keybindsSuspended()) return;
 
-    const { saveKeybind, toggleKeybind, markKeybind } = settings.store;
+    const { saveKeybind, toggleKeybind, markKeybind, povKeybind } = settings.store;
 
     for (const [bind, action] of [
         [saveKeybind, "save"],
         [toggleKeybind, "toggle"],
-        [markKeybind, "mark"]
+        [markKeybind, "mark"],
+        [povKeybind, "pov"]
     ] as const) {
         if (!keybindMatches(bind, e)) continue;
 
@@ -60,7 +62,7 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 /** Keeps the OS-level binds in sync with what the settings hold. */
-const KEYBIND_SETTINGS = ["saveKeybind", "toggleKeybind", "markKeybind", "globalKeybinds"] as const;
+const KEYBIND_SETTINGS = ["saveKeybind", "toggleKeybind", "markKeybind", "povKeybind", "globalKeybinds"] as const;
 
 /**
  * Kept so the listeners can be dropped again on stop(): toggling the plugin off
@@ -150,6 +152,7 @@ export default definePlugin({
         "Start / stop clip buffer": () => recorder.toggle(),
         "Save clip": () => recorder.save(),
         "Drop a marker": () => recorder.mark(),
+        "Clip everyone's angle": () => void requestPov(),
         "Choose capture source": () => recorder.chooseSource(),
         "Open the clip studio": () => recorder.openStudio(),
         "Check the video encoders": () => {
@@ -204,6 +207,7 @@ export default definePlugin({
         // Before anything else opens a connection: a call already running when
         // the patch lands is invisible to it.
         installVoiceTaps();
+        installPovRequests();
 
         logger.info("started", {
             source: settings.store.sourceName || "(none, will use the primary screen)"
@@ -227,5 +231,6 @@ export default definePlugin({
         unmountOverlay();
         recorder.stop();
         uninstallVoiceTaps();
+        uninstallPovRequests();
     }
 });

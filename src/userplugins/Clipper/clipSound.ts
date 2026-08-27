@@ -61,7 +61,7 @@ const MAX_SECONDS = 5;
 export const DEFAULT_CLIP_SOUND_VOLUME = 70;
 
 /** Silences the recording mix for this many milliseconds. Implemented by the recorder. */
-export type Duck = (ms: number) => void;
+type Duck = (ms: number) => void;
 
 let audio: AudioContext | null = null;
 

@@ -11,13 +11,20 @@
  * gap between them is a file picker, a folder to find again and a drag. This
  * puts the clip in the message box instead: the upload is not sent, it is
  * attached, so the caption and the channel are still the user's to change.
+ *
+ * A clip that is too big to send is the other half of the same gap. Discord's
+ * answer is to refuse it, which leaves the moment on disk, so this one re-encodes
+ * it down to the limit first - or, when what is wanted is the three seconds
+ * everyone will quote back, turns it into a GIF instead.
  */
 
 import { getCurrentChannel } from "@utils/discord";
 import { DraftType, Toasts, UploadHandler } from "@webpack/common";
 
-import { CLIPS_AVAILABLE, loadClipFile } from "./clips";
+import { CLIPS_AVAILABLE, loadClipFile, typeOfClip } from "./clips";
+import { clipToGif, type GifRequest, saveGif } from "./gifExport";
 import { logger } from "./recorder";
+import { shrinkVideo } from "./shrink";
 import { formatBytes } from "./utils";
 
 /**
@@ -27,7 +34,7 @@ import { formatBytes } from "./utils";
  * the store is fragile and being wrong the safe way costs nothing: the check
  * only decides whether to warn, the upload is attempted either way.
  */
-const FREE_LIMIT = 10 * 1024 * 1024;
+export const FREE_LIMIT = 10 * 1024 * 1024;
 
 function attach(file: File): boolean {
     const channel = getCurrentChannel();
@@ -43,6 +50,9 @@ function attach(file: File): boolean {
     UploadHandler.promptToUpload([file], channel, DraftType.ChannelMessage);
     return true;
 }
+
+/** A step of a long job, for a caller that has somewhere to show it. */
+export type Progress = (step: string) => void;
 
 /** Attaches a saved clip, by name, to the channel that is open. */
 export async function sendClip(name: string): Promise<boolean> {
@@ -62,4 +72,73 @@ export async function sendClip(name: string): Promise<boolean> {
 
 function toast(message: string, type: string) {
     Toasts.show({ id: Toasts.genId(), message, type });
+}
+
+/**
+ * Attaches a clip, making it fit first when it does not.
+ *
+ * The re-encode runs in real time, so the size is checked before anything is
+ * started: most clips are already small enough and the only honest thing to do
+ * with those is attach them untouched.
+ */
+export async function sendClipFitted(name: string, onProgress?: Progress): Promise<boolean> {
+    if (!CLIPS_AVAILABLE) {
+        toast("Clips are only readable in the desktop client", Toasts.Type.FAILURE);
+        return false;
+    }
+
+    try {
+        const file = await loadClipFile(name);
+        if (file.size <= FREE_LIMIT) return attach(file);
+
+        onProgress?.("Too big to send - re-encoding");
+
+        const url = URL.createObjectURL(file);
+        try {
+            const result = await shrinkVideo(url, { limit: FREE_LIMIT, onProgress });
+            const stem = name.replace(/\.(webm|mp4)$/i, "");
+            const ext = result.mimeType.startsWith("video/mp4") ? "mp4" : "webm";
+
+            if (!result.fits) {
+                toast(`Smallest this clip goes is ${formatBytes(result.blob.size)}`, Toasts.Type.MESSAGE);
+            }
+
+            return attach(new File([result.blob], `${stem}-small.${ext}`, { type: result.mimeType }));
+        } finally {
+            URL.revokeObjectURL(url);
+        }
+    } catch (e) {
+        logger.error("Could not fit the clip", e);
+        toast("Could not re-encode that clip", Toasts.Type.FAILURE);
+        return false;
+    }
+}
+
+/**
+ * Turns part of a clip into a GIF, keeps it next to the clips, and attaches it.
+ *
+ * Both, rather than either: a GIF is made to be posted, and one that only landed
+ * in the message box is gone the moment the box is cleared.
+ */
+export async function sendClipGif(name: string, request: GifRequest = {}): Promise<boolean> {
+    if (!CLIPS_AVAILABLE) {
+        toast("Clips are only readable in the desktop client", Toasts.Type.FAILURE);
+        return false;
+    }
+
+    try {
+        const result = await clipToGif(name, { limit: FREE_LIMIT, ...request });
+        const saved = await saveGif(name, result.blob);
+
+        toast(
+            `GIF ready: ${result.width}px, ${result.fps}fps, ${formatBytes(result.blob.size)}`,
+            result.fits ? Toasts.Type.SUCCESS : Toasts.Type.MESSAGE
+        );
+
+        return attach(new File([result.blob], saved, { type: typeOfClip(saved) }));
+    } catch (e) {
+        logger.error("Could not make a GIF", e);
+        toast("Could not make a GIF of that clip", Toasts.Type.FAILURE);
+        return false;
+    }
 }

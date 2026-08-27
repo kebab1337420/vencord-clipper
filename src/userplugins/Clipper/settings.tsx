@@ -34,6 +34,21 @@ export const settings = definePluginSettings({
         description: "Start the capture buffer as soon as Discord launches, on the remembered source (the primary screen when none was picked)",
         default: false
     },
+    followGame: {
+        type: OptionType.BOOLEAN,
+        description: "While a game is running, record the screen it is on instead of the picked source - a game in exclusive fullscreen cannot be captured as a window, and only a screen carries the system sound",
+        default: true
+    },
+    autoHighlight: {
+        type: OptionType.BOOLEAN,
+        description: "Drop a marker by itself when the call gets loud - several people talking over each other, or you shouting at your own screen. Measured against how loud the last minute was, so a lively call does not mark itself constantly",
+        default: true
+    },
+    autoHighlightSave: {
+        type: OptionType.BOOLEAN,
+        description: "And save a clip of those moments without being asked. At most one every two minutes",
+        default: false
+    },
     clipLength: {
         type: OptionType.CUSTOM,
         default: 30
@@ -218,6 +233,23 @@ export const settings = definePluginSettings({
                 onChange={v => (settings.store.markKeybind = v)}
             />
         )
+    },
+    povKeybind: {
+        type: OptionType.COMPONENT,
+        default: "alt+F12",
+        component: () => (
+            <KeybindInput
+                title="Clip everyone's angle keybind"
+                note="Saves your own clip and posts a message in the call's chat asking everyone else running Clipper to save theirs. The message is plain text and says what it does, so the people without the plugin see the same thing you sent."
+                value={settings.store.povKeybind}
+                onChange={v => (settings.store.povKeybind = v)}
+            />
+        )
+    },
+    povRequests: {
+        type: OptionType.BOOLEAN,
+        description: "Save your own clip when somebody else in your call asks for everyone's angle. Only from people in the call you are currently in, only while your buffer is already running, and at most one every ten seconds - so it can never write a clip you could not have saved yourself a second earlier",
+        default: true
     },
     updatesSection: {
         type: OptionType.COMPONENT,

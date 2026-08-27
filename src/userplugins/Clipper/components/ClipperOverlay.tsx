@@ -19,12 +19,15 @@
 import { React, useEffect, useMemo, useRef, useState } from "@webpack/common";
 
 import { CLIPS_AVAILABLE } from "../clips";
+import { requestPov } from "../multipov";
 import type { CaptureSource } from "../native";
-import { listCaptureSources, recorder, RecorderState, setPickerOpener, setStudioOpener } from "../recorder";
-import { sendClip } from "../send";
+import { listCaptureSources, recorder, RecorderState, type SavedClip, setPickerOpener, setStudioOpener } from "../recorder";
+import { sendClipFitted, sendClipGif } from "../send";
 import { Container, settings } from "../settings";
 import { formatBytes } from "../utils";
+import { BufferPreview } from "./BufferPreview";
 import { ClipStudio, STUDIO_CSS } from "./ClipStudio";
+import { ReplayCard } from "./ReplayCard";
 
 const STYLE_ID = "vc-clipper-style";
 
@@ -392,6 +395,156 @@ const CSS = `
     accent-color: var(--brand-experiment, #5865f2);
 }
 
+.vc-clipper-preview {
+    width: min(760px, 82vw);
+}
+.vc-clipper-preview-video {
+    width: 100%;
+    max-height: 46vh;
+    border-radius: 8px;
+    background: #000;
+}
+
+.vc-clipper-scrub {
+    position: relative;
+    height: 26px;
+    margin-top: 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    background: var(--background-tertiary, #1e1f22);
+}
+.vc-clipper-range {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-radius: 4px;
+    background: var(--brand-experiment, #5865f2);
+    opacity: .32;
+}
+.vc-clipper-tick {
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    width: 2px;
+    margin-left: -1px;
+    border-radius: 1px;
+    background: var(--status-warning, #f0b232);
+}
+.vc-clipper-playhead {
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--text-normal, #dbdee1);
+    pointer-events: none;
+}
+.vc-clipper-handle {
+    position: absolute;
+    top: -3px;
+    bottom: -3px;
+    width: 10px;
+    margin-left: -5px;
+    border-radius: 3px;
+    cursor: ew-resize;
+    background: var(--brand-experiment, #5865f2);
+}
+
+.vc-clipper-preview-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--text-muted, #949ba4);
+}
+.vc-clipper-preview-actions button {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+    background: var(--button-secondary-background, #4e5058);
+    color: #fff;
+    font-size: 13px;
+    cursor: pointer;
+}
+.vc-clipper-preview-actions button:hover {
+    background: var(--button-secondary-background-hover, #6d6f78);
+}
+.vc-clipper-preview-actions span {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+}
+
+.vc-clipper-replay {
+    position: fixed;
+    left: 10px;
+    bottom: 112px;
+    z-index: 1002;
+    width: 268px;
+    padding: 8px;
+    border-radius: 10px;
+    background: var(--background-floating, #111214);
+    box-shadow: var(--elevation-high, 0 8px 24px rgba(0, 0, 0, .5));
+    font-family: var(--font-primary, "gg sans", sans-serif);
+    animation: vc-clipper-rise .15s ease-out;
+}
+.vc-clipper-replay-video {
+    display: block;
+    width: 100%;
+    border-radius: 6px;
+    background: #000;
+    cursor: pointer;
+}
+.vc-clipper-replay-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-muted, #949ba4);
+}
+.vc-clipper-replay-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-normal, #dbdee1);
+}
+.vc-clipper-replay-head .vc-clipper-close {
+    width: 22px;
+    height: 22px;
+    font-size: 16px;
+}
+.vc-clipper-replay-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+}
+.vc-clipper-replay-actions button {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 2px;
+    border: none;
+    border-radius: 6px;
+    background: var(--button-secondary-background, #4e5058);
+    color: #fff;
+    font-size: 11px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.vc-clipper-replay-actions button:hover {
+    background: var(--button-secondary-background-hover, #6d6f78);
+}
+.vc-clipper-replay-actions button:disabled {
+    opacity: .5;
+    cursor: default;
+}
+.vc-clipper-replay-actions .vc-clipper-danger {
+    background: var(--button-danger-background, #da373c);
+}
+.vc-clipper-replay-actions .vc-clipper-danger:hover {
+    background: var(--button-danger-background-hover, #a12828);
+}
+
 @keyframes vc-clipper-fade {
     from { opacity: 0; }
 }
@@ -698,7 +851,12 @@ function Picker({ onClose }: { onClose(): void; }) {
     );
 }
 
-function ActionMenu({ recording, onClose, onStudio }: { recording: boolean; onClose(): void; onStudio(): void; }) {
+function ActionMenu({ recording, onClose, onPreview, onStudio }: {
+    recording: boolean;
+    onClose(): void;
+    onPreview(): void;
+    onStudio(): void;
+}) {
     // The buffer grows while the menu is open, so the readout ticks with it.
     const [, tick] = useState(0);
     useEffect(() => {
@@ -717,23 +875,31 @@ function ActionMenu({ recording, onClose, onStudio }: { recording: boolean; onCl
     const buffered = Math.floor(recorder.bufferedSeconds);
     const last = recorder.lastClip;
 
-    // Offered lengths, shortest first, none of them longer than the buffer: a
-    // clip is trimmed down, and asking for more than was recorded does nothing.
+    // Offered lengths, shortest first, none of them longer than the buffer:
+    // asking for more than was recorded is asking for the whole buffer twice.
     const cuts = [15, 30, 60].filter(n => n < settings.store.clipLength);
 
     return (
         <div className="vc-clipper-menu">
             {item(recording ? "Stop the clip buffer" : "Start the clip buffer", () => void recorder.toggle())}
             {item(`Save the last ${settings.store.clipLength}s`, () => void recorder.save(), !recording)}
+            {cuts.map(n => (
+                <React.Fragment key={`save-${n}`}>
+                    {item(`Save only the last ${n}s`, () => void recorder.save(n), !recording || buffered < n)}
+                </React.Fragment>
+            ))}
+            {item("Watch the buffer before saving", onPreview, !recording || !buffered)}
             {item(
                 recorder.markCount ? `Drop a marker (${recorder.markCount} so far)` : "Drop a marker",
                 () => recorder.mark(),
                 !recording
             )}
+            {item("Clip everyone's angle in the call", () => void requestPov(), !recording)}
             {last && (
                 <>
                     <div className="vc-clipper-menu-label">{last.name}</div>
-                    {item("Send it to this channel", () => void sendClip(last.name))}
+                    {item("Send it to this channel", () => void sendClipFitted(last.name))}
+                    {item("Post its ending as a GIF", () => void sendClipGif(last.name))}
                     {cuts.map(n => (
                         <React.Fragment key={n}>
                             {item(`Keep only its last ${n}s`, () => void recorder.trimLastSaved(n))}
@@ -756,10 +922,23 @@ export function ClipperOverlay() {
     const [picker, setPicker] = useState(false);
     const [studio, setStudio] = useState<{ initial?: string; } | null>(null);
     const [menu, setMenu] = useState(false);
+    const [preview, setPreview] = useState(false);
+    const [replay, setReplay] = useState<SavedClip | null>(null);
 
     useStyle();
 
     useEffect(() => recorder.subscribe(setState), []);
+
+    /*
+     * A save ends by going back to recording, and by then the clip is written
+     * and its blob is still in hand - which is the one moment it can be played
+     * back without reading the file again.
+     */
+    const wasSaving = useRef(false);
+    useEffect(() => {
+        if (wasSaving.current && state !== "saving") setReplay(recorder.lastClip);
+        wasSaving.current = state === "saving";
+    }, [state]);
     useEffect(() => {
         setPickerOpener(() => setPicker(true));
         setStudioOpener(() => setStudio({}));
@@ -794,6 +973,7 @@ export function ClipperOverlay() {
                         <ActionMenu
                             recording={recording}
                             onClose={() => setMenu(false)}
+                            onPreview={() => setPreview(true)}
                             onStudio={() => setStudio({})}
                         />
                     )}
@@ -810,7 +990,17 @@ export function ClipperOverlay() {
                 </div>
             )}
 
+            {replay && (
+                <ReplayCard
+                    clip={replay}
+                    onStudio={name => setStudio({ initial: name })}
+                    onRefresh={() => setReplay(recorder.lastClip)}
+                    onClose={() => setReplay(null)}
+                />
+            )}
+
             {picker && <Picker onClose={() => setPicker(false)} />}
+            {preview && <BufferPreview onClose={() => setPreview(false)} />}
             {studio && <ClipStudio initial={studio.initial} onClose={() => setStudio(null)} />}
         </>
     );

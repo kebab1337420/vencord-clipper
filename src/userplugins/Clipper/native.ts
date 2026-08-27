@@ -12,7 +12,7 @@
  */
 
 import { createHash } from "crypto";
-import { app, desktopCapturer, dialog, globalShortcut, type IpcMainInvokeEvent, session, shell } from "electron";
+import { app, desktopCapturer, dialog, globalShortcut, type IpcMainInvokeEvent, screen, session, shell } from "electron";
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { get as httpsGet } from "https";
 import { basename, extname, isAbsolute, join } from "path";
@@ -68,9 +68,10 @@ function clipName(name: string): string | null {
     const cleaned = flat.replace(/[<>:"|?*\x00-\x1f]/g, "_").replace(/^\.+/, "");
 
     // Parentheses are allowed because the de-duplicating suffix uses them, png
-    // because the editor saves single frames next to the clips, and jpg because
-    // that is what the thumbnails are.
-    const match = /^([\w.\-+ ()[\]]{1,120})\.(webm|mp4|png|jpg)$/i.exec(cleaned);
+    // because the editor saves single frames next to the clips, jpg because
+    // that is what the thumbnails are, and gif because a clip exported as one
+    // is written into the same folder and read back out of it to be attached.
+    const match = /^([\w.\-+ ()[\]]{1,120})\.(webm|mp4|png|jpg|gif)$/i.exec(cleaned);
 
     return match ? `${match[1]}.${match[2].toLowerCase()}` : null;
 }
@@ -607,6 +608,69 @@ export async function getCaptureSources(_: IpcMainInvokeEvent, withThumbnails = 
     return listed;
 }
 
+/**
+ * What every process of the client is holding, in megabytes.
+ *
+ * The client has been reloading itself on its own: the renderer dies with
+ * `EXCEPTION_BREAKPOINT` on `CrRendererMain`, and once with `E0000008`, which
+ * is the code Chromium raises when an allocation fails. A capture that runs for
+ * hours can walk any of three processes up - the renderer holding the buffered
+ * chunks, the GPU process holding capture surfaces, the utility process the
+ * media engine runs in - and each of those is fixed somewhere else, so the
+ * renderer's own heap reading is not enough to tell them apart.
+ *
+ * Electron only offers this in the main process, which is why it is here.
+ */
+export async function getMemoryReport(_: IpcMainInvokeEvent): Promise<Array<{ type: string; mb: number; }>> {
+    try {
+        return app.getAppMetrics()
+            .map(m => ({
+                type: m.serviceName || m.type,
+                mb: Math.round((m.memory?.workingSetSize ?? 0) / 1024)
+            }))
+            .filter(m => m.mb > 0)
+            .sort((a, b) => b.mb - a.mb);
+    } catch {
+        // Older Electron, or a metric that is not collected on this platform.
+        return [];
+    }
+}
+
+/**
+ * The screen a game is running on, as a capture source id.
+ *
+ * A game in exclusive fullscreen does not answer window capture: what comes
+ * back is the desktop behind it, which is what a clip of such a game used to
+ * show. Recording its screen instead is the only reliable way to see it.
+ *
+ * The screen to pick is the one holding the pointer. A fullscreen game owns the
+ * pointer, and on a single-monitor machine the question does not arise at all.
+ * Returns an empty string when nothing can be matched, which leaves the source
+ * the user chose alone.
+ */
+export async function getActiveScreen(_: IpcMainInvokeEvent): Promise<string> {
+    if (IS_WAYLAND) return "";
+
+    const sources = await desktopCapturer.getSources({
+        types: ["screen"],
+        thumbnailSize: { width: 0, height: 0 }
+    });
+
+    if (!sources.length) return "";
+
+    try {
+        const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+        const match = sources.find(s => s.display_id === String(display.id));
+
+        if (match) return match.id;
+    } catch {
+        // No display server, or a monitor that was unplugged between the two
+        // calls. The first screen is still a better answer than none.
+    }
+
+    return sources[0].id;
+}
+
 /*
  * Display-media handling.
  *
@@ -691,7 +755,7 @@ export function disarmDisplayMedia(_?: IpcMainInvokeEvent): void {
  * the timeout expires, which costs nothing while idle and adds no latency when
  * a key is actually pressed.
  */
-type ShortcutAction = "save" | "toggle" | "mark";
+type ShortcutAction = "save" | "toggle" | "mark" | "pov";
 
 const registered = new Map<ShortcutAction, string>();
 let waiters: Array<(action: ShortcutAction | null) => void> = [];

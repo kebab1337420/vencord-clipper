@@ -111,7 +111,8 @@ function currentVoiceChannel(): string | undefined {
     }
 }
 
-function nameOf(userId: string): string {
+/** Somebody's display name, or a short stand-in when the store has no user. */
+export function nameOf(userId: string): string {
     try {
         const user = UserStore.getUser(userId) as any;
         return user?.globalName || user?.username || `User ${userId.slice(-4)}`;
@@ -359,6 +360,24 @@ class VoiceActivityBuffer {
         const bucket = Math.floor(Date.now() / BUCKET_MS);
 
         return Math.max(track.get(bucket) ?? 0, track.get(bucket - 1) ?? 0) / 255;
+    }
+
+    /**
+     * Everybody's level right now, 0 to 1, without asking whose it is.
+     *
+     * The same reading `levelNow` gives for one person. The highlight watcher
+     * counts voices rather than following any of them, so handing it the raw
+     * levels saves it a lookup per participant per tick.
+     */
+    levelsNow(): number[] {
+        const bucket = Math.floor(Date.now() / BUCKET_MS);
+        const levels: number[] = [];
+
+        for (const track of this.levels.values()) {
+            levels.push(Math.max(track.get(bucket) ?? 0, track.get(bucket - 1) ?? 0) / 255);
+        }
+
+        return levels;
     }
 
     /** Drops what has rolled out of the window, so the maps stay bounded. */

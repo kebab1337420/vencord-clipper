@@ -16,18 +16,20 @@
 import type { PluginNative } from "@utils/types";
 import { Toasts } from "@webpack/common";
 
+import { requestPov } from "./multipov";
 import { logger, recorder } from "./recorder";
 import { settings } from "./settings";
 import { formatKeybind, toAccelerator, watchKeybindSuspension } from "./utils";
 
 const Native = VencordNative.pluginHelpers.Clipper as PluginNative<typeof import("./native")>;
 
-type ShortcutAction = "save" | "toggle" | "mark";
+type ShortcutAction = "save" | "toggle" | "mark" | "pov";
 
 const ACTIONS: Record<ShortcutAction, () => void> = {
     save: () => void recorder.save(),
     toggle: () => void recorder.toggle(),
-    mark: () => recorder.mark()
+    mark: () => recorder.mark(),
+    pov: () => void requestPov()
 };
 
 /** Bumped on every stop, so a pump loop left over from a previous run exits. */
@@ -92,7 +94,7 @@ export async function startGlobalKeybinds(): Promise<void> {
 export async function syncGlobalKeybinds(): Promise<void> {
     if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return;
 
-    const { saveKeybind, toggleKeybind, markKeybind, globalKeybinds } = settings.store;
+    const { saveKeybind, toggleKeybind, markKeybind, povKeybind, globalKeybinds } = settings.store;
 
     if (!globalKeybinds) {
         await Native.unregisterShortcuts().catch(e => logger.warn("Could not drop the global keybinds", e));
@@ -102,10 +104,11 @@ export async function syncGlobalKeybinds(): Promise<void> {
     const binds = {
         save: toAccelerator(saveKeybind),
         toggle: toAccelerator(toggleKeybind),
-        mark: toAccelerator(markKeybind)
+        mark: toAccelerator(markKeybind),
+        pov: toAccelerator(povKeybind)
     };
 
-    for (const [action, bind] of [["save", saveKeybind], ["toggle", toggleKeybind], ["mark", markKeybind]] as const) {
+    for (const [action, bind] of [["save", saveKeybind], ["toggle", toggleKeybind], ["mark", markKeybind], ["pov", povKeybind]] as const) {
         if (bind && !binds[action]) {
             logger.warn(`"${formatKeybind(bind)}" cannot be registered system-wide, it only works while Discord is focused`);
         }

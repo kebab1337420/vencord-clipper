@@ -7,11 +7,12 @@ usually takes up a couple % of GPU usage
 ## Features
 
 - Rolling in-memory buffer, configurable from 10s to 300s
-- Save keybind and start/stop keybind, both rebindable from the settings panel,
-  registered system-wide so they fire from inside a game. The picker takes
-  combinations: it shows the modifiers as they are held, and it hands the
-  system-wide binds back to the OS while it listens, so the combination being
-  replaced reaches the picker instead of being swallowed on its way
+- Four keybinds — save, start/stop, drop a marker, clip everyone's angle — all
+  rebindable from the settings panel and registered system-wide, so they fire
+  from inside a game. The picker takes combinations: it shows the modifiers as
+  they are held, and it hands the system-wide binds back to the OS while it
+  listens, so the combination being replaced reaches the picker instead of being
+  swallowed on its way
 - Quality controls: video bitrate (1–50 Mbps), audio bitrate (64–320 kbps),
   resolution (source / 2160p → 480p), frame rate (24 / 30 / 60 / 120)
 - Container / codec choice: WebM VP9, WebM VP8, MP4 H.264
@@ -67,6 +68,43 @@ usually takes up a couple % of GPU usage
   `O` mark a range on the ruler, `X` cuts that range out, `Shift + X` keeps only
   it, `D` duplicates the segment, `Delete` removes it, `←` / `→` step the
   playhead, `Ctrl + Z` and `Ctrl + Shift + Z` walk the edits, `Esc` closes
+- **Automatic highlight markers.** The plugin listens to how loud the call and
+  your own microphone are and drops a marker by itself when a moment stands out
+  — several people talking over each other, or you shouting at your own screen.
+  It measures against how loud the last minute was rather than a fixed
+  threshold, so a lively call does not mark itself constantly, and it can be
+  told to save a clip of those moments without being asked (at most one every
+  two minutes).
+- **Watch the buffer before you save it.** The actions menu plays a copy of
+  what is in memory right now, with the markers drawn on the scrub bar and two
+  handles to pick the piece worth keeping. The window you pick is what gets
+  written, so a 30s buffer can become the 6s that mattered without a round trip
+  through the studio.
+- **Instant replay after a save.** The clip that was just written plays itself
+  in the corner, muted and looping, next to the things anybody does about a clip
+  they just watched: send it, turn its ending into a GIF, shorten it to 15s or
+  30s, open it in the studio, or throw it away. It leaves on its own if it is
+  ignored, and stays as long as the pointer is on it.
+- **Send a clip straight to the channel, whatever size it is.** A clip that
+  already fits is attached untouched. One that does not is re-encoded down to
+  the limit first — the whole moment, softer, rather than the half of it that
+  happened to fit. Resolution only comes down once the bitrate has been cut far
+  enough that leaving it alone would spend it all on macroblocks.
+- **GIF export.** The last seconds of a clip become a looping GIF small enough
+  to post, written next to the clips and attached to the message box. The
+  encoder is the plugin's own, with frame differencing and a median-cut palette,
+  and the size is measured rather than estimated: it encodes, checks, and gives
+  something up — frame rate first, then colours, and resolution last, because a
+  GIF too small to read is worth nothing.
+- **One key, everybody's angle.** Press the multi-POV bind and the plugin saves
+  your clip and posts a message in the call's chat asking everyone else running
+  Clipper to save theirs. There is no hidden payload: the message is plain text
+  that says what it does, so the people without the plugin see exactly what you
+  sent. Receivers cut their buffer to end where the request was *sent* rather
+  than where it arrived, so the angles cover the same moment instead of drifting
+  apart by the round trip. It is only accepted from somebody in the call you are
+  currently in, only while your own buffer is already running, and at most once
+  every ten seconds.
 - Chat bar button — left click saves, right click starts/stops
 - Floating button above the account panel — left click opens the source picker,
   right click opens the actions menu (start/stop, save, clip studio, buffer
@@ -275,6 +313,14 @@ firing it only while Discord is focused.
 | `studio.ts` | Timeline model and the montage render engine (canvas + WebAudio) |
 | `webm.ts` | Rebases the buffered WebM timeline so saved clips start at zero |
 | `globalKeybinds.ts` | System-wide keybind registration and dispatch |
+| `highlights.ts` | Watches the call and the microphone, and marks the loud moments |
+| `send.ts` | Attaching a clip to the message box, re-encoding it first when it is too big |
+| `shrink.ts` | Re-encodes a clip down to a size limit through MediaRecorder |
+| `gif.ts` | GIF89a encoder: median-cut palette, LZW, frame differencing |
+| `gifExport.ts` | Turns part of a clip into a GIF that comes in under the limit |
+| `multipov.ts` | Asks the call for everyone's angle, and answers the same request |
+| `components/BufferPreview.tsx` | Plays the live buffer and picks the window to save |
+| `components/ReplayCard.tsx` | The clip that was just saved, playing back in the corner |
 | `updater.ts` | Version check at launch, and the install that follows it |
 | `native.ts` | Main process: file write, source listing, global shortcuts, bundle updates |
 | `utils.ts` | Keybind parsing / accelerators, formatting helpers |

@@ -43,7 +43,9 @@
  */
 
 import { Logger } from "@utils/Logger";
-import { FluxDispatcher, UserStore } from "@webpack/common";
+import { FluxDispatcher } from "@webpack/common";
+
+import { nameOf } from "./voice";
 
 const logger = new Logger("Clipper", "#f0b132");
 
@@ -135,15 +137,6 @@ export function probeVoiceTaps(): string {
 
     const named = all.filter(t => t.userId);
     return `${all.length} voice receiver(s) open, ${named.length} matched to a person: ${named.map(t => t.name).join(", ") || "none yet"}.`;
-}
-
-function nameOf(userId: string): string {
-    try {
-        const user = UserStore.getUser(userId) as any;
-        return user?.globalName || user?.username || `User ${userId.slice(-4)}`;
-    } catch {
-        return `User ${userId.slice(-4)}`;
-    }
 }
 
 const onSpeaking = (event: any) => {

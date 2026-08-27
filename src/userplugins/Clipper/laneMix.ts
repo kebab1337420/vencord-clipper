@@ -642,13 +642,25 @@ function prepare(
     const speech = measured.map(entry => speechGate(entry.rms));
     const gates = measured.map(entry => muteGate(entry.rms));
 
+    /*
+     * How many people are talking at each instant, counted once.
+     *
+     * Both questions below are asked of it - "is anybody talking" for the floor,
+     * "is anybody else talking" for each person - and asking every gate again
+     * per person made the second one cost the square of the call.
+     */
+    const talking = new Uint8Array(points);
+    for (const gate of speech) {
+        for (let i = 0; i < points; i++) if (gate[i]) talking[i]++;
+    }
+
     // What the bed holds while nobody is talking: the game, the music, the
     // room. Taken off the top before a voice is measured against it.
     let quiet = 0;
     let floor = 0;
 
     for (let i = 0; i < points; i++) {
-        if (speech.some(gate => gate[i])) continue;
+        if (talking[i]) continue;
 
         floor += bedEnvelope[i];
         quiet++;
@@ -659,8 +671,12 @@ function prepare(
     const lanes = measured.map((entry, index) => {
         const alone = new Float32Array(points);
 
+        // Alone means nobody else: their own gate is taken back off the count
+        // rather than compared against every other one again.
+        const mine = speech[index];
+
         for (let i = 0; i < points; i++) {
-            alone[i] = entry.rms[i] >= ENV_FLOOR && !speech.some((other, at) => at !== index && other[i]) ? 1 : 0;
+            alone[i] = entry.rms[i] >= ENV_FLOOR && talking[i] === (mine[i] ? 1 : 0) ? 1 : 0;
         }
 
         return {
@@ -1019,41 +1035,53 @@ export async function nativeLaneMixFor(
 
         if (!hasVoiceTracks(tracks)) return null;
 
-        let bed: AudioBuffer | null = null;
-        let bedOffset = 0;
-        const raw: RawLane[] = [];
-
-        for (const track of tracks) {
+        const decoded = async (track: typeof tracks[number]): Promise<AudioBuffer | null> => {
             try {
-                /*
-                 * `0:all` is skipped on purpose, and it is the reason a mute
-                 * used to do nothing at all.
-                 *
-                 * It is not the desktop, whatever its name suggests: measured
-                 * over the frames of a real clip where nobody speaks it sits at
-                 * 0.0007 against the bed's 0.0159, and it peaks with each voice
-                 * track in turn. It is the call mixed together - which is to say
-                 * a second copy of everybody, the muted person included, and it
-                 * used to be summed in at full level under the mix that had just
-                 * left them out.
-                 */
-                if (track.userId && track.kind === "voice") {
-                    raw.push({
-                        userId: track.userId,
-                        name: named.get(track.userId) || track.userId,
-                        offset: track.offset,
-                        buffer: await decode(ctx, track.adts)
-                    });
-                } else if (track.kind === "bed" && !bed) {
-                    bed = await decode(ctx, track.adts);
-                    bedOffset = track.offset;
-                }
+                return await decode(ctx, track.adts);
             } catch (e) {
                 logger.warn(`Could not decode the ${track.userId || track.kind} track of "${target.id}"`, e);
+                return null;
             }
-        }
+        };
 
-        return { bed, bedOffset, raw };
+        /*
+         * `0:all` is skipped on purpose, and it is the reason a mute used to do
+         * nothing at all.
+         *
+         * It is not the desktop, whatever its name suggests: measured over the
+         * frames of a real clip where nobody speaks it sits at 0.0007 against
+         * the bed's 0.0159, and it peaks with each voice track in turn. It is
+         * the call mixed together - which is to say a second copy of everybody,
+         * the muted person included, and it used to be summed in at full level
+         * under the mix that had just left them out.
+         */
+        const voices = tracks.filter(track => !!track.userId && track.kind === "voice");
+        const beds = tracks.filter(track => track.kind === "bed");
+
+        // All of them at once: a call of seven used to decode seven files' worth
+        // of AAC one after another before the studio could draw anything, and no
+        // track needs another one to be read.
+        const [bedBuffers, lanes] = await Promise.all([
+            Promise.all(beds.map(decoded)),
+            Promise.all(voices.map(async (track): Promise<RawLane | null> => {
+                const buffer = await decoded(track);
+                if (!buffer) return null;
+
+                const userId = track.userId as string;
+
+                return { userId, name: named.get(userId) || userId, offset: track.offset, buffer };
+            }))
+        ]);
+
+        // The first bed that could be read, as before: a file carries one, and
+        // the others are only ever there when the first would not decode.
+        const at = bedBuffers.findIndex(buffer => buffer !== null);
+
+        return {
+            bed: at < 0 ? null : bedBuffers[at],
+            bedOffset: at < 0 ? 0 : beds[at].offset,
+            raw: lanes.filter((lane): lane is RawLane => lane !== null)
+        };
     });
 
     if (!found) return null;

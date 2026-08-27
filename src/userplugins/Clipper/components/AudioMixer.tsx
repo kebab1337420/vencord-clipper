@@ -37,6 +37,7 @@ import {
 } from "../mixer";
 import { recorder } from "../recorder";
 import { settings } from "../settings";
+import { Meter, VALUE } from "./Meter";
 import { VoicePanel } from "./VoicePanel";
 
 const logger = new Logger("Clipper", "#f0b132");
@@ -77,15 +78,6 @@ const NAME: React.CSSProperties = {
 /** Same rows, narrow enough for the studio sidebar. */
 const COMPACT_NAME: React.CSSProperties = { ...NAME, width: 96, fontSize: 13 };
 
-const VALUE: React.CSSProperties = {
-    width: 46,
-    flex: "0 0 auto",
-    textAlign: "right",
-    fontSize: 13,
-    fontVariantNumeric: "tabular-nums",
-    color: "var(--text-muted, #949ba4)"
-};
-
 const INPUT: React.CSSProperties = {
     padding: "6px 8px",
     border: "1px solid transparent",
@@ -95,31 +87,6 @@ const INPUT: React.CSSProperties = {
     fontSize: 13,
     outline: "none"
 };
-
-/** Green bar that follows what the channel is actually sending to the encoder. */
-function Meter({ level }: { level: number; }) {
-    return (
-        <div
-            style={{
-                width: 56,
-                height: 6,
-                flex: "0 0 auto",
-                overflow: "hidden",
-                borderRadius: 3,
-                background: "var(--background-tertiary, #1e1f22)"
-            }}
-        >
-            <div
-                style={{
-                    width: `${Math.round(Math.min(1, level) * 100)}%`,
-                    height: "100%",
-                    background: level > 0.9 ? "var(--status-danger, #da373c)" : "var(--green-360, #23a55a)",
-                    transition: "width .1s linear"
-                }}
-            />
-        </div>
-    );
-}
 
 function Channel({ id, name, note, level, meter, compact, onChange, onRemove, children }: {
     id: string;

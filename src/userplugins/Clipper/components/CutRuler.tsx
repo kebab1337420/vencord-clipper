@@ -19,10 +19,11 @@
  * the cut is one button.
  */
 
-import { useEffect, useRef, useState } from "@webpack/common";
+import { useRef, useState } from "@webpack/common";
 
 import { type Segment, segmentLength } from "../studio";
 import { formatTime } from "../utils";
+import { useDragWindow } from "./dragWindow";
 
 /** Pixels of grab area on either edge of the marked range. */
 const HANDLE = 7;
@@ -77,10 +78,8 @@ export function CutRuler({ segments, names, length, playhead, mark, selected, di
      * sweeping across it, and a sweep that leaves the bar - which is what
      * marking to the very end looks like - must not drop the gesture.
      */
-    useEffect(() => {
-        if (!drag) return;
-
-        const move = (e: MouseEvent) => {
+    useDragWindow(drag && {
+        move: (e: MouseEvent) => {
             const at = timeAt(e.clientX);
 
             if (drag.kind === "range") {
@@ -95,9 +94,8 @@ export function CutRuler({ segments, names, length, playhead, mark, selected, di
 
             if (drag.kind === "start") onMark({ from: Math.min(at, mark.to - 0.05), to: mark.to });
             else onMark({ from: mark.from, to: Math.max(at, mark.from + 0.05) });
-        };
-
-        const up = (e: MouseEvent) => {
+        },
+        up: (e: MouseEvent) => {
             // A press that never moved is a seek. Marking and seeking share the
             // same gesture because the playhead is where a cut is judged from.
             if (drag.kind === "range" && !drag.moved) {
@@ -106,15 +104,7 @@ export function CutRuler({ segments, names, length, playhead, mark, selected, di
             }
 
             setDrag(null);
-        };
-
-        window.addEventListener("mousemove", move);
-        window.addEventListener("mouseup", up);
-
-        return () => {
-            window.removeEventListener("mousemove", move);
-            window.removeEventListener("mouseup", up);
-        };
+        }
     }, [drag, mark, span]);
 
     const grab = (e: React.MouseEvent) => {

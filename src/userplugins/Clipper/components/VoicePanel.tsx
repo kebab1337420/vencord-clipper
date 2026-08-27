@@ -33,6 +33,7 @@ import { useEffect, useState } from "@webpack/common";
 
 import { clampGain, type MixerLevel } from "../mixer";
 import { voiceActivity, voiceParticipants, type VoicePerson } from "../voice";
+import { Meter, VALUE } from "./Meter";
 
 /** How often the panel re-reads the channel. Cheap: a few store lookups. */
 const REFRESH_MS = 2000;
@@ -56,41 +57,7 @@ const AVATAR: React.CSSProperties = {
     objectFit: "cover"
 };
 
-const VALUE: React.CSSProperties = {
-    width: 46,
-    flex: "0 0 auto",
-    textAlign: "right",
-    fontSize: 13,
-    fontVariantNumeric: "tabular-nums",
-    color: "var(--text-muted, #949ba4)"
-};
-
 const UNTOUCHED: MixerLevel = { gain: 1, muted: false };
-
-/** Green bar following how loud that person is right now. */
-function Meter({ level }: { level: number; }) {
-    return (
-        <div
-            style={{
-                width: 56,
-                height: 6,
-                flex: "0 0 auto",
-                overflow: "hidden",
-                borderRadius: 3,
-                background: "var(--background-tertiary, #1e1f22)"
-            }}
-        >
-            <div
-                style={{
-                    width: `${Math.round(Math.min(1, level) * 100)}%`,
-                    height: "100%",
-                    background: level > 0.9 ? "var(--status-danger, #da373c)" : "var(--green-360, #23a55a)",
-                    transition: "width .1s linear"
-                }}
-            />
-        </div>
-    );
-}
 
 function Person({ person, level, meter, compact, onChange }: {
     person: VoicePerson;

@@ -21,6 +21,7 @@
 import { Logger } from "@utils/Logger";
 import type { PluginNative } from "@utils/types";
 
+import type { ChatLine } from "./chat";
 import { runningGame } from "./game";
 import { settings } from "./settings";
 // Its own logger rather than the recorder's: the recorder tags clips through
@@ -74,6 +75,14 @@ export interface ClipMeta {
      * rather than while the buffer runs. Absent when nobody was turned down.
      */
     levels?: VoiceLevels;
+    /**
+     * What the call's chat said while this was being recorded.
+     *
+     * Offsets from the start of the clip, like the markers: the studio can burn
+     * them into the picture, so a clip carries the reaction it got as well as
+     * the moment that caused it. Only what arrived while the buffer ran.
+     */
+    chat?: ChatLine[];
 }
 
 interface LibraryDocument {
@@ -157,6 +166,19 @@ function entryOf(value: unknown): ClipMeta | null {
         levels[userId] = Math.min(3, Math.max(0, gain));
     }
 
+    const chat: ChatLine[] = Array.isArray(raw.chat)
+        ? (raw.chat as any[])
+            .filter(line => line && typeof line.text === "string" && typeof line.at === "number" && Number.isFinite(line.at) && line.at >= 0)
+            .slice(0, 300)
+            .map(line => ({
+                at: line.at,
+                name: (typeof line.name === "string" && line.name.trim().slice(0, 60)) || "Someone",
+                text: String(line.text).slice(0, 200),
+                ...(typeof line.avatar === "string" && line.avatar ? { avatar: line.avatar.slice(0, 300) } : {})
+            }))
+            .sort((a, b) => a.at - b.at)
+        : [];
+
     const markers = Array.isArray(raw.markers)
         ? raw.markers
             .filter((m): m is number => typeof m === "number" && Number.isFinite(m) && m >= 0)
@@ -171,7 +193,8 @@ function entryOf(value: unknown): ClipMeta | null {
         ...(markers.length ? { markers } : {}),
         ...(voices.length ? { voices } : {}),
         ...(tracks.length ? { tracks } : {}),
-        ...(Object.keys(levels).length ? { levels } : {})
+        ...(Object.keys(levels).length ? { levels } : {}),
+        ...(chat.length ? { chat } : {})
     };
 }
 
@@ -229,10 +252,15 @@ async function load(): Promise<LibraryDocument> {
     if (loading && cacheDir === dir) return loading;
 
     cacheDir = dir;
-    loading = read(dir);
-    loading.finally(() => void (loading = null)).catch(() => void 0);
 
-    return loading;
+    // Cleared by identity rather than by name: a folder changed mid-read starts
+    // a second one here, and clearing the variable would have whichever
+    // finished first drop the other's read and send the callers back to disk.
+    const work = read(dir);
+    loading = work;
+    work.finally(() => void (loading === work && (loading = null))).catch(() => void 0);
+
+    return work;
 }
 
 async function flush(): Promise<void> {
@@ -331,7 +359,8 @@ export async function tagSavedClip(
     markers?: number[],
     voices?: VoiceTrackMeta[],
     tracks?: VoiceFileMeta[],
-    levels?: VoiceLevels
+    levels?: VoiceLevels,
+    chat?: ChatLine[]
 ): Promise<void> {
     const name = path.split(/[\\/]/).pop();
     if (!name) return;
@@ -341,10 +370,11 @@ export async function tagSavedClip(
     const lanes = voices?.filter(v => v.levels) ?? [];
     const files = tracks?.filter(t => t.file) ?? [];
     const balance = Object.entries(levels ?? {}).filter(([, gain]) => Number.isFinite(gain) && gain !== 1);
+    const said = chat?.filter(line => line.text.trim() && Number.isFinite(line.at)) ?? [];
 
     // Markers are worth writing on their own: a clip taken outside a game has no
     // category to record but its marks are still the reason it was saved.
-    if (!game && !kept.length && !lanes.length && !files.length && !balance.length) return;
+    if (!game && !kept.length && !lanes.length && !files.length && !balance.length && !said.length) return;
 
     try {
         await setMeta(name, {
@@ -352,7 +382,8 @@ export async function tagSavedClip(
             ...(kept.length ? { markers: kept } : {}),
             ...(lanes.length ? { voices: lanes } : {}),
             ...(files.length ? { tracks: files } : {}),
-            ...(balance.length ? { levels: Object.fromEntries(balance) } : {})
+            ...(balance.length ? { levels: Object.fromEntries(balance) } : {}),
+            ...(said.length ? { chat: said } : {})
         });
     } catch (e) {
         logger.warn("Could not tag the saved clip", e);

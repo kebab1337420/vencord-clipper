@@ -293,6 +293,16 @@ let held: Held | null = null;
 const bare = new Set<string>();
 
 /**
+ * The decode currently running, so two callers wait on one of them.
+ *
+ * The cache above only answers once a decode has finished, and a decode is
+ * seconds of work on every track of the clip. A slider released while a render
+ * is starting reaches here twice, and without this both of them would decode
+ * the same files and hold two copies of them at once.
+ */
+let loading: { key: string; work: Promise<Held | null>; } | null = null;
+
+/**
  * Speech-band RMS per hop of one channel, on the clip's clock.
  *
  * The band is one pole each way rather than a proper filter: what it is for is
@@ -698,7 +708,23 @@ async function heldFor(
 ): Promise<Held | null> {
     if (held?.key === key) return held;
     if (bare.has(key)) return null;
+    if (loading?.key === key) return await loading.work;
 
+    const work = decodeInto(key, load);
+    loading = { key, work };
+
+    try {
+        return await work;
+    } finally {
+        if (loading?.work === work) loading = null;
+    }
+}
+
+/** The body of `heldFor`, once it has decided that a decode has to happen. */
+async function decodeInto(
+    key: string,
+    load: () => Promise<{ bed: AudioBuffer | null; bedOffset: number; raw: RawLane[]; } | null>
+): Promise<Held | null> {
     const found = await load();
 
     if (!found?.raw.length) {

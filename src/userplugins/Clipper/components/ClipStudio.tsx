@@ -19,15 +19,20 @@
 import { localStorage } from "@utils/localStorage";
 import { Toasts, useEffect, useMemo, useRef, useState } from "@webpack/common";
 
+import { fetchAngle, type PostedAngle, postedAngles } from "../angles";
 import { addAssets, type Asset, type AssetKind, removeAsset, sortedAssets, touchAsset } from "../assets";
 import {
+    alignTo,
     type AudioClip,
     type AudioSource,
+    beatsOf,
     clipEnd,
     clipLengthOf,
     decodeSource,
-    scheduleClips
+    scheduleClips,
+    stretchToRate
 } from "../audio";
+import type { ChatLine } from "../chat";
 import {
     deleteClip,
     frameName,
@@ -64,19 +69,26 @@ import { trimClip } from "../repair";
 import { sendClipFitted } from "../send";
 import { Container, extensionFor, pickMimeType } from "../settings";
 import {
+    type AngleLayout,
     type AvatarCache,
+    bestOf,
     type Caption,
     cutRange,
+    cutSilence,
     decodeImage,
     DEFAULT_CAPTION_STYLE,
     DEFAULT_EFFECTS,
+    DEFAULT_MONTAGE,
     DEFAULT_OVERLAY,
+    duckSettingsOf,
     type Effects,
     estimatedSize,
     type Frame,
+    framingAt,
     type ImageSource,
     keepRange,
     loadAvatars,
+    type MontagePick,
     newId,
     type Overlay,
     OVERLAY_SECONDS,
@@ -86,12 +98,19 @@ import {
     type Project,
     projectEnding,
     projectLength,
+    punchIn,
+    reframeVertical,
     renderProject,
     type Segment,
     segmentLength,
     segmentStart,
+    snapToBeats,
     type SourceOrigin,
-    type StudioSource
+    speechDuck,
+    type StudioSource,
+    trackAction,
+    verticalWidth,
+    type ZoomKey
 } from "../studio";
 import { writeThumbnail } from "../thumbnail";
 import { formatBytes, formatTime } from "../utils";
@@ -1227,6 +1246,15 @@ const store: Pick<Storage, "getItem" | "setItem" | "removeItem"> = localStorage 
 /** Shown when the clip folder cannot be listed; cleared by the next good read. */
 const FOLDER_ERROR = "Could not read the clip folder";
 
+/*
+ * How many clips the auto-montage will open at once.
+ *
+ * Every one of them holds a decoded video element open for as long as the
+ * timeline does, and a folder with a hundred marked clips in it would exhaust
+ * the client rather than build anything watchable.
+ */
+const MONTAGE_CLIPS = 12;
+
 /**
  * What is kept between two openings of the studio.
  *
@@ -1454,6 +1482,19 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
     const [tagging, setTagging] = useState("");
     const [confirmDelete, setConfirmDelete] = useState(false);
 
+    /** Rough length the auto-montage aims for, in seconds. */
+    const [montageTarget, setMontageTarget] = useState(DEFAULT_MONTAGE.target);
+
+    /** The video files posted in the channel, once somebody has asked for them. */
+    const [posted, setPosted] = useState<PostedAngle[] | null>(null);
+
+    /** The countdown on the delete confirmation, so a second click resets it. */
+    const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(() => () => {
+        if (confirmTimer.current != null) clearTimeout(confirmTimer.current);
+    }, []);
+
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const sourcesRef = useRef<StudioSource[]>([]);
@@ -1563,6 +1604,7 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
     const segment = project.segments.find(s => s.id === selected) ?? null;
     const source = segment ? sources.find(s => s.id === segment.sourceId) ?? null : null;
     const total = projectLength(project);
+    const duck = duckSettingsOf(project);
 
     const segmentIndex = project.segments.findIndex(s => s.id === selected);
     const soundsById = useMemo(() => new Map(sounds.map(s => [s.id, s])), [sounds]);
@@ -1622,10 +1664,19 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         [source?.name, meta]
     );
 
+    /** What the chat said while the previewed clip was recorded. */
+    const chatLines = useMemo(
+        () => (source ? meta[source.name]?.chat ?? [] : []),
+        [source?.name, meta]
+    );
+
     // Read by the preview's paint loop, which must not be re-armed on every
     // clip switch just to see the new tracks.
     const lanesRef = useRef<VoiceTrack[]>([]);
     lanesRef.current = lanes;
+
+    const chatRef = useRef<ChatLine[]>([]);
+    chatRef.current = chatLines;
 
     /*
      * The clip's sound with every person's level applied to their own voice.
@@ -1754,13 +1805,15 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         () => sources.map(item => {
             const voices = meta[item.name]?.voices;
             const tracks = meta[item.name]?.tracks;
+            const chat = meta[item.name]?.chat;
 
-            if (!voices?.length && !tracks?.length) return item;
+            if (!voices?.length && !tracks?.length && !chat?.length) return item;
 
             return {
                 ...item,
                 ...(voices?.length ? { voices: voices.map(fromMeta) } : {}),
-                ...(tracks?.length ? { tracks } : {})
+                ...(tracks?.length ? { tracks } : {}),
+                ...(chat?.length ? { chat } : {})
             };
         }),
         [sources, meta]
@@ -1842,9 +1895,14 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
     };
 
     const onDeleteClip = async () => {
+        if (confirmTimer.current != null) clearTimeout(confirmTimer.current);
+        confirmTimer.current = null;
+
         if (!confirmDelete) {
             setConfirmDelete(true);
-            setTimeout(() => setConfirmDelete(false), 4000);
+            // An older countdown left running would disarm the confirmation
+            // under the click that was about to answer it.
+            confirmTimer.current = setTimeout(() => setConfirmDelete(false), 4000);
             return;
         }
 
@@ -2172,6 +2230,212 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         }), tag);
     };
 
+    /*
+     * The moving framing: a key at the playhead, and the automatic punch-in.
+     *
+     * Keys are held in source seconds and in order, so adding one is a matter
+     * of finding where it belongs and replacing any key already standing on
+     * that frame - setting the same instant twice should move the camera, not
+     * add a second one a hundredth of a second later.
+     */
+    const addFraming = () => {
+        const video = videoRef.current;
+        if (!segment || !video) return;
+
+        const at = Math.min(segment.to, Math.max(segment.from, video.currentTime));
+        const now = framingAt(segment, at);
+        const key: ZoomKey = { at, zoom: now.zoom, x: now.x, y: now.y };
+
+        const moves = [...(segment.moves ?? []).filter(m => Math.abs(m.at - at) > 0.02), key]
+            .sort((a, b) => a.at - b.at);
+
+        patchSegment(segment.id, { moves });
+        toast(`Framing key at ${formatTime(at)}`, Toasts.Type.SUCCESS);
+    };
+
+    const clearFraming = () => {
+        if (!segment) return;
+
+        patchSegment(segment.id, { moves: [] });
+        toast("The framing holds still again", Toasts.Type.SUCCESS);
+    };
+
+    const punchMarkers = () => {
+        if (!segment || !source) return;
+
+        const marks = meta[source.name]?.markers ?? [];
+        const moves = punchIn(segment, marks);
+
+        if (!moves.length) {
+            toast("No marker inside this segment", Toasts.Type.FAILURE);
+            return;
+        }
+
+        patchSegment(segment.id, { moves });
+        toast(`Punched in on ${moves.length / 4} moment${moves.length === 4 ? "" : "s"}`, Toasts.Type.SUCCESS);
+    };
+
+    /**
+     * The decoded sound of a timeline source, kept for the alignment.
+     *
+     * Lining two angles up reads the whole file, and the same reference is read
+     * once per angle added, so the buffers are held rather than decoded again.
+     */
+    const audioOfRef = useRef(new Map<string, AudioBuffer>());
+
+    const audioOf = async (item: StudioSource): Promise<AudioBuffer> => {
+        const held = audioOfRef.current.get(item.id);
+        if (held) return held;
+
+        const bytes = await (await fetch(item.url)).arrayBuffer();
+        const decoded = await audioContext().decodeAudioData(bytes);
+
+        audioOfRef.current.set(item.id, decoded);
+        return decoded;
+    };
+
+    /**
+     * Pulls one of the clips posted in the channel in beside this shot.
+     *
+     * The download is the easy half. The hard half is that their buffer started
+     * whenever their client felt like it, so the two files are the same moment
+     * minutes apart: the sound is what they have in common, and the offset that
+     * lines their loudness up with ours is what puts them on the same clock.
+     */
+    const addAngle = async (angle: PostedAngle) => {
+        if (!segment || !source) return;
+
+        setError("");
+        setNote(`Downloading ${angle.name}…`);
+
+        let opened: { url: string; bytes: ArrayBuffer; } | null = null;
+
+        try {
+            opened = await fetchAngle(angle);
+            track({ url: opened.url });
+
+            const range = await probeFile(opened.url);
+            if (range.end - range.start <= 0) throw new Error(`"${angle.name}" has nothing to play`);
+
+            const item: StudioSource = {
+                id: newId(),
+                name: `${angle.author} - ${angle.name}`,
+                url: opened.url,
+                ...(range.height ? { width: range.width, height: range.height } : {})
+            };
+
+            setNote("Lining it up by ear…");
+
+            let offset = 0;
+
+            try {
+                const ctx = audioContext();
+                const mine = await audioOf(source);
+                const theirs = await ctx.decodeAudioData(opened.bytes);
+                const lag = alignTo(mine, theirs);
+
+                if (lag === null) toast("Nothing in common to hear - line it up by hand below", Toasts.Type.FAILURE);
+                else offset = lag;
+            } catch (e) {
+                logger.warn("Could not line up an angle by its sound", e);
+                toast("Could not read the sound of that angle - line it up by hand below", Toasts.Type.FAILURE);
+            }
+
+            setSources(list => [...list, item]);
+            patchSegment(segment.id, { angles: [...(segment.angles ?? []), { sourceId: item.id, offset }] });
+
+            toast(`Added ${angle.author}'s angle`, Toasts.Type.SUCCESS);
+        } catch (e) {
+            if (opened) drop(opened.url);
+            logger.warn("Could not add a posted angle", e);
+            setError(e instanceof Error ? e.message : String(e));
+        } finally {
+            setNote("");
+        }
+    };
+
+    const nudgeAngle = (index: number, offset: number) => {
+        if (!segment) return;
+
+        const angles = (segment.angles ?? []).map((angle, i) => i === index ? { ...angle, offset } : angle);
+        patchSegment(segment.id, { angles }, `angle-${segment.id}-${index}`);
+    };
+
+    const dropAngle = (index: number) => {
+        if (!segment) return;
+
+        const angles = (segment.angles ?? []).filter((unused, i) => i !== index);
+        patchSegment(segment.id, { angles });
+    };
+
+    /** Turns the whole montage into a 9:16 crop, or back to the wide one. */
+    const toggleVertical = () => {
+        const before = projectRef.current;
+        const vertical = before.width === verticalWidth(before.height);
+
+        if (vertical) {
+            commit(p => ({
+                ...p,
+                width: undefined,
+                segments: p.segments.map(segment => segment.fill ? { ...segment, fill: false } : segment)
+            }));
+            toast("Back to the wide frame", Toasts.Type.SUCCESS);
+            return;
+        }
+
+        commit(p => reframeVertical(p));
+        toast("Cropped to 9:16 - track the action on a shot to follow it", Toasts.Type.SUCCESS);
+    };
+
+    /**
+     * Walks the selected shot and keys the crop onto whatever is moving.
+     *
+     * The preview element is what is walked, so it is paused first and put back
+     * where it was afterwards: a scrub the user did not ask for that ends
+     * somewhere else is worse than the wait.
+     */
+    const trackSegment = async () => {
+        const video = videoRef.current;
+        if (!segment || !video) return;
+
+        const live = projectRef.current;
+        const width = live.width || live.height * 16 / 9;
+
+        const was = video.currentTime;
+        const wasPlaying = !video.paused;
+
+        video.pause();
+        setNote("Following the action…");
+
+        try {
+            const keys = await trackAction(video, segment, {
+                aspect: width / live.height,
+                onProgress: done => setNote(`Following the action… ${Math.round(done * 100)}%`)
+            });
+
+            if (!keys.length) {
+                toast("Nothing to follow: the crop is already the whole picture", Toasts.Type.FAILURE);
+                return;
+            }
+
+            patchSegment(segment.id, { moves: keys });
+            toast(`Tracked ${keys.length} points across the shot`, Toasts.Type.SUCCESS);
+        } catch (e) {
+            logger.warn("Could not track the action", e);
+            toast("Could not read the picture to track it", Toasts.Type.FAILURE);
+        } finally {
+            setNote("");
+
+            try {
+                video.currentTime = was;
+                if (wasPlaying) await video.play();
+            } catch {
+                // The element was swapped out from under the walk; nothing to
+                // put back.
+            }
+        }
+    };
+
     /** Adds a whole file to the end of the timeline as one segment. */
     const addSource = async (name: string, url: string, origin?: SourceOrigin) => {
         const range = await probeFile(url);
@@ -2219,6 +2483,86 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         }));
 
         setSelected(segment.id);
+    };
+
+    /**
+     * Builds a montage out of every marked moment in the clips on show.
+     *
+     * The search box and the category picker are the selection: whatever is
+     * listed is what an evening means, so filtering to one game and pressing
+     * this gives the best of that game. Clips without a marker are skipped -
+     * nothing in them was ever flagged as worth watching again.
+     */
+    const buildBestOf = async () => {
+        const marked = shown.filter(clip => meta[clip.name]?.markers?.length);
+        if (!marked.length) {
+            toast("No clip on show carries a marker", Toasts.Type.FAILURE);
+            return;
+        }
+
+        setError("");
+
+        const opened: StudioSource[] = [];
+        const picks: MontagePick[] = [];
+
+        try {
+            for (const clip of marked.slice(0, MONTAGE_CLIPS)) {
+                setNote(`Reading ${clip.name}…`);
+
+                const source = await openSource({ kind: "clip", name: clip.name });
+                const range = await probeFile(source.url);
+
+                // A file this client cannot decode is skipped rather than
+                // failing the montage: the rest of the evening still plays.
+                if (range.end - range.start <= 0) {
+                    drop(source.url);
+                    logger.warn(`Skipped ${clip.name} in the montage, nothing to play`);
+                    continue;
+                }
+
+                const item: StudioSource = {
+                    id: newId(),
+                    name: clip.name,
+                    url: source.url,
+                    origin: { kind: "clip", name: clip.name },
+                    ...(range.height ? { width: range.width, height: range.height } : {})
+                };
+
+                opened.push(item);
+                picks.push({ sourceId: item.id, from: range.start, to: range.end, markers: meta[clip.name]!.markers! });
+            }
+        } catch (e) {
+            opened.forEach(item => drop(item.url));
+            logger.warn("Could not build the montage", e);
+            setError(e instanceof Error ? e.message : String(e));
+            setNote("");
+            return;
+        }
+
+        setNote("");
+
+        const segments = bestOf(picks, { target: montageTarget });
+        const used = new Set(segments.map(segment => segment.sourceId));
+
+        // Whatever contributed no moment is closed again rather than left on
+        // the timeline as a source nothing points at.
+        for (const item of opened) {
+            if (!used.has(item.id)) drop(item.url);
+        }
+
+        const kept = opened.filter(item => used.has(item.id));
+
+        if (!segments.length) {
+            toast("Those markers were too close to the edges to cut", Toasts.Type.FAILURE);
+            return;
+        }
+
+        setSources(list => [...list, ...kept]);
+        commit(p => ({ ...p, segments: [...p.segments, ...segments] }));
+        setSelected(segments[0].id);
+        setMark(null);
+
+        toast(`Cut ${segments.length} moment${segments.length === 1 ? "" : "s"} out of ${kept.length} clip${kept.length === 1 ? "" : "s"}`, Toasts.Type.SUCCESS);
     };
 
     const onAddClip = async (name: string) => {
@@ -2733,6 +3077,80 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
      * screen leaves the editor pointing at a segment that no longer exists, and
      * the panel beside the preview would go blank with no way back.
      */
+    /*
+     * Takes every stretch nobody talks over out of the montage at once.
+     *
+     * The lanes are per clip, so an imported file with none is passed over
+     * rather than cut to nothing - which is also why this says how much it
+     * found: a montage that comes back the same length is one whose sources
+     * never carried the activity, not one with no dead air in it.
+     */
+    const trimSilence = () => {
+        const before = projectRef.current;
+        if (!before.segments.length) {
+            toast("Nothing on the timeline yet", Toasts.Type.FAILURE);
+            return;
+        }
+
+        const { project: next, removed, ranges } = cutSilence(before, sourcesRef.current);
+
+        if (next === before || !ranges) {
+            toast("Found no dead air to cut", Toasts.Type.FAILURE);
+            return;
+        }
+
+        commit(() => next);
+        setMark(null);
+        setSelected(current => next.segments.some(s => s.id === current) ? current : next.segments[0].id);
+
+        toast(`Cut ${formatTime(removed)} of silence over ${ranges} place${ranges === 1 ? "" : "s"}`, Toasts.Type.SUCCESS);
+    };
+
+    /**
+     * Beats of a sound, kept per source.
+     *
+     * The detection walks the whole decoded buffer, which is slow enough on a
+     * long track to be worth doing once rather than on every click.
+     */
+    const beatsRef = useRef(new Map<string, number[]>());
+
+    const beatsFor = (sound: AudioSource): number[] => {
+        const held = beatsRef.current.get(sound.id);
+        if (held) return held;
+
+        const found = beatsOf(sound.buffer);
+        beatsRef.current.set(sound.id, found);
+        return found;
+    };
+
+    /** Pull every cut onto the nearest beat of the picked sound. */
+    const snapCuts = (clip: AudioClip) => {
+        const sound = soundsById.get(clip.sourceId);
+        if (!sound) {
+            toast("That sound is missing", Toasts.Type.FAILURE);
+            return;
+        }
+
+        const beats = beatsFor(sound);
+        if (!beats.length) {
+            toast("Found no beat in that sound", Toasts.Type.FAILURE);
+            return;
+        }
+
+        const before = projectRef.current;
+        const { project: next, moved } = snapToBeats(before, clip, beats);
+
+        if (next === before || !moved) {
+            toast("Every cut already sits on a beat", Toasts.Type.FAILURE);
+            return;
+        }
+
+        commit(() => next);
+        setMark(null);
+
+        toast(`Snapped ${moved} cut${moved === 1 ? "" : "s"} to the beat`, Toasts.Type.SUCCESS);
+    };
+
     const cutMarked = (keep: boolean) => {
         if (!mark || mark.to - mark.from < 0.05) {
             toast("Mark a range on the ruler first", Toasts.Type.FAILURE);
@@ -2873,7 +3291,8 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                     voices,
                     voiceLevels: live.voiceLevels,
                     avatars: avatarsRef.current,
-                    showSpeakers: live.showSpeakers !== false
+                    showSpeakers: live.showSpeakers !== false,
+                    ...(live.showChat === true ? { chat: chatRef.current } : {})
                 }
                 : null;
 
@@ -3034,8 +3453,17 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
             const ctx = audioContext();
             const from = projectTime();
 
+            /*
+             * The duck is built over what is actually going to be heard rather
+             * than over the hour the preview asks for: the curve is a sample
+             * per fifth of a second, and an hour of them for a montage that
+             * runs four minutes is work nobody hears.
+             */
+            const until = Math.min(from + 3600, projectLength(live));
+
             stopSoundsRef.current = scheduleClips(
-                ctx, ctx.destination, clips, sources, ctx.currentTime, from, from + 3600, projectEnding(live)
+                ctx, ctx.destination, clips, sources, ctx.currentTime, from, from + 3600, projectEnding(live),
+                speechDuck(live, sourcesRef.current, from, until)
             );
         };
 
@@ -3096,11 +3524,21 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
             const band = createVoiceBand(ctx);
             band.output.connect(gain);
 
+            /*
+             * A buffer source has no `preservesPitch`, so a segment that asks
+             * for its pitch to be kept gets a buffer stretched to the speed
+             * instead - the same thing the render does, so the preview and the
+             * file agree.
+             */
+            const speed = Math.min(4, Math.max(0.25, segment.speed || 1));
+            const buffer = segment.pitch !== false ? stretchToRate(ctx, voiceMix.buffer, speed) : voiceMix.buffer;
+            const kept = buffer !== voiceMix.buffer;
+
             const source = ctx.createBufferSource();
-            source.buffer = voiceMix.buffer;
-            source.playbackRate.value = Math.min(4, Math.max(0.25, segment.speed || 1));
+            source.buffer = buffer;
+            source.playbackRate.value = kept ? 1 : speed;
             source.connect(band.input);
-            source.start(ctx.currentTime, Math.max(0, video.currentTime));
+            source.start(ctx.currentTime, Math.max(0, kept ? video.currentTime / speed : video.currentTime));
 
             voiceNodesRef.current = { source, gain, band };
         };
@@ -3309,6 +3747,11 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         const [only] = project.segments;
         if (only.speed !== 1 || only.volume !== 1) return false;
 
+        // A moving framing, a crop and a second angle are all painted, and the
+        // chat is text that exists nowhere in the file.
+        if (only.moves?.length || only.fill || only.angles?.length) return false;
+        if (project.showChat === true) return false;
+
         return (Object.keys(DEFAULT_EFFECTS) as (keyof Effects)[]).every(k => only.effects[k] === DEFAULT_EFFECTS[k]);
     };
 
@@ -3334,6 +3777,10 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         // The output size is a render setting: honouring it means re-encoding,
         // and silently ignoring it would hand back a file of the wrong size.
         if (!height || height !== project.height) return null;
+
+        // The shape as well: a montage reframed for a phone is a crop of this
+        // file, not this file.
+        if (project.width && project.width !== (from.width || (await probeFile(from.url)).width)) return null;
 
         const type = typeOfClip(from.name);
         const whole = await (await fetch(from.url)).blob();
@@ -3505,6 +3952,31 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                         <button className="vc-clipper-side-clip vc-clipper-add" disabled={busy} onClick={() => void onImport()}>
                             Import a video…
                         </button>
+
+                        <button
+                            className="vc-clipper-side-clip vc-clipper-add"
+                            disabled={busy || !shown.some(clip => meta[clip.name]?.markers?.length)}
+                            title="Cut every marked moment out of the clips listed below into one montage"
+                            onClick={() => void buildBestOf()}
+                        >
+                            Best of the evening…
+                        </button>
+
+                        <div className="vc-clipper-field">
+                            <label>
+                                <span>Montage length</span>
+                                <b>{formatTime(montageTarget)}</b>
+                            </label>
+                            <input
+                                type="range"
+                                min={30}
+                                max={600}
+                                step={15}
+                                value={montageTarget}
+                                disabled={busy}
+                                onChange={e => setMontageTarget(Number(e.currentTarget.value))}
+                            />
+                        </div>
 
                         {!!clips?.length && (
                             <div className="vc-clipper-field">
@@ -3753,6 +4225,13 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                             Keep
                                         </button>
                                         <button disabled={busy || !mark} onClick={() => setMark(null)} title="Drop the mark">Clear</button>
+                                        <button
+                                            disabled={busy}
+                                            onClick={trimSilence}
+                                            title="Cut every stretch nobody is talking over, using the clip's own voice lanes"
+                                        >
+                                            Trim silence
+                                        </button>
                                     </div>
                                 )}
                             </div>
@@ -3971,6 +4450,50 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                     {slider("Blur", segment.effects.blur, 0, 20, 1, v => patchEffects(segment.id, { blur: v }, "blur"), "px")}
                                     {slider("Zoom", segment.effects.zoom, 1, 3, 0.05, v => patchEffects(segment.id, { zoom: v }, "zoom"), "x")}
 
+                                    {(segment.effects.zoom > 1 || !!segment.moves?.length) && (
+                                        <>
+                                            {slider("Frame across", segment.effects.zoomX ?? 0.5, 0, 1, 0.02, v => patchEffects(segment.id, { zoomX: v }, "zoomX"))}
+                                            {slider("Frame down", segment.effects.zoomY ?? 0.5, 0, 1, 0.02, v => patchEffects(segment.id, { zoomY: v }, "zoomY"))}
+                                        </>
+                                    )}
+
+                                    <div className="vc-clipper-field">
+                                        <label>
+                                            <span>Moving framing</span>
+                                            <span>{segment.moves?.length ? `${segment.moves.length} keys` : "held still"}</span>
+                                        </label>
+                                        <div className="vc-clipper-row">
+                                            <button
+                                                disabled={busy}
+                                                title="Hold the framing that is on screen right now at this frame"
+                                                onClick={addFraming}
+                                            >
+                                                Key here
+                                            </button>
+                                            <button
+                                                disabled={busy || !meta[source?.name ?? ""]?.markers?.length}
+                                                title="Push in on every marker in this segment, and pull back out after it"
+                                                onClick={punchMarkers}
+                                            >
+                                                Punch in on markers
+                                            </button>
+                                            <button
+                                                disabled={busy}
+                                                title="Walk this shot and key the crop onto whatever is moving"
+                                                onClick={() => void trackSegment()}
+                                            >
+                                                Track the action
+                                            </button>
+                                            <button disabled={busy || !segment.moves?.length} onClick={clearFraming} title="Back to one framing for the whole segment">
+                                                Hold still
+                                            </button>
+                                        </div>
+                                        <small>
+                                            Two keys or more and the crop travels between them, eased in and out. Set
+                                            the zoom and the frame above, then key the frames it should be on.
+                                        </small>
+                                    </div>
+
                                     <div className="vc-clipper-field">
                                         <label>
                                             <span>Mirror the image</span>
@@ -3987,6 +4510,104 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                 <Group title="Fades">
                                     {slider("Fade in", segment.effects.fadeIn, 0, 3, 0.1, v => patchEffects(segment.id, { fadeIn: v }, "fadeIn"), "s")}
                                     {slider("Fade out", segment.effects.fadeOut, 0, 3, 0.1, v => patchEffects(segment.id, { fadeOut: v }, "fadeOut"), "s")}
+
+                                    {segmentIndex > 0 && (
+                                        <>
+                                            {slider("Dissolve from the last shot", segment.transition ?? 0, 0, 1.5, 0.1, v => patchSegment(segment.id, { transition: v }, "transition"), "s")}
+                                            <small className="vc-clipper-note">
+                                                The frame the previous segment ended on fades out over the opening of
+                                                this one. Zero cuts straight in. Shown in the render, not in the
+                                                preview, which plays one segment at a time.
+                                            </small>
+                                        </>
+                                    )}
+                                </Group>
+
+                                <Group title="Angles">
+                                    <div className="vc-clipper-field">
+                                        <label>
+                                            <span>Everybody else's view</span>
+                                            <span>{segment.angles?.length ? `${segment.angles.length} alongside` : "this shot alone"}</span>
+                                        </label>
+                                        <div className="vc-clipper-row">
+                                            <button
+                                                disabled={busy}
+                                                title="Look through the channel for the clips the others posted"
+                                                onClick={() => setPosted(postedAngles())}
+                                            >
+                                                Look in the chat
+                                            </button>
+                                            {!!segment.angles?.length && (
+                                                <select
+                                                    value={segment.layout ?? "grid"}
+                                                    disabled={busy}
+                                                    onChange={e => patchSegment(segment.id, { layout: e.currentTarget.value as AngleLayout })}
+                                                >
+                                                    <option value="grid">Side by side</option>
+                                                    <option value="pip">Small, in the corner</option>
+                                                </select>
+                                            )}
+                                        </div>
+                                        <small>
+                                            The clips the others dropped in the channel, played alongside this one and
+                                            lined up by their sound. Silent: this shot keeps the soundtrack. Shown in
+                                            the render, not in the preview, which plays one file at a time.
+                                        </small>
+                                    </div>
+
+                                    {posted !== null && !posted.length && (
+                                        <div className="vc-clipper-note">
+                                            No video posted in the channel this client has loaded. Scroll the chat back
+                                            to the clips and look again.
+                                        </div>
+                                    )}
+
+                                    {!!posted?.length && (
+                                        <div className="vc-clipper-row vc-clipper-markers">
+                                            {posted.map(angle => (
+                                                <button
+                                                    key={angle.id}
+                                                    disabled={busy}
+                                                    title={`${angle.name} - ${new Date(angle.sentAt).toLocaleString()}`}
+                                                    onClick={() => void addAngle(angle)}
+                                                >
+                                                    {angle.author}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {(segment.angles ?? []).map((angle, i) => {
+                                        const from = sources.find(item => item.id === angle.sourceId);
+
+                                        return (
+                                            <div className="vc-clipper-field" key={`${angle.sourceId}-${i}`}>
+                                                <label>
+                                                    <span title={from?.name}>{from?.name ?? "missing angle"}</span>
+                                                    <b>{angle.offset >= 0 ? "+" : ""}{angle.offset.toFixed(2)}s</b>
+                                                </label>
+                                                <input
+                                                    type="range"
+                                                    min={angle.offset - 5}
+                                                    max={angle.offset + 5}
+                                                    step={0.05}
+                                                    value={angle.offset}
+                                                    disabled={busy}
+                                                    onChange={e => nudgeAngle(i, Number(e.currentTarget.value))}
+                                                />
+                                                <div className="vc-clipper-row">
+                                                    <button disabled={busy} onClick={() => nudgeAngle(i, angle.offset - 0.2)}>Earlier</button>
+                                                    <button disabled={busy} onClick={() => nudgeAngle(i, angle.offset + 0.2)}>Later</button>
+                                                    <button className="vc-clipper-danger" disabled={busy} onClick={() => dropAngle(i)}>Remove</button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+
+                                    <small className="vc-clipper-note">
+                                        A pulled angle lives as long as this studio does: it was never on disk here, so
+                                        a reopened timeline comes back without it.
+                                    </small>
                                 </Group>
 
                                 <Group title="Arrange" start>
@@ -4234,6 +4855,59 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                     </>
                                 )}
 
+                                <div className="vc-clipper-field">
+                                    <label>
+                                        <span>Burn the chat into the picture</span>
+                                        <input
+                                            type="checkbox"
+                                            checked={project.showChat === true}
+                                            disabled={busy}
+                                            onChange={e => { const showChat = e.currentTarget.checked; commit(p => ({ ...p, showChat })); }}
+                                        />
+                                    </label>
+                                    <small>
+                                        What the call typed while the clip was recorded, in the bottom corner as it
+                                        arrived. Only the clips recorded with this version carry it.
+                                    </small>
+                                </div>
+
+                                <div className="vc-clipper-field">
+                                    <label>
+                                        <span>Duck the sound lane under speech</span>
+                                        <input
+                                            type="checkbox"
+                                            checked={project.duckMusic === true}
+                                            disabled={busy}
+                                            onChange={e => { const duckMusic = e.currentTarget.checked; commit(p => ({ ...p, duckMusic })); }}
+                                        />
+                                    </label>
+                                    <small>
+                                        The music and stings drop back while somebody talks, following the clip's own
+                                        voice lanes. Needs a clip that carries them.
+                                    </small>
+                                </div>
+
+                                {project.duckMusic === true && (
+                                    <div className="vc-clipper-field">
+                                        <label>
+                                            <span>How far it drops</span>
+                                            <span>{Math.round((1 - duck.depth) * 100)}%</span>
+                                        </label>
+                                        <input
+                                            type="range"
+                                            min={0}
+                                            max={95}
+                                            step={5}
+                                            value={Math.round((1 - duck.depth) * 100)}
+                                            disabled={busy}
+                                            onChange={e => {
+                                                const depth = 1 - Number(e.currentTarget.value) / 100;
+                                                commit(p => ({ ...p, duck: { ...duckSettingsOf(p), depth } }));
+                                            }}
+                                        />
+                                    </div>
+                                )}
+
                                 <button className="vc-clipper-side-clip vc-clipper-add" disabled={busy} onClick={() => void onImportSound()}>
                                     Add a sound here…
                                 </button>
@@ -4318,6 +4992,16 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                                 </button>
                                                 <button disabled={busy || !inside} title="Split it in two at the playhead" onClick={() => splitSound(clip)}>
                                                     Split
+                                                </button>
+                                            </div>
+
+                                            <div className="vc-clipper-caption-row">
+                                                <button
+                                                    disabled={busy || project.segments.length < 2}
+                                                    title="Pull every cut in the montage onto the nearest beat of this sound"
+                                                    onClick={() => snapCuts(clip)}
+                                                >
+                                                    Snap cuts to the beat
                                                 </button>
                                             </div>
 
@@ -4533,6 +5217,26 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                     >
                                         {OUTPUT_HEIGHTS.map(h => <option key={h} value={String(h)}>{h}p</option>)}
                                     </select>
+                                </div>
+
+                                <div className="vc-clipper-field">
+                                    <label>
+                                        <span>Shape</span>
+                                        <span>{project.width === verticalWidth(project.height) ? `9:16, ${verticalWidth(project.height)}x${project.height}` : "wide"}</span>
+                                    </label>
+                                    <div className="vc-clipper-row">
+                                        <button
+                                            disabled={busy || !project.segments.length}
+                                            title="Crop every shot to a phone frame instead of putting bars around it"
+                                            onClick={toggleVertical}
+                                        >
+                                            {project.width === verticalWidth(project.height) ? "Back to wide" : "Reframe for phones (9:16)"}
+                                        </button>
+                                    </div>
+                                    <small>
+                                        The crop sits where each shot is framed. Track the action on a shot, in Look,
+                                        to have it follow what moves instead of holding the middle.
+                                    </small>
                                 </div>
 
                                 <div className="vc-clipper-field">

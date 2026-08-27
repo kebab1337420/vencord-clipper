@@ -408,6 +408,9 @@ export class MicInput {
     /** True while a device swap is in flight, so a burst cannot start several. */
     private resyncing = false;
 
+    /** Set by stop(), so a swap that lands afterwards releases what it opened. */
+    private stopped = false;
+
     /** A device asked for while a swap was in flight, answered once it lands. */
     private missed = "";
 
@@ -702,6 +705,14 @@ export class MicInput {
                 throw new Error("The microphone opened with no audio track");
             }
 
+            // The input can be stopped while the capture is opening. Installing
+            // the new stream then would leave a live microphone nobody owns,
+            // which the operating system keeps showing as in use.
+            if (this.stopped) {
+                stream.getTracks().forEach(t => t.stop());
+                return;
+            }
+
             this.source.disconnect();
             this.stream.getTracks().forEach(t => t.stop());
 
@@ -731,7 +742,7 @@ export class MicInput {
         const { missed } = this;
         this.missed = "";
 
-        if (missed && missed !== target) await this.resync();
+        if (missed && missed !== target && !this.stopped) await this.resync();
     }
 
     /**
@@ -815,6 +826,8 @@ export class MicInput {
     };
 
     stop(): void {
+        this.stopped = true;
+
         if (this.timer != null) clearInterval(this.timer);
         this.timer = null;
 

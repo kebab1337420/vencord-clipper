@@ -17,6 +17,7 @@ import { Logger } from "@utils/Logger";
 import type { PluginNative } from "@utils/types";
 import { Toasts, UserStore } from "@webpack/common";
 
+import { type ChatLine, chatLog, shiftChat } from "./chat";
 import { playClipSound } from "./clipSound";
 import { runningGame, watchRunningGame } from "./game";
 import { highlights } from "./highlights";
@@ -180,6 +181,8 @@ export interface SavedClip {
     markers: number[];
     /** Who was talking during it, on the same clock as the markers. */
     voices: VoiceTrack[];
+    /** What the chat said during it, on that clock too. */
+    chat?: ChatLine[];
 }
 
 class ClipRecorder {
@@ -523,6 +526,10 @@ class ClipRecorder {
             // saved after the fact, so who was talking has to have been kept all
             // along or the tracks stop where the save began.
             voiceActivity.start(settings.store.clipLength);
+
+            // And what the call was typing, which is half of why a moment was
+            // funny and is not in the picture at all.
+            chatLog.start(settings.store.clipLength);
 
             // And the call itself, one buffer per person, on the same window.
             // Best effort: a client with no reachable per-person audio simply
@@ -933,8 +940,17 @@ class ClipRecorder {
 
         report.call(logger, `The ${failed} encoder failed${detail ? `: ${detail}` : ""}`, event);
 
+        // The failed encoder is unhooked first: its last chunk arrives after
+        // the stop, and by then the next container in the chain may already be
+        // running, which would read those bytes as its own header.
+        const failing = this.recorder;
+        if (failing) {
+            failing.ondataavailable = null;
+            failing.onerror = null;
+        }
+
         try {
-            if (this.recorder && this.recorder.state !== "inactive") this.recorder.stop();
+            if (failing && failing.state !== "inactive") failing.stop();
         } catch {
             // An encoder that has already given up throws on being stopped,
             // which is not something the fallback below needs to know about.
@@ -1219,8 +1235,18 @@ class ClipRecorder {
 
         this.stopHeapWatch();
 
+        // Detached before the stop, because stopping is what makes the encoder
+        // hand over its last chunk. Dropping the reference is not enough: the
+        // recorder holds the handler, and a chunk arriving after this would be
+        // taken for the header of whatever runs next.
+        const going = this.recorder;
+        if (going) {
+            going.ondataavailable = null;
+            going.onerror = null;
+        }
+
         try {
-            if (this.recorder && this.recorder.state !== "inactive") this.recorder.stop();
+            if (going && going.state !== "inactive") going.stop();
         } catch (e) {
             logger.warn("Error stopping recorder", e);
         }
@@ -1229,6 +1255,7 @@ class ClipRecorder {
 
         voiceActivity.stop();
         voiceBuffers.stop();
+        chatLog.stop();
 
         if (this.consentTicker) clearInterval(this.consentTicker);
         this.consentTicker = null;
@@ -1455,6 +1482,7 @@ class ClipRecorder {
                 .filter(m => m >= start && m <= end)
                 .map(m => (m - start) / 1000);
             const voices = voiceActivity.slice(start, end);
+            const said = chatLog.slice(start, end);
 
             // Cluster timecodes are absolute, so the kept ones still carry the
             // time elapsed since the buffer started: without this the clip
@@ -1473,6 +1501,7 @@ class ClipRecorder {
             const cutOff = blob === raw ? 0 : await dropped(raw, blob, this.mimeType);
             const offsets = shift(markers, cutOff);
             const lanes = shiftTracks(voices, cutOff);
+            const chat = shiftChat(said, cutOff);
 
             /*
              * The call, put back into the clip it belongs to.
@@ -1489,15 +1518,15 @@ class ClipRecorder {
             const path = await writeClip(blob, name);
             const saved = path.split(/[\\/]/).pop() || name;
 
-            this.lastSaved = { name: saved, path, blob, mimeType: this.mimeType, markers: offsets, voices: lanes };
+            this.lastSaved = { name: saved, path, blob, mimeType: this.mimeType, markers: offsets, voices: lanes, chat };
 
             // The call, kept apart. `cutOff` is what the repair took off the
             // front, so this is the instant the saved footage really begins.
-            const tracks = await this.saveVoices(saved, start + cutOff * 1000);
+            const tracks = await this.saveVoices(saved, start + cutOff * 1000, end);
 
             // File the clip under whatever is running now: after the save, the
             // player may already have alt-tabbed away.
-            await tagSavedClip(path, offsets, lanes.map(toMeta), tracks, voiceLevelsFrom(readMixer()));
+            await tagSavedClip(path, offsets, lanes.map(toMeta), tracks, voiceLevelsFrom(readMixer()), chat);
 
             // Best effort and off the critical path: the library falls back to a
             // placeholder for a clip that has no picture.
@@ -1537,11 +1566,14 @@ class ClipRecorder {
      * thing here - a clip whose voices are only inside its mixed soundtrack,
      * which is what every clip was until now.
      */
-    private async saveVoices(clip: string, from: number): Promise<VoiceFileMeta[]> {
+    private async saveVoices(clip: string, from: number, to: number): Promise<VoiceFileMeta[]> {
         if (!voiceBuffers.active) return [];
 
         try {
-            const harvested = await voiceBuffers.harvest(from, Date.now());
+            // The window the clip covers, not the one ending now: a clip picked
+            // out of the buffer ends in the past, and harvesting to now would
+            // give every person a track running past the last frame.
+            const harvested = await voiceBuffers.harvest(from, to);
 
             // One round trip per person, all in flight together: they are
             // separate files with nothing to say to each other, and the toast
@@ -1817,10 +1849,11 @@ class ClipRecorder {
         const start = end - Math.round(seconds * 1000);
         const markers = this.marks.map(m => (m - start) / 1000).filter(m => m >= 0);
         const voices = voiceActivity.slice(start, end);
+        const chat = chatLog.slice(start, end);
 
-        this.lastSaved = { name: saved, path, blob, mimeType: "video/mp4", markers, voices };
+        this.lastSaved = { name: saved, path, blob, mimeType: "video/mp4", markers, voices, chat };
 
-        await tagSavedClip(path, markers, voices.map(toMeta), undefined, voiceLevelsFrom(readMixer()));
+        await tagSavedClip(path, markers, voices.map(toMeta), undefined, voiceLevelsFrom(readMixer()), chat);
         void writeThumbnail(blob, saved);
 
         /*
@@ -1923,8 +1956,9 @@ class ClipRecorder {
             const gone = total - await clipLength(cut, last.mimeType);
             const markers = shift(last.markers, gone);
             const voices = shiftTracks(last.voices, gone);
+            const chat = shiftChat(last.chat ?? [], gone);
 
-            await tagSavedClip(path, markers, voices.map(toMeta), undefined, voiceLevelsFrom(readMixer()));
+            await tagSavedClip(path, markers, voices.map(toMeta), undefined, voiceLevelsFrom(readMixer()), chat);
             void writeThumbnail(cut, saved);
 
             // Only once the replacement is safely on disk.
@@ -1935,7 +1969,7 @@ class ClipRecorder {
                 logger.warn("Could not remove the untrimmed clip", e);
             }
 
-            this.lastSaved = { name: saved, path, blob: cut, mimeType: last.mimeType, markers, voices };
+            this.lastSaved = { name: saved, path, blob: cut, mimeType: last.mimeType, markers, voices, chat };
             toast(`Kept the last ${Math.round(seconds)}s (${formatBytes(cut.size)})`, Toasts.Type.SUCCESS);
         } catch (e) {
             logger.error("Failed to trim the last clip", e);

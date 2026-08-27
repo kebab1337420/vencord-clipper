@@ -235,6 +235,9 @@ class VoiceActivityBuffer {
     private speaking = new Set<string>();
     private ticker: ReturnType<typeof setInterval> | null = null;
 
+    /** When the speaking set was last checked against the channel members. */
+    private sweptAt = 0;
+
     private onActivity = (userId: string, level: number) => {
         if (typeof userId !== "string" || !Number.isFinite(level)) return;
 
@@ -281,6 +284,7 @@ class VoiceActivityBuffer {
         // A held note is one event, not one per bucket, so the floor a speaking
         // user gets has to be written on a clock rather than on arrival.
         this.ticker = setInterval(() => {
+            this.sweepSpeaking();
             for (const userId of this.speaking) this.write(userId, 0);
             this.forget();
         }, BUCKET_MS);
@@ -310,6 +314,41 @@ class VoiceActivityBuffer {
         this.names.clear();
         this.avatars.clear();
         this.speaking.clear();
+    }
+
+    /**
+     * Drops anyone who left the channel while the dispatch had them speaking.
+     *
+     * SPEAKING only ever says started or stopped, and leaving a call mid-word
+     * sends no stop. Without this the ticker keeps writing that person a floor
+     * for the rest of the session, which both draws a lane for someone who is
+     * not there and pushes a real speaker out of the ten a clip carries.
+     */
+    private sweepSpeaking(): void {
+        if (!this.speaking.size) return;
+
+        const now = Date.now();
+        if (now - this.sweptAt < 1000) return;
+        this.sweptAt = now;
+
+        const channelId = currentVoiceChannel();
+        if (!channelId) {
+            this.speaking.clear();
+            return;
+        }
+
+        let states: Record<string, unknown>;
+        try {
+            states = (VoiceStateStore.getVoiceStatesForChannel(channelId) ?? {}) as Record<string, unknown>;
+        } catch {
+            // The store is the only thing that knows; leave the set alone
+            // rather than silence someone who is still talking.
+            return;
+        }
+
+        for (const userId of this.speaking) {
+            if (!(userId in states)) this.speaking.delete(userId);
+        }
     }
 
     /**

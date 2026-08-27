@@ -251,9 +251,21 @@ class VoiceBuffers {
 
         return new Promise<void>(resolve => {
             let done = false;
+            let timer: ReturnType<typeof setTimeout> | null = null;
+
             const finish = () => {
                 if (done) return;
                 done = true;
+
+                // Both the chunk and the deadline call this, and whichever
+                // arrives first releases the other: a timer left armed keeps
+                // this closure alive until it fires, and the lane keeps a
+                // callback for a flush that is over.
+                if (timer != null) clearTimeout(timer);
+                timer = null;
+
+                if (lane.next === finish) lane.next = null;
+
                 resolve();
             };
 
@@ -265,7 +277,7 @@ class VoiceBuffers {
                 finish();
             }
 
-            setTimeout(finish, FLUSH_MS);
+            if (!done) timer = setTimeout(finish, FLUSH_MS);
         });
     }
 

@@ -23,10 +23,11 @@
  * here, and the render always comes back out in the configured container.
  */
 
-import { type AudioClip, type AudioSource, type Ending, scheduleClips } from "./audio";
+import { type AudioClip, type AudioSource, type DuckCurve, type Ending, scheduleClips, stretchToRate } from "./audio";
+import type { ChatLine } from "./chat";
 import { logger } from "./recorder";
 import { pickMimeType, settings } from "./settings";
-import { speakingAt, voiceDuckAt, type VoiceFileMeta, type VoiceLevels, voiceLevelsTouched, type VoiceTrack } from "./voice";
+import { speakingAt, VOICE_HZ, voiceDuckAt, type VoiceFileMeta, type VoiceLevels, voiceLevelsTouched, type VoiceTrack } from "./voice";
 import { createVoiceBand, type VoiceBand } from "./voiceBand";
 import { type VoiceMix, voiceMixFor } from "./voiceMix";
 
@@ -41,6 +42,14 @@ export interface Effects {
     blur: number;
     /** 1 fills the frame, 1.5 crops a third off each edge. */
     zoom: number;
+    /**
+     * Where the crop sits, 0..1 across and down the frame.
+     *
+     * Absent means the middle, which is where every zoom was before the frame
+     * could be moved: a project saved then must keep looking the way it did.
+     */
+    zoomX?: number;
+    zoomY?: number;
     /** Seconds of fade at the start and end of the segment. */
     fadeIn: number;
     fadeOut: number;
@@ -97,6 +106,13 @@ export interface StudioSource {
     voices?: VoiceTrack[];
     /** The per-person recordings saved beside this file, where it has any. */
     tracks?: VoiceFileMeta[];
+    /**
+     * What the call's chat said while this file was recorded.
+     *
+     * On the file's own clock, like the voice tracks: a montage cut out of
+     * three evenings shows each shot the messages that belong to it.
+     */
+    chat?: ChatLine[];
 }
 
 export interface Segment {
@@ -119,6 +135,66 @@ export interface Segment {
      */
     pitch?: boolean;
     effects: Effects;
+    /**
+     * A framing that moves over the take: the punch-in on the kill, the slow
+     * push on the reaction.
+     *
+     * In source seconds rather than project seconds, so a segment survives
+     * being split, trimmed or sped up with its moves still pointing at the
+     * frames they were set on. Absent, or shorter than two keys, means the
+     * still framing in `effects` is used for the whole segment.
+     */
+    moves?: ZoomKey[];
+    /**
+     * Seconds of dissolve from the segment before this one. 0, or absent, cuts.
+     *
+     * What is dissolved is the frame the previous segment ended on, held as a
+     * still - not two takes playing at once. The render has one element per
+     * source and moves it from one segment to the next, so a real overlap would
+     * mean loading the file twice and seeking both; over the third of a second
+     * a dissolve lasts, a held frame reads the same. It also covers the seek
+     * between two segments, which used to paint black.
+     */
+    transition?: number;
+    /**
+     * Crop the source to the output's shape instead of letterboxing it.
+     *
+     * What a phone reframe is made of: a 16:9 shot in a 9:16 frame is either
+     * two thirds black bars or a crop, and the crop is the one anybody wants.
+     * Where in the picture the crop sits is the framing - `effects.zoomX` and
+     * `zoomY`, or the moving keys - so a tracked reframe is this plus keys.
+     */
+    fill?: boolean;
+    /**
+     * The other people's clips of this same moment, played alongside this one.
+     *
+     * Only the picture: the angles are silent, because two recordings of one
+     * call played together is an echo, and the one this segment points at is
+     * the one whose sound was chosen. `offset` is where their file sits against
+     * this one - the number the alignment works out, or a hand-set nudge.
+     */
+    angles?: Angle[];
+    /** How the angles share the frame. Absent is the grid. */
+    layout?: AngleLayout;
+}
+
+export interface Angle {
+    sourceId: string;
+    /** Seconds to add to this segment's clock to reach the same instant there. */
+    offset: number;
+}
+
+export type AngleLayout = "grid" | "pip";
+
+/** One framing, held at an instant of the source. */
+export interface ZoomKey {
+    /** Source seconds. */
+    at: number;
+    /** 1 fills the frame, 2 crops half of it away. */
+    zoom: number;
+    /** Centre of the crop, 0..1 across and down the frame. */
+    x: number;
+    y: number;
 }
 
 /**
@@ -271,6 +347,18 @@ export interface Project {
     voiceLevels?: VoiceLevels;
     /** Draw the avatar of whoever is talking in the corner of the frame. */
     showSpeakers?: boolean;
+    /** Burn the call's chat into the picture, where the clips carry any. */
+    showChat?: boolean;
+    /**
+     * Whether the sound lane steps aside while somebody talks.
+     *
+     * Off by default, and absent on every project saved before it existed: a
+     * montage that already had its bed level set by hand must not have it moved
+     * underneath by an update.
+     */
+    duckMusic?: boolean;
+    /** How far and how fast, when it does. Absent means the defaults. */
+    duck?: DuckSettings;
 }
 
 interface RenderOptions {
@@ -464,6 +552,453 @@ export function keepRange(project: Project, from: number, to: number): Project {
     return cutRange(cutRange(project, end, projectLength(project)), 0, start);
 }
 
+/*
+ * Cutting the montage down to the parts somebody is talking over.
+ *
+ * A clip carries one activity lane per person, five samples a second, which is
+ * exactly the question this asks: was anyone speaking here. So the dead minute
+ * between two rounds does not have to be found by hand and marked on the ruler
+ * - it is already written down, and the cut is a walk over it.
+ *
+ * A take with no lanes at all is left alone rather than treated as silent: no
+ * data is not the same answer as nobody spoke, and the second reading would
+ * quietly delete a montage cut from imported footage.
+ */
+export interface SilenceOptions {
+    /** Shortest gap worth removing, in project seconds. */
+    minimum: number;
+    /** Kept at each end of a gap, so a word is not clipped off. */
+    padding: number;
+    /** Level under which nobody counts as talking, 0..1. */
+    floor: number;
+}
+
+export const DEFAULT_SILENCE: SilenceOptions = {
+    minimum: 1.5,
+    padding: 0.25,
+    floor: 0.12
+};
+
+/**
+ * The stretches of the montage nobody is talking over, in project time.
+ *
+ * Muted people do not hold a gap open: `speakingAt` reads the project's own
+ * per-person levels, so somebody turned down to zero is somebody who, as far as
+ * the render is concerned, said nothing.
+ */
+export function silentRanges(
+    project: Project,
+    sources: StudioSource[],
+    options: SilenceOptions = DEFAULT_SILENCE
+): { from: number; to: number; }[] {
+    const byId = new Map(sources.map(source => [source.id, source]));
+    const step = 1 / VOICE_HZ;
+    const padding = Math.max(0, options.padding);
+    const minimum = Math.max(0.1, options.minimum);
+
+    const ranges: { from: number; to: number; }[] = [];
+    let elapsed = 0;
+
+    for (const segment of project.segments) {
+        const length = segmentLength(segment);
+        const head = elapsed;
+        elapsed += length;
+
+        const voices = byId.get(segment.sourceId)?.voices ?? [];
+        if (!voices.length || length <= 0) continue;
+
+        const speed = rate(segment.speed);
+
+        // Source seconds in, project seconds out: the gap is measured on the
+        // file and removed from the timeline.
+        const toProject = (at: number) => head + (at - segment.from) / speed;
+
+        let quiet = -1;
+
+        const close = (until: number) => {
+            if (quiet < 0) return;
+
+            const from = toProject(Math.min(until, quiet + padding));
+            const to = toProject(Math.max(quiet, until - padding));
+            quiet = -1;
+
+            if (to - from >= minimum) ranges.push({ from, to });
+        };
+
+        for (let at = segment.from; at < segment.to; at += step) {
+            if (speakingAt(voices, project.voiceLevels, at, options.floor).length) close(at);
+            else if (quiet < 0) quiet = at;
+        }
+
+        close(segment.to);
+    }
+
+    // A gap that runs over a cut is one gap: the two segments are played back
+    // to back, and leaving the seam in would keep a fraction of a second of
+    // nothing on either side of it.
+    const merged: { from: number; to: number; }[] = [];
+    for (const range of ranges) {
+        const last = merged[merged.length - 1];
+
+        if (last && range.from - last.to < step) last.to = range.to;
+        else merged.push({ ...range });
+    }
+
+    return merged;
+}
+
+/**
+ * The montage with its dead air taken out.
+ *
+ * The ranges are removed from the end backwards, so each one is still at the
+ * project time it was measured at when its turn comes.
+ */
+export function cutSilence(
+    project: Project,
+    sources: StudioSource[],
+    options: SilenceOptions = DEFAULT_SILENCE
+): { project: Project; removed: number; ranges: number; } {
+    const found = silentRanges(project, sources, options);
+
+    let next = project;
+    let removed = 0;
+    let ranges = 0;
+
+    for (let i = found.length - 1; i >= 0; i--) {
+        const { from, to } = found[i];
+        const after = cutRange(next, from, to);
+        if (after === next) continue;
+
+        // The last thing on the timeline being silence would leave the montage
+        // with no segments at all; a montage that is nothing but silence is a
+        // montage the user did not mean to empty.
+        if (!after.segments.length) continue;
+
+        next = after;
+        removed += to - from;
+        ranges++;
+    }
+
+    return { project: next, removed, ranges };
+}
+
+/** The segment a project time falls in, and where inside its source it lands. */
+export function sourceAt(project: Project, at: number): { segment: Segment; seconds: number; } | null {
+    let elapsed = 0;
+
+    for (const segment of project.segments) {
+        const length = segmentLength(segment);
+
+        if (at < elapsed + length || segment === project.segments[project.segments.length - 1]) {
+            return { segment, seconds: segment.from + Math.max(0, at - elapsed) * rate(segment.speed) };
+        }
+
+        elapsed += length;
+    }
+
+    return null;
+}
+
+/*
+ * The music steps aside while somebody talks.
+ *
+ * A bed at a level that sits nicely under a quiet stretch buries the call the
+ * moment the call gets going, and the usual repair - riding the sound lane's
+ * gain by hand - is the part of editing nobody does. The activity lanes already
+ * say when there was speech, to a fifth of a second, so the curve can be built
+ * from them.
+ */
+export interface DuckSettings {
+    /** What is left of the sound lane while somebody talks, 0..1. */
+    depth: number;
+    /** Seconds taken to move down, and to come back up. */
+    attack: number;
+    release: number;
+}
+
+export const DEFAULT_DUCK: DuckSettings = {
+    depth: 0.3,
+    attack: 0.2,
+    release: 0.5
+};
+
+export function duckSettingsOf(project: Project): DuckSettings {
+    const held = project.duck;
+
+    return {
+        depth: Math.min(1, Math.max(0, held?.depth ?? DEFAULT_DUCK.depth)),
+        attack: Math.min(3, Math.max(0.05, held?.attack ?? DEFAULT_DUCK.attack)),
+        release: Math.min(5, Math.max(0.05, held?.release ?? DEFAULT_DUCK.release))
+    };
+}
+
+/**
+ * The sound lane's gain over `[from, to]`, following the voices.
+ *
+ * Null when the montage carries no activity at all over that stretch, so the
+ * caller can leave the graph alone rather than hang a flat gain on it.
+ */
+export function speechDuck(project: Project, sources: StudioSource[], from: number, to: number): DuckCurve | null {
+    if (!project.duckMusic || to <= from) return null;
+
+    const byId = new Map(sources.map(source => [source.id, source]));
+    const { depth, attack, release } = duckSettingsOf(project);
+
+    const hz = VOICE_HZ;
+    const step = 1 / hz;
+    const count = Math.ceil((to - from) * hz) + 1;
+    if (count <= 1) return null;
+
+    const talking = new Uint8Array(count);
+    let any = false;
+
+    for (let i = 0; i < count; i++) {
+        const found = sourceAt(project, from + i * step);
+        if (!found) continue;
+
+        const voices = byId.get(found.segment.sourceId)?.voices;
+        if (!voices?.length) continue;
+
+        if (speakingAt(voices, project.voiceLevels, found.seconds).length) {
+            talking[i] = 1;
+            any = true;
+        }
+    }
+
+    if (!any) return null;
+
+    /*
+     * The duck lands before the word and lets go after it.
+     *
+     * Ramping only once the level has already arrived means the first syllable
+     * is the one buried, and coming back up between two words is the pumping
+     * every automatic duck is judged on. So the mask is widened by the attack
+     * on the way in and the release on the way out before anything is ramped.
+     */
+    const ahead = Math.round(attack * hz);
+    const behind = Math.round(release * hz);
+    const wide = new Uint8Array(count);
+
+    for (let i = 0; i < count; i++) {
+        if (!talking[i]) continue;
+
+        for (let j = Math.max(0, i - ahead); j <= Math.min(count - 1, i + behind); j++) wide[j] = 1;
+    }
+
+    const gains = new Float32Array(count);
+    const down = step / attack;
+    const up = step / release;
+
+    let level = wide[0] ? depth : 1;
+
+    for (let i = 0; i < count; i++) {
+        const target = wide[i] ? depth : 1;
+
+        if (target < level) level = Math.max(target, level - down);
+        else if (target > level) level = Math.min(target, level + up);
+
+        gains[i] = level;
+    }
+
+    return { from, hz, gains };
+}
+
+/**
+ * Moves the cuts onto the nearest beat of a music bed.
+ *
+ * Only the seams move, and only by a fraction of a second: the shots keep their
+ * content, they just land where the track does. Everything else on the timeline
+ * moves with the picture, or the captions written against a frame would end up
+ * a beat away from it - everything except the bed being snapped to, which is
+ * the grid and therefore the one thing that has to hold still.
+ *
+ * `beats` are in the bed's own seconds; `clip` says where it sits on the
+ * montage, so a track dropped a minute in is read a minute in.
+ */
+export function snapToBeats(project: Project, clip: AudioClip, beats: number[], tolerance = 0.35): { project: Project; moved: number; } {
+    if (project.segments.length < 2 || !beats.length) return { project, moved: 0 };
+
+    // The bed's own seconds put on the montage's clock, and only the part of it
+    // that is actually played.
+    const grid = beats
+        .filter(at => at >= clip.from && at <= clip.to)
+        .map(at => clip.at + (at - clip.from));
+
+    if (!grid.length) return { project, moved: 0 };
+
+    const segments = project.segments.map(segment => ({ ...segment }));
+    const shifts: { at: number; delta: number; }[] = [];
+
+    let elapsed = 0;
+    let moved = 0;
+
+    for (let i = 0; i < segments.length - 1; i++) {
+        const segment = segments[i];
+        const length = segmentLength(segment);
+        const seam = elapsed + length;
+
+        let nearest = grid[0];
+        for (const beat of grid) {
+            if (Math.abs(beat - seam) < Math.abs(nearest - seam)) nearest = beat;
+        }
+
+        const delta = nearest - seam;
+        const speed = rate(segment.speed);
+
+        // A seam that would have to travel further than the tolerance is a seam
+        // the beat has nothing to say about, and one that would leave a shot
+        // shorter than a fifth of a second is not worth having.
+        if (!delta || Math.abs(delta) > tolerance || length + delta < 0.2) {
+            elapsed = seam;
+            continue;
+        }
+
+        segment.to += delta * speed;
+        shifts.push({ at: seam, delta });
+
+        elapsed = seam + delta;
+        moved++;
+    }
+
+    if (!moved) return { project, moved: 0 };
+
+    /*
+     * Every seam a time sits after moves it, because the seams were measured on
+     * the untouched timeline and each one slides everything behind it.
+     */
+    const move = (at: number): number => {
+        let out = at;
+        for (const shift of shifts) {
+            if (at > shift.at) out += shift.delta;
+        }
+        return out;
+    };
+
+    const captions = project.captions.map(caption => ({ ...caption, from: move(caption.from), to: move(caption.to) }));
+    const overlays = (project.overlays ?? []).map(o => ({ ...o, from: move(o.from), to: move(o.to) }));
+    const audioClips = (project.audioClips ?? []).map(c => c.id === clip.id ? c : { ...c, at: move(c.at) });
+
+    return { project: { ...project, segments, captions, overlays, audioClips }, moved };
+}
+
+/** One clip offered to the auto-montage, with what was marked in it. */
+export interface MontagePick {
+    sourceId: string;
+    /** Playable range of the file, as it was probed. */
+    from: number;
+    to: number;
+    /** Marker times, in the file's own clock. */
+    markers: number[];
+}
+
+export interface MontageOptions {
+    /** Seconds kept before a marker and after it. */
+    lead: number;
+    tail: number;
+    /** Length to aim for. Moments are dropped to fit it, never trimmed. */
+    target: number;
+    /** Dissolve laid between the moments. */
+    dissolve: number;
+}
+
+export const DEFAULT_MONTAGE: MontageOptions = { lead: 6, tail: 4, target: 120, dissolve: 0.5 };
+
+/** The shortest moment worth keeping, once the file's own edges have cut it. */
+const MOMENT_FLOOR = 2;
+
+/**
+ * Builds a montage out of what was marked across an evening's clips.
+ *
+ * A marker says a moment happened, not how long it lasted, so each one becomes
+ * a window: enough lead to see what caused it and enough tail to see the
+ * reaction. Markers that land close together in the same clip are one window
+ * rather than three overlapping copies of the same shout.
+ *
+ * The evening is usually far longer than anybody wants to watch, so the
+ * windows are taken clip by clip in turn until the target is reached. Round
+ * robin rather than in order, because taking them in order would spend the
+ * whole budget inside the first clip and leave the rest of the night out.
+ */
+export function bestOf(picks: MontagePick[], options: Partial<MontageOptions> = {}): Segment[] {
+    const { lead, tail, target, dissolve } = { ...DEFAULT_MONTAGE, ...options };
+
+    /** Windows per clip, in the order they happened. */
+    const perClip: { sourceId: string; from: number; to: number; }[][] = [];
+
+    for (const pick of picks) {
+        const marks = pick.markers
+            .filter(at => Number.isFinite(at) && at > pick.from && at < pick.to)
+            .sort((a, b) => a - b);
+
+        const windows: { sourceId: string; from: number; to: number; }[] = [];
+
+        for (const at of marks) {
+            const from = Math.max(pick.from, at - lead);
+            const to = Math.min(pick.to, at + tail);
+            const last = windows[windows.length - 1];
+
+            if (last && from <= last.to) {
+                last.to = Math.max(last.to, to);
+                continue;
+            }
+
+            windows.push({ sourceId: pick.sourceId, from, to });
+        }
+
+        const kept = windows.filter(w => w.to - w.from >= MOMENT_FLOOR);
+        if (kept.length) perClip.push(kept);
+    }
+
+    if (!perClip.length) return [];
+
+    const taken: { sourceId: string; from: number; to: number; }[] = [];
+    const cursors = perClip.map(() => 0);
+    let length = 0;
+
+    for (let round = 0; ; round++) {
+        let offered = false;
+
+        for (let clip = 0; clip < perClip.length; clip++) {
+            const next = perClip[clip][cursors[clip]];
+            if (!next) continue;
+
+            offered = true;
+            cursors[clip]++;
+
+            // The first window of each clip goes in whatever the budget says,
+            // so a montage always shows every clip it was offered.
+            if (round > 0 && length + (next.to - next.from) > target) continue;
+
+            taken.push(next);
+            length += next.to - next.from;
+        }
+
+        if (!offered) break;
+    }
+
+    if (!taken.length) return [];
+
+    // Back into the order they happened: the round robin picked what to keep,
+    // it is not the order anybody wants to watch them in.
+    const order = new Map(picks.map((pick, i) => [pick.sourceId, i]));
+    taken.sort((a, b) => (order.get(a.sourceId) ?? 0) - (order.get(b.sourceId) ?? 0) || a.from - b.from);
+
+    return taken.map((window, i) => ({
+        id: newId(),
+        sourceId: window.sourceId,
+        from: window.from,
+        to: window.to,
+        speed: 1,
+        volume: 1,
+        effects: {
+            ...DEFAULT_EFFECTS,
+            fadeIn: i === 0 ? 0.6 : 0,
+            fadeOut: i === taken.length - 1 ? 0.8 : 0
+        },
+        ...(i > 0 && dissolve > 0 ? { transition: dissolve } : {})
+    }));
+}
+
 function filterFor(effects: Effects): string {
     const parts: string[] = [];
 
@@ -484,15 +1019,268 @@ function filterFor(effects: Effects): string {
  * the zoom crops into the source instead of scaling the drawing, which keeps the
  * letterboxing untouched.
  */
-function fitted(video: HTMLVideoElement, width: number, height: number, zoom: number) {
+/**
+ * A framing eased between its two nearest keys.
+ *
+ * Smoothstep rather than a straight line: a linear zoom starts and stops dead,
+ * which reads as a camera being yanked. This one leaves and arrives at rest,
+ * which is what a push looks like when somebody does it on purpose.
+ */
+function ease(ratio: number): number {
+    const t = Math.min(1, Math.max(0, ratio));
+    return t * t * (3 - 2 * t);
+}
+
+export function framingAt(segment: Segment, seconds: number): { zoom: number; x: number; y: number; } {
+    const still = {
+        zoom: Math.max(1, segment.effects.zoom),
+        x: segment.effects.zoomX ?? 0.5,
+        y: segment.effects.zoomY ?? 0.5
+    };
+
+    const { moves } = segment;
+    if (!moves || moves.length < 2) return still;
+
+    // The keys are kept in order by whoever adds one, and sorting on every
+    // painted frame is the one thing this must not do.
+    if (seconds <= moves[0].at) return { zoom: Math.max(1, moves[0].zoom), x: moves[0].x, y: moves[0].y };
+
+    for (let i = 1; i < moves.length; i++) {
+        const key = moves[i];
+        if (seconds > key.at) continue;
+
+        const previous = moves[i - 1];
+        const span = key.at - previous.at;
+        const ratio = span > 0 ? ease((seconds - previous.at) / span) : 1;
+
+        return {
+            zoom: Math.max(1, previous.zoom + (key.zoom - previous.zoom) * ratio),
+            x: previous.x + (key.x - previous.x) * ratio,
+            y: previous.y + (key.y - previous.y) * ratio
+        };
+    }
+
+    const last = moves[moves.length - 1];
+    return { zoom: Math.max(1, last.zoom), x: last.x, y: last.y };
+}
+
+/** A punch-in on each of `marks` that falls inside the segment. */
+export function punchIn(segment: Segment, marks: number[], zoom = 1.5): ZoomKey[] {
+    const still = { x: segment.effects.zoomX ?? 0.5, y: segment.effects.zoomY ?? 0.5 };
+    const base = Math.max(1, segment.effects.zoom);
+    const keys: ZoomKey[] = [];
+
+    // A marker is dropped once the moment has been seen, so the push starts
+    // before it and holds through what follows rather than landing on it.
+    const LEAD = 0.6;
+    const HOLD = 1.6;
+    const OUT = 0.8;
+
+    /*
+     * The windows are worked out first, and only then turned into keys.
+     *
+     * Two markers a second apart are one moment, not two: pushed in and pulled
+     * out for each of them the shot would bounce, so anything close enough that
+     * the camera would not have finished leaving is held as one longer push.
+     */
+    const windows: { from: number; to: number; }[] = [];
+
+    for (const at of [...marks].sort((a, b) => a - b)) {
+        if (at <= segment.from || at >= segment.to) continue;
+
+        const opens = Math.max(segment.from, at - LEAD);
+        const closes = Math.min(segment.to, at + HOLD);
+        if (closes - opens < 0.3) continue;
+
+        const last = windows[windows.length - 1];
+
+        if (last && opens <= last.to + OUT + LEAD) last.to = Math.max(last.to, closes);
+        else windows.push({ from: opens, to: closes });
+    }
+
+    for (const window of windows) {
+        keys.push({ at: window.from, zoom: base, ...still });
+        keys.push({ at: Math.min(window.to, window.from + LEAD), zoom, ...still });
+        keys.push({ at: window.to, zoom, ...still });
+        keys.push({ at: Math.min(segment.to, window.to + OUT), zoom: base, ...still });
+    }
+
+    return keys;
+}
+
+/** The 9:16 width for an output of this height, rounded to an even number. */
+export function verticalWidth(height: number): number {
+    return Math.max(2, Math.round(height * 9 / 16 / 2) * 2);
+}
+
+/**
+ * Turns the montage into something worth posting from a phone.
+ *
+ * The output turns 9:16 and every shot is told to fill it rather than sit in
+ * bars. Where each shot is cropped is left alone: a segment that was already
+ * framed by hand, or tracked, keeps that framing, and one that was not gets the
+ * middle of the picture - which is where a game puts its crosshair anyway.
+ */
+export function reframeVertical(project: Project): Project {
+    const width = verticalWidth(project.height);
+
+    return {
+        ...project,
+        width,
+        segments: project.segments.map(segment => segment.fill ? segment : { ...segment, fill: true })
+    };
+}
+
+/** How often the tracker looks at the picture, in seconds. */
+const TRACK_STEP = 0.5;
+
+/** Motion under this share of the frame is noise, and the crop holds still. */
+const TRACK_FLOOR = 0.004;
+
+/** How fast the crop is allowed to follow, as a share of the gap per sample. */
+const TRACK_EASE = 0.3;
+
+/** Width of the picture the tracker actually looks at. */
+const TRACK_COLUMNS = 96;
+const TRACK_ROWS = 54;
+
+export interface TrackOptions {
+    /** Shape of the output, width over height. */
+    aspect: number;
+    /** Called with 0..1 as the segment is walked, for a progress note. */
+    onProgress?(done: number): void;
+}
+
+/**
+ * Follows the action across a shot and hands back the framing to crop with.
+ *
+ * No model and no object detection: what a crop needs to know is where things
+ * are changing, which is a frame difference. The picture is read at a size
+ * where a whole shot can be walked in a few seconds, each sample is compared
+ * with the one before it, and the centre of mass of what moved is where the
+ * crop wants to be.
+ *
+ * The result is eased rather than followed exactly, because a crop that snaps
+ * to every muzzle flash is unwatchable, and it is clamped so the window never
+ * leaves the picture. A still shot - a menu, a loading screen - moves nothing,
+ * so it holds where it was instead of drifting to the middle of the noise.
+ *
+ * The element is left wherever the walk finished; the caller owns it and knows
+ * where it should go back to.
+ */
+export async function trackAction(video: HTMLVideoElement, segment: Segment, options: TrackOptions): Promise<ZoomKey[]> {
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!vw || !vh) return [];
+
+    // How wide the crop is, as a share of the picture. Nothing to track when
+    // the output is as wide as the source: there is nowhere for it to sit.
+    const share = Math.min(1, (vh * options.aspect) / vw);
+    if (share >= 0.995) return [];
+
+    const half = share / 2;
+    const slack = 1 - share;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = TRACK_COLUMNS;
+    canvas.height = TRACK_ROWS;
+
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return [];
+
+    const length = Math.max(0, segment.to - segment.from);
+    const samples = Math.min(600, Math.floor(length / TRACK_STEP));
+    if (samples < 2) return [];
+
+    const keys: ZoomKey[] = [];
+    const y = segment.effects.zoomY ?? 0.5;
+
+    let previous: Uint8ClampedArray | null = null;
+
+    // Starts in the middle rather than on the first frame's noise.
+    let centre = 0.5;
+
+    for (let i = 0; i <= samples; i++) {
+        const at = Math.min(segment.to, segment.from + i * TRACK_STEP);
+
+        try {
+            await seekTo(video, at);
+            ctx.drawImage(video, 0, 0, TRACK_COLUMNS, TRACK_ROWS);
+        } catch (e) {
+            logger.warn("Could not read a frame while tracking the action", e);
+            break;
+        }
+
+        const { data } = ctx.getImageData(0, 0, TRACK_COLUMNS, TRACK_ROWS);
+
+        if (previous) {
+            const columns = new Float32Array(TRACK_COLUMNS);
+            let total = 0;
+
+            for (let row = 0; row < TRACK_ROWS; row++) {
+                for (let column = 0; column < TRACK_COLUMNS; column++) {
+                    const at4 = (row * TRACK_COLUMNS + column) * 4;
+
+                    // Green alone: it carries most of the luminance and costs a
+                    // third of what reading all three channels would.
+                    const moved = Math.abs(data[at4 + 1] - previous[at4 + 1]);
+                    if (moved < 12) continue;
+
+                    columns[column] += moved;
+                    total += moved;
+                }
+            }
+
+            const busy = total / (TRACK_COLUMNS * TRACK_ROWS * 255);
+
+            if (busy > TRACK_FLOOR) {
+                let weighted = 0;
+                for (let column = 0; column < TRACK_COLUMNS; column++) {
+                    weighted += columns[column] * ((column + 0.5) / TRACK_COLUMNS);
+                }
+
+                centre += (weighted / total - centre) * TRACK_EASE;
+            }
+        }
+
+        previous = data;
+
+        // The centre of the action put back into the crop's own coordinates,
+        // where 0 is the window against the left edge and 1 against the right.
+        const x = Math.min(1, Math.max(0, (centre - half) / slack));
+
+        keys.push({ at, zoom: Math.max(1, segment.effects.zoom), x, y });
+        options.onProgress?.(i / samples);
+    }
+
+    return keys.length > 1 ? keys : [];
+}
+
+function fitted(video: HTMLVideoElement, width: number, height: number, zoom: number, x = 0.5, y = 0.5, fill = false) {
     const vw = video.videoWidth || width;
     const vh = video.videoHeight || height;
 
     const crop = Math.max(1, zoom);
-    const sw = vw / crop;
-    const sh = vh / crop;
-    const sx = (vw - sw) / 2;
-    const sy = (vh - sh) / 2;
+    let sw = vw / crop;
+    let sh = vh / crop;
+
+    /*
+     * Filling narrows the read rather than widening the write.
+     *
+     * Taking the output's shape out of the middle of what the zoom already
+     * chose keeps the two controls apart: the zoom says how much of the frame
+     * is kept, this says what shape it is kept in, and the framing says where.
+     * The result lands on the canvas edge to edge, so there are no bars.
+     */
+    if (fill) {
+        const want = width / height;
+
+        if (sw / sh > want) sw = sh * want;
+        else sh = sw / want;
+    }
+
+    const sx = (vw - sw) * Math.min(1, Math.max(0, x));
+    const sy = (vh - sh) * Math.min(1, Math.max(0, y));
 
     const scale = Math.min(width / sw, height / sh);
     const dw = sw * scale;
@@ -823,6 +1611,187 @@ function drawSpeakers(ctx: CanvasRenderingContext2D, width: number, height: numb
     ctx.restore();
 }
 
+/** How long a message stays on screen after it was sent. */
+const CHAT_HOLD = 9;
+
+/** How many lines are shown at once. Past this it is a wall of text. */
+const CHAT_LINES = 4;
+
+/**
+ * Draws the call's chat down the bottom-left corner, as it arrived.
+ *
+ * The messages are laid out the way they were read at the time: newest at the
+ * bottom, each one fading out as it ages past the hold. Wrapped by hand rather
+ * than clipped, because a message cut off mid-word is worse than no message.
+ */
+function drawChat(ctx: CanvasRenderingContext2D, width: number, height: number, chat: ChatLine[], seconds: number): void {
+    const live = chat.filter(line => line.at <= seconds && seconds - line.at <= CHAT_HOLD).slice(-CHAT_LINES);
+    if (!live.length) return;
+
+    const font = Math.max(11, Math.round(height * 0.026));
+    const pad = Math.round(height * 0.028);
+    const lead = Math.round(font * 1.35);
+    const box = Math.min(width * 0.42, width - pad * 2);
+
+    ctx.save();
+    ctx.filter = "none";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+
+    /** Every line of every message, top to bottom, so the stack can be measured. */
+    const rows: { name: string; text: string; age: number; }[] = [];
+
+    for (const line of live) {
+        ctx.font = `600 ${font}px "gg sans", "Segoe UI", system-ui, sans-serif`;
+        const lead0 = ctx.measureText(`${line.name} `).width;
+
+        ctx.font = `400 ${font}px "gg sans", "Segoe UI", system-ui, sans-serif`;
+
+        const words = line.text.split(" ");
+        const age = (seconds - line.at) / CHAT_HOLD;
+
+        let current = "";
+        let room = box - lead0;
+        let first = true;
+
+        for (const word of words) {
+            const next = current ? `${current} ${word}` : word;
+
+            if (ctx.measureText(next).width <= room || !current) {
+                current = next;
+                continue;
+            }
+
+            rows.push({ name: first ? line.name : "", text: current, age });
+            first = false;
+            current = word;
+            room = box;
+        }
+
+        if (current || first) rows.push({ name: first ? line.name : "", text: current, age });
+    }
+
+    const shown = rows.slice(-CHAT_LINES * 2);
+    let y = height - pad - (shown.length - 1) * lead;
+
+    for (const row of shown) {
+        // The last second of the hold is a fade rather than a message that
+        // simply vanishes between two frames.
+        ctx.globalAlpha = Math.min(1, Math.max(0, (1 - row.age) * 6));
+
+        let x = pad;
+
+        if (row.name) {
+            ctx.font = `600 ${font}px "gg sans", "Segoe UI", system-ui, sans-serif`;
+            ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+            ctx.fillText(row.name, x + 1, y + 1);
+            ctx.fillStyle = "#c9cdfb";
+            ctx.fillText(row.name, x, y);
+            x += ctx.measureText(`${row.name} `).width;
+        }
+
+        ctx.font = `400 ${font}px "gg sans", "Segoe UI", system-ui, sans-serif`;
+        ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+        ctx.fillText(row.text, x + 1, y + 1);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(row.text, x, y);
+
+        y += lead;
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
+}
+
+/** A rectangle on the output canvas. */
+interface Box { x: number; y: number; w: number; h: number; }
+
+/** The gutter between two angles, as a share of the frame's short side. */
+const CELL_GAP = 0.006;
+
+/**
+ * Splits the frame between the angles being shown at once.
+ *
+ * Two go side by side in a wide output and one above the other in a tall one,
+ * which is the only arrangement that leaves either of them worth looking at;
+ * three or four fall into quarters. The order is the order they were added, so
+ * the shot the segment points at is always the first cell.
+ */
+function angleCells(width: number, height: number, count: number): Box[] {
+    const wide = width >= height;
+    const columns = wide ? Math.min(count, count <= 2 ? count : 2) : Math.ceil(count / Math.min(count, 2));
+    const rows = Math.ceil(count / columns);
+
+    const gap = Math.round(Math.min(width, height) * CELL_GAP);
+    const w = (width - gap * (columns - 1)) / columns;
+    const h = (height - gap * (rows - 1)) / rows;
+
+    const cells: Box[] = [];
+
+    for (let i = 0; i < count; i++) {
+        const column = i % columns;
+        const row = Math.floor(i / columns);
+
+        // A last row with a hole in it is centred rather than left aligned: a
+        // three-up montage with a gap in the corner reads as a missing angle.
+        const inRow = Math.min(columns, count - row * columns);
+        const indent = (columns - inRow) * (w + gap) / 2;
+
+        cells.push({ x: indent + column * (w + gap), y: row * (h + gap), w, h });
+    }
+
+    return cells;
+}
+
+/**
+ * Draws a whole element into a box, cropped to fill it.
+ *
+ * Bars inside a cell would be bars inside a frame that already has cells in it,
+ * so the picture is cropped instead: the middle of an angle is what somebody
+ * pointed their camera at.
+ */
+function drawCover(ctx: CanvasRenderingContext2D, video: HTMLVideoElement, box: Box, x = 0.5, y = 0.5, flip = false): void {
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!vw || !vh) return;
+
+    const want = box.w / box.h;
+
+    let sw = vw;
+    let sh = vh;
+
+    if (vw / vh > want) sw = vh * want;
+    else sh = vw / want;
+
+    const sx = (vw - sw) * Math.min(1, Math.max(0, x));
+    const sy = (vh - sh) * Math.min(1, Math.max(0, y));
+
+    if (flip) {
+        ctx.save();
+        ctx.translate(box.x * 2 + box.w, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, sx, sy, sw, sh, box.x, box.y, box.w, box.h);
+        ctx.restore();
+        return;
+    }
+
+    ctx.drawImage(video, sx, sy, sw, sh, box.x, box.y, box.w, box.h);
+}
+
+/** Where the small angles sit when they are laid over the main one. */
+function pipBoxes(width: number, height: number, count: number): Box[] {
+    const w = width * 0.26;
+    const h = w * 9 / 16;
+    const pad = Math.round(Math.min(width, height) * 0.025);
+
+    return Array.from({ length: count }, (unused, i) => ({
+        x: width - pad - w,
+        y: pad + i * (h + pad * 0.6),
+        w,
+        h
+    }));
+}
+
 /** What the frame under the playhead is, beyond the pixels the element holds. */
 export interface Frame {
     segment: Segment;
@@ -838,6 +1807,13 @@ export interface Frame {
     voiceLevels?: VoiceLevels;
     avatars?: AvatarCache;
     showSpeakers?: boolean;
+    /** The chat of the file under the playhead, on the file's own clock. */
+    chat?: ChatLine[];
+    /** The other angles of this moment, already seeked and playing. */
+    angles?: HTMLVideoElement[];
+    layout?: AngleLayout;
+    /** The previous segment's last frame, faded out over the first seconds. */
+    dissolve?: { image: CanvasImageSource; seconds: number; };
 }
 
 /**
@@ -869,16 +1845,45 @@ export function paintFrame(ctx: CanvasRenderingContext2D, video: HTMLVideoElemen
     ctx.globalAlpha = Math.min(1, Math.max(0, alpha));
     ctx.filter = filterFor(effects);
 
-    const box = fitted(video, width, height, effects.zoom);
+    const framing = framingAt(segment, video.currentTime);
 
-    if (effects.flip) {
-        ctx.save();
-        ctx.translate(width, 0);
-        ctx.scale(-1, 1);
-        ctx.drawImage(video, box.sx, box.sy, box.sw, box.sh, width - box.dx - box.dw, box.dy, box.dw, box.dh);
-        ctx.restore();
+    // Only the angles that have a picture to give: one that failed to load
+    // must not leave a black cell where a face should be.
+    const angles = (frame.angles ?? []).filter(other => other.videoWidth).slice(0, 3);
+
+    if (angles.length && frame.layout !== "pip") {
+        const cells = angleCells(width, height, angles.length + 1);
+
+        drawCover(ctx, video, cells[0], framing.x, framing.y, effects.flip);
+        angles.forEach((other, i) => drawCover(ctx, other, cells[i + 1]));
     } else {
-        ctx.drawImage(video, box.sx, box.sy, box.sw, box.sh, box.dx, box.dy, box.dw, box.dh);
+        const box = fitted(video, width, height, framing.zoom, framing.x, framing.y, segment.fill === true);
+
+        if (effects.flip) {
+            ctx.save();
+            ctx.translate(width, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, box.sx, box.sy, box.sw, box.sh, width - box.dx - box.dw, box.dy, box.dw, box.dh);
+            ctx.restore();
+        } else {
+            ctx.drawImage(video, box.sx, box.sy, box.sw, box.sh, box.dx, box.dy, box.dw, box.dh);
+        }
+
+        if (angles.length) {
+            const boxes = pipBoxes(width, height, angles.length);
+
+            angles.forEach((other, i) => {
+                const at = boxes[i];
+
+                drawCover(ctx, other, at);
+
+                // A hairline so a dark angle over a dark frame still reads as
+                // a second picture rather than as a smudge.
+                ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
+                ctx.lineWidth = Math.max(1, Math.round(height * 0.002));
+                ctx.strokeRect(at.x, at.y, at.w, at.h);
+            });
+        }
     }
 
     const now = startsAt + played / rate(segment.speed);
@@ -915,6 +1920,29 @@ export function paintFrame(ctx: CanvasRenderingContext2D, video: HTMLVideoElemen
      */
     if (frame.showSpeakers && frame.voices?.length) {
         drawSpeakers(ctx, width, height, speakingAt(frame.voices, frame.voiceLevels, video.currentTime), frame.avatars);
+    }
+
+    // Same clock as the badges, and for the same reason: a message was sent at
+    // a moment in the file, whatever the montage did with that moment.
+    if (frame.chat?.length) drawChat(ctx, width, height, frame.chat, video.currentTime);
+
+    /*
+     * The previous segment goes out over the top of this one.
+     *
+     * Painted last so it covers the captions and the badges as well: a
+     * dissolve where the text of the outgoing shot vanished a third of a second
+     * before the picture did would read as a glitch, not as a transition.
+     */
+    const { dissolve } = frame;
+    if (dissolve && dissolve.seconds > 0) {
+        const into = now - startsAt;
+
+        if (into < dissolve.seconds) {
+            ctx.filter = "none";
+            ctx.globalAlpha = Math.min(1, Math.max(0, 1 - into / dissolve.seconds));
+            ctx.drawImage(dissolve.image, 0, 0, width, height);
+            ctx.globalAlpha = 1;
+        }
     }
 }
 
@@ -1216,6 +2244,12 @@ function setGain(ctx: AudioContext, gain: GainNode, value: number): void {
  */
 async function loadSources(project: Project, sources: StudioSource[], ctx: AudioContext, dest: MediaStreamAudioDestinationNode): Promise<Map<string, Loaded>> {
     const needed = new Set(project.segments.map(s => s.sourceId));
+
+    // The angles are played alongside their segment, so their files have to be
+    // open too - silently: only the segment's own source reaches the mix.
+    for (const segment of project.segments) {
+        for (const angle of segment.angles ?? []) needed.add(angle.sourceId);
+    }
     const loaded = new Map<string, Loaded>();
 
     try {
@@ -1317,6 +2351,8 @@ export async function renderProject(project: Project, sources: StudioSource[], o
     clips.push(...fromOverlays.clips);
 
     const voicesBySource = new Map(sources.filter(s => s.voices?.length).map(s => [s.id, s.voices!]));
+    const chatBySource = new Map(sources.filter(s => s.chat?.length).map(s => [s.id, s.chat!]));
+    const showChat = project.showChat === true && chatBySource.size > 0;
     const showSpeakers = project.showSpeakers !== false && voicesBySource.size > 0;
     const ducking = voiceLevelsTouched(project.voiceLevels) && voicesBySource.size > 0;
 
@@ -1408,7 +2444,30 @@ export async function renderProject(project: Project, sources: StudioSource[], o
     let frame = 0;
     let started = false;
 
-    const draw = () => paintFrame(ctx, current?.video ?? null, width, height, current?.frame ?? null);
+    /*
+     * The frame the outgoing segment ended on, kept for the cut.
+     *
+     * Seeking the next source takes long enough to see, and the canvas painted
+     * black through all of it - one dark flash per cut, recorded into the file.
+     * Holding the last frame instead is both what a dissolve needs and what the
+     * seek should have been showing all along.
+     */
+    const hold = document.createElement("canvas");
+    hold.width = width;
+    hold.height = height;
+
+    const holdCtx = hold.getContext("2d");
+    let holding = false;
+
+    const draw = () => {
+        if (!current) {
+            if (holding) ctx.drawImage(hold, 0, 0);
+            else paintFrame(ctx, null, width, height, null);
+            return;
+        }
+
+        paintFrame(ctx, current.video, width, height, current.frame);
+    };
 
     /*
      * The capture stream only takes one frame per output frame, so painting on
@@ -1439,8 +2498,43 @@ export async function renderProject(project: Project, sources: StudioSource[], o
 
             const { video, gain, band } = entry;
 
+            // Whatever is on the canvas now is the previous segment's last
+            // frame, and it stays up until this one has something to show.
+            if (holdCtx && started) {
+                try {
+                    holdCtx.drawImage(canvas, 0, 0);
+                    holding = true;
+                } catch {
+                    // A canvas that will not copy is a black cut, as before.
+                    holding = false;
+                }
+            }
+
             current = null;
             await seekTo(video, segment.from);
+
+            /*
+             * The other angles of this moment, put on this segment's clock.
+             *
+             * Each one was recorded on its own client and starts whenever that
+             * buffer did, so the offset is what makes them the same instant.
+             * A source that is also the segment's own is skipped: one element
+             * cannot be in two places, and it is already showing this shot.
+             */
+            const angles: HTMLVideoElement[] = [];
+
+            for (const angle of (segment.angles ?? []).slice(0, 3)) {
+                const other = loaded.get(angle.sourceId);
+                if (!other || other.video === video) continue;
+
+                try {
+                    await seekTo(other.video, Math.max(0, segment.from + angle.offset));
+                    other.video.playbackRate = rate(segment.speed);
+                    angles.push(other.video);
+                } catch (e) {
+                    logger.warn("Could not line up an angle, leaving it out of this shot", e);
+                }
+            }
 
             // Set before the rate: Chromium reads it when the rate changes.
             (video as HTMLVideoElement & { preservesPitch?: boolean; }).preservesPitch = segment.pitch !== false;
@@ -1479,7 +2573,12 @@ export async function renderProject(project: Project, sources: StudioSource[], o
                     voices,
                     voiceLevels: project.voiceLevels,
                     avatars,
-                    showSpeakers
+                    showSpeakers,
+                    ...(showChat ? { chat: chatBySource.get(segment.sourceId) ?? [] } : {}),
+                    ...(angles.length ? { angles, layout: segment.layout ?? "grid" } : {}),
+                    ...(holding && segment.transition ? {
+                        dissolve: { image: hold, seconds: Math.min(3, Math.max(0, segment.transition)) }
+                    } : {})
                 }
             };
 
@@ -1495,6 +2594,10 @@ export async function renderProject(project: Project, sources: StudioSource[], o
             }
 
             await video.play();
+
+            // Started after the main one, which is the frame the render is
+            // driven by: an angle that stalls must not hold up the shot.
+            for (const other of angles) void other.play().catch(() => void 0);
 
             /*
              * The sounds of this stretch are scheduled once playback is actually
@@ -1519,11 +2622,27 @@ export async function renderProject(project: Project, sources: StudioSource[], o
                     voiceBand = createVoiceBand(audioCtx);
                     voiceBand.output.connect(voiceGain);
 
+                    /*
+                     * The element's own `preservesPitch` says nothing here: the
+                     * sound is coming off the graph, where the only speed
+                     * control shifts the pitch with it. So the buffer is
+                     * stretched to the length the speed asks for and played at
+                     * an ordinary rate, and the offset moves onto its clock.
+                     */
+                    const speed = rate(segment.speed);
+                    const buffer = segment.pitch !== false
+                        ? stretchToRate(audioCtx, mix!.buffer, speed)
+                        : mix!.buffer;
+
+                    // The stretch declines at ordinary speeds, and gives up
+                    // rather than fail; either way the rate carries the speed.
+                    const kept = buffer !== mix!.buffer;
+
                     voiceSource = audioCtx.createBufferSource();
-                    voiceSource.buffer = mix!.buffer;
-                    voiceSource.playbackRate.value = rate(segment.speed);
+                    voiceSource.buffer = buffer;
+                    voiceSource.playbackRate.value = kept ? 1 : speed;
                     voiceSource.connect(voiceBand.input);
-                    voiceSource.start(audioCtx.currentTime, Math.max(0, video.currentTime));
+                    voiceSource.start(audioCtx.currentTime, Math.max(0, kept ? video.currentTime / speed : video.currentTime));
                 } catch (e) {
                     // Whatever went wrong, the one outcome that is not allowed
                     // is a segment with no sound at all: the element goes back
@@ -1546,7 +2665,8 @@ export async function renderProject(project: Project, sources: StudioSource[], o
             const stopSounds = clips.length
                 ? scheduleClips(
                     audioCtx, dest, clips, sounds, audioCtx.currentTime, elapsed, elapsed + length,
-                    last ? projectEnding(project) : undefined
+                    last ? projectEnding(project) : undefined,
+                    speechDuck(project, sources, elapsed, elapsed + length)
                 )
                 : null;
 
@@ -1639,6 +2759,7 @@ export async function renderProject(project: Project, sources: StudioSource[], o
             }
 
             video.pause();
+            for (const other of angles) other.pause();
             setGain(audioCtx, gain, 0);
             elapsed += length;
         }

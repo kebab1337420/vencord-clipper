@@ -33,6 +33,9 @@ const logger = new Logger("Clipper");
 /** How long each container is given to produce bytes. */
 const RUN_MS = 600;
 
+/** How long a stopped encoder is given to hand over what it still holds. */
+const CLOSE_MS = 1000;
+
 interface EncoderReport {
     mimeType: string;
     ok: boolean;
@@ -123,18 +126,52 @@ function runOne(stream: MediaStream, mimeType: string): Promise<EncoderReport> {
         }
 
         let settled = false;
+        let reported = false;
+        let closing: ReturnType<typeof setTimeout> | undefined;
+
+        const report = (reason?: string) => {
+            if (reported) return;
+            reported = true;
+
+            clearTimeout(timer);
+            clearTimeout(closing);
+
+            resolve({ mimeType, ok: !reason && bytes > 0, bytes, reason: reason ?? (bytes ? undefined : "produced no bytes") });
+        };
+
+        /*
+         * The verdict waits for the encoder to finish closing its file.
+         *
+         * Some containers only hand over anything at all on the stop - they
+         * hold the whole run and write it out when they know how long it was -
+         * and answering at the timer instead would mark those as producing no
+         * bytes and have the buffer skip a container that works. It is also
+         * what makes the probe sequential in fact and not just in intent: the
+         * next encoder opens on the same capture, and opening it while the
+         * previous one is still flushing is the thing this file is written to
+         * avoid.
+         */
         const finish = (reason?: string) => {
             if (settled) return;
             settled = true;
 
             clearTimeout(timer);
-            try {
-                if (recorder.state !== "inactive") recorder.stop();
-            } catch {
-                // An encoder that has already given up throws on being stopped.
+
+            if (recorder.state === "inactive") {
+                report(reason);
+                return;
             }
 
-            resolve({ mimeType, ok: !reason && bytes > 0, bytes, reason: reason ?? (bytes ? undefined : "produced no bytes") });
+            recorder.onstop = () => report(reason);
+            closing = setTimeout(() => report(reason), CLOSE_MS);
+
+            try {
+                recorder.stop();
+            } catch {
+                // An encoder that has already given up throws on being stopped,
+                // and will not be firing onstop either.
+                report(reason);
+            }
         };
 
         recorder.ondataavailable = e => { bytes += e.data.size; };

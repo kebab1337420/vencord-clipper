@@ -311,7 +311,20 @@ export function renameClip(_: IpcMainInvokeEvent, dir: string, name: string, nex
     // typed, which is the entire point of the operation.
     if (!wanted) throw new Error("That name cannot be used. Keep it under 120 characters, with letters, digits, spaces or - _ . + ( ) [ ]");
 
-    const to = freePath(target, wanted);
+    // The clip is already called this: nothing to do, and going on would find
+    // the clip itself in the way and file it as "name (2).ext".
+    if (wanted === current) return current;
+
+    /*
+     * A rename that only changes the case is still a rename.
+     *
+     * Windows and macOS both answer that the destination exists - it is the
+     * same file - so the free-name search would step around it in exactly the
+     * case where stepping around it is wrong.
+     */
+    const sameFile = wanted.toLowerCase() === current.toLowerCase();
+    const to = sameFile ? join(target, wanted) : freePath(target, wanted);
+
     renameSync(from, to);
 
     // The thumbnail is found by the clip's name, so it has to follow it.

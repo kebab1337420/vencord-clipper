@@ -399,6 +399,7 @@ function studioPage(clip: StudioClip, look: StudioLook): string {
     el.video.addEventListener("loadedmetadata", function () {
         length = isFinite(el.video.duration) ? el.video.duration : 0;
         outAt = length;
+        drawMarks();
         draw();
         el.card.classList.add("up");
     });
@@ -463,11 +464,18 @@ function studioPage(clip: StudioClip, look: StudioLook): string {
         draw();
     });
 
-    for (var i = 0; i < clip.markers.length; i++) {
-        var mark = document.createElement("div");
-        mark.className = "mark";
-        mark.style.left = percent(clip.markers[i]);
-        el.marks.appendChild(mark);
+    function drawMarks() {
+        el.marks.textContent = "";
+        if (!(length > 0)) return;
+
+        for (var i = 0; i < clip.markers.length; i++) {
+            if (clip.markers[i] < 0 || clip.markers[i] > length) continue;
+
+            var mark = document.createElement("div");
+            mark.className = "mark";
+            mark.style.left = percent(clip.markers[i]);
+            el.marks.appendChild(mark);
+        }
     }
 
     /* --------------------------------------------------------- the buttons */

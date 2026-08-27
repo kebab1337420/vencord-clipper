@@ -1492,13 +1492,17 @@ class ClipRecorder {
             const voices = voiceActivity.slice(start, end);
             const said = chatLog.slice(start, end);
 
-            // Cluster timecodes are absolute, so the kept ones still carry the
-            // time elapsed since the buffer started: without this the clip
-            // claims to last as long as the whole session.
-            // One read of the buffer, and everything after it works on those
-            // same bytes: the repair, the measurement of what it dropped, the
-            // call muxed back in, the write. A clip is hundreds of megabytes,
-            // and each of those steps used to copy the whole of it again.
+            /*
+             * One read of the buffer, and everything after it works on those
+             * same bytes: the repair, the measurement of what it dropped, the
+             * call muxed back in, the write. A clip is hundreds of megabytes,
+             * and each of those steps used to copy the whole of it again.
+             *
+             * The repair is what the read is for. Cluster timecodes are
+             * absolute, so the chunks that were kept still carry the time
+             * elapsed since the buffer started: without it the clip claims to
+             * last as long as the whole session.
+             */
             let bytes: Uint8Array<ArrayBufferLike> = new Uint8Array(await raw.arrayBuffer());
             let cutOff = 0;
 

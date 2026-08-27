@@ -54,27 +54,9 @@ export function repairBytes(data: Uint8Array, mimeType: string): Uint8Array | nu
 /**
  * Cuts a clip down to a range, losslessly, on the nearest keyframe boundary.
  *
- * Returns the original blob when the container is not one this understands or
- * when the range already covers the whole clip, so the caller can hand the
- * result straight to a writer either way.
- */
-export async function trimClip(blob: Blob, mimeType: string, from: number, to: number): Promise<Blob> {
-    const parser = parserFor(mimeType);
-    if (!parser || !(to > from)) return blob;
-
-    const cut = trimBytes(new Uint8Array(await blob.arrayBuffer()), mimeType, from, to);
-
-    return cut ? new Blob([cut as any], { type: mimeType }) : blob;
-}
-
-/**
- * The same cut, on bytes that are already in hand.
- *
- * Reading a clip out of the library hands over a `Uint8Array`, and writing one
- * back takes a `Uint8Array`: going through a `Blob` in between copies the whole
- * clip twice for nothing, which for a few hundred megabytes is worth avoiding.
  * Null means the container is not one this understands, or that the range
- * already covers the whole clip.
+ * already covers the whole clip, so a caller holding the original can keep it
+ * rather than being handed a copy of what it already has.
  */
 export function trimBytes(data: Uint8Array, mimeType: string, from: number, to: number): Uint8Array | null {
     const parser = parserFor(mimeType);

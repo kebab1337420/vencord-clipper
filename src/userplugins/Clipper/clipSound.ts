@@ -157,7 +157,11 @@ async function read(path: string): Promise<AudioBuffer | null> {
     try {
         const bytes = await Native.readAudioFile(path);
 
-        return await context().decodeAudioData(bytes.buffer as ArrayBuffer);
+        // Exactly the span the read handed over: decodeAudioData detaches the
+        // buffer it is given, and a view is not always the whole of one.
+        const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+
+        return await context().decodeAudioData(data);
     } catch (e) {
         logger.warn(`Could not load the clip sound at ${path}; using the built-in one`, e);
 

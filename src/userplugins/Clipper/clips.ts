@@ -48,8 +48,10 @@ export async function listClips(): Promise<StoredClip[]> {
 export async function loadClipUrl(name: string): Promise<string> {
     const data = await Native.readClip(settings.store.saveDirectory, name);
 
-    // The IPC copy is a plain Uint8Array; hand its buffer to the Blob directly.
-    return URL.createObjectURL(new Blob([data.buffer as ArrayBuffer], { type: typeOfClip(name) }));
+    // The view rather than the buffer behind it: a Uint8Array is not always
+    // the whole of what it sits on, and a Blob given the buffer would take
+    // everything around it too.
+    return URL.createObjectURL(new Blob([data as BlobPart], { type: typeOfClip(name) }));
 }
 
 /** Media type a clip's name implies. WebM is the fallback, as it always was. */
@@ -71,7 +73,7 @@ export function typeOfClip(name: string): string {
 export async function loadClipFile(name: string): Promise<File> {
     const data = await Native.readClip(settings.store.saveDirectory, name);
 
-    return new File([data.buffer as ArrayBuffer], name, { type: typeOfClip(name) });
+    return new File([data as BlobPart], name, { type: typeOfClip(name) });
 }
 
 /**
@@ -86,7 +88,7 @@ export async function loadThumbUrl(clip: StoredClip): Promise<string | null> {
 
     try {
         const data = await Native.readClip(settings.store.saveDirectory, clip.thumb);
-        return URL.createObjectURL(new Blob([data.buffer as ArrayBuffer], { type: "image/jpeg" }));
+        return URL.createObjectURL(new Blob([data as BlobPart], { type: "image/jpeg" }));
     } catch (e) {
         logger.warn("Could not read a clip thumbnail", e);
         return null;
@@ -233,7 +235,7 @@ export async function loadVideoFile(path: string): Promise<{ name: string; url: 
     const name = path.split(/[\\/]/).pop() || "video";
     const type = IMPORT_TYPES[name.split(".").pop()?.toLowerCase() ?? ""] ?? "video/mp4";
 
-    return { name, url: URL.createObjectURL(new Blob([data.buffer as ArrayBuffer], { type })) };
+    return { name, url: URL.createObjectURL(new Blob([data as BlobPart], { type })) };
 }
 
 /** Opens the OS picker for sounds to lay over a montage. */
@@ -272,9 +274,11 @@ export async function loadAudioFile(path: string): Promise<{ name: string; url: 
     const name = path.split(/[\\/]/).pop() || "sound";
     const type = SOUND_TYPES[name.split(".").pop()?.toLowerCase() ?? ""] ?? "audio/mpeg";
 
-    // One copy, shared: the Blob keeps the bytes alive for the URL while the
-    // decoder gets the same buffer.
-    const data = bytes.buffer as ArrayBuffer;
+    // One buffer, shared: the Blob keeps the bytes alive for the URL while the
+    // decoder gets the same ones. Exactly the span the read handed over rather
+    // than whatever the view sits on, and its own buffer either way, because
+    // decodeAudioData detaches what it is given.
+    const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 
     return { name, url: URL.createObjectURL(new Blob([data], { type })), data };
 }
@@ -315,7 +319,7 @@ export async function loadImageFile(path: string): Promise<{ name: string; url: 
     const name = path.split(/[\\/]/).pop() || "picture";
     const type = IMAGE_TYPES[name.split(".").pop()?.toLowerCase() ?? ""] ?? "image/png";
 
-    return { name, url: URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type })) };
+    return { name, url: URL.createObjectURL(new Blob([bytes as BlobPart], { type })) };
 }
 
 /** `clip-....webm` becomes `clip-....-edit.webm` for a studio render. */

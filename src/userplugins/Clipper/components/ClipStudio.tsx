@@ -65,7 +65,7 @@ import {
     UNCATEGORISED
 } from "../library";
 import { logger } from "../recorder";
-import { trimClip } from "../repair";
+import { trimBytes } from "../repair";
 import { sendClipFitted } from "../send";
 import { Container, extensionFor, pickMimeType } from "../settings";
 import {
@@ -3297,8 +3297,9 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
             const voices = lanesRef.current;
 
             const now = performance.now();
+            const at = video?.currentTime ?? -1;
             const still = video?.paused !== false
-                && video?.currentTime === paintedTime
+                && at === paintedTime
                 && live === paintedProject
                 && width === paintedWidth
                 && height === paintedHeight
@@ -3306,7 +3307,7 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
 
             if (!still) {
                 paintedAt = now;
-                paintedTime = video?.currentTime ?? -1;
+                paintedTime = at;
                 paintedProject = live;
                 paintedWidth = width;
                 paintedHeight = height;
@@ -3815,12 +3816,12 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         if (project.width && project.width !== (from.width || (await probeFile(from.url)).width)) return null;
 
         const type = typeOfClip(from.name);
-        const whole = await (await fetch(from.url)).blob();
-        const cut = await trimClip(whole, type, only.from, only.to);
+        const whole = new Uint8Array(await (await fetch(from.url)).arrayBuffer());
+        const cut = trimBytes(whole, type, only.from, only.to);
 
-        // Same blob back: the parser found nothing to remove, which for a
-        // segment that starts at zero and runs to the end is the right answer.
-        return { blob: new Blob([cut], { type }), name: from.name };
+        // Nothing back: the parser found nothing to remove, which for a segment
+        // that starts at zero and runs to the end is the right answer.
+        return { blob: new Blob([(cut ?? whole) as BlobPart], { type }), name: from.name };
     };
 
     const onExport = async () => {

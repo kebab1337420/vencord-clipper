@@ -21,10 +21,10 @@
 import { getCurrentChannel } from "@utils/discord";
 import { DraftType, Toasts, UploadHandler } from "@webpack/common";
 
-import { CLIPS_AVAILABLE, loadClipFile, typeOfClip } from "./clips";
+import { CLIPS_AVAILABLE, loadClipFile, readClipBytes, typeOfClip } from "./clips";
 import { clipToGif, type GifRequest, saveGif } from "./gifExport";
 import { logger } from "./recorder";
-import { trimClip } from "./repair";
+import { trimBytes } from "./repair";
 import { shrinkVideo } from "./shrink";
 import { formatBytes } from "./utils";
 
@@ -74,18 +74,18 @@ export async function sendClipRange(name: string, from: number, to: number): Pro
     }
 
     try {
-        const file = await loadClipFile(name);
         const type = typeOfClip(name);
-        const cut = await trimClip(file, type, from, to);
+        const data = await readClipBytes(name);
+        const cut = trimBytes(data, type, from, to);
 
-        // Same blob back: the range covers the clip, or this container is not
-        // one the parser knows. Either way the whole file is the right answer.
-        if (cut === file) return attach(file);
+        // Nothing back: the range covers the clip, or this container is not one
+        // the parser knows. Either way the whole file is the right answer.
+        if (!cut) return attach(new File([data as BlobPart], name, { type }));
 
         const stem = name.replace(/\.[^.]+$/, "");
         const extension = name.split(".").pop() || "webm";
 
-        return attach(new File([cut], `${stem}-cut.${extension}`, { type }));
+        return attach(new File([cut as BlobPart], `${stem}-cut.${extension}`, { type }));
     } catch (e) {
         logger.error("Could not attach the selection", e);
         toast("Could not read that clip", Toasts.Type.FAILURE);

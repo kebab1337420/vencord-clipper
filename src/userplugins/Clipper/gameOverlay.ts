@@ -256,6 +256,13 @@ async function pump(mine: number): Promise<void> {
 
         if (mine !== generation) return;
 
+        // The editor takes itself down a moment after an answer that says so,
+        // and there is nothing left to poll for once it has.
+        if (outcome.close) {
+            stopPump();
+            return;
+        }
+
         // A cut replaces the file the editor was showing, so it reopens on what
         // is now there rather than on a name that no longer exists.
         if (outcome.next) await openClipEditor(outcome.next);

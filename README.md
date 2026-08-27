@@ -2,7 +2,10 @@
 
 Free clipping plugin because i don't want to pay 10 bucks a month for basic features 👍👍👍👍👍👍👍👍👍👍
 Runs a LOT better than alternatives like MidalTV 
-usually takes up a couple % of GPU usage 
+usually takes up a couple % of GPU usage at most
+
+obviously can't really make every single feature possible because it isn't a dedicated app (not really the point of the **plugin** but i might make it a seperated app in the future)
+
 
 ## Features
 

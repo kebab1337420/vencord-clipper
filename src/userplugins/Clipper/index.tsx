@@ -17,6 +17,7 @@ import { createRoot, Toasts } from "@webpack/common";
 import { ClipperChatButton, ClipperIcon } from "./components/ClipperChatButton";
 import { ClipperOverlay } from "./components/ClipperOverlay";
 import { encoderSummary, probeEncoders } from "./encoders";
+import { hideGameOverlay, toggleGameOverlay } from "./gameOverlay";
 import { runShortcut, startGlobalKeybinds, stopGlobalKeybinds, syncGlobalKeybinds } from "./globalKeybinds";
 import { micReport } from "./micInput";
 import { installPovRequests, requestPov, uninstallPovRequests } from "./multipov";
@@ -39,13 +40,14 @@ function onKeyDown(e: KeyboardEvent) {
     // that keystroke belongs to the picker, not to the recorder.
     if (keybindsSuspended()) return;
 
-    const { saveKeybind, toggleKeybind, markKeybind, povKeybind } = settings.store;
+    const { saveKeybind, toggleKeybind, markKeybind, povKeybind, replayKeybind } = settings.store;
 
     for (const [bind, action] of [
         [saveKeybind, "save"],
         [toggleKeybind, "toggle"],
         [markKeybind, "mark"],
-        [povKeybind, "pov"]
+        [povKeybind, "pov"],
+        [replayKeybind, "replay"]
     ] as const) {
         if (!keybindMatches(bind, e)) continue;
 
@@ -74,6 +76,7 @@ const WATCHED: Array<readonly [string, () => void]> = [
     ["toggleKeybind", () => void syncGlobalKeybinds()],
     ["markKeybind", () => void syncGlobalKeybinds()],
     ["povKeybind", () => void syncGlobalKeybinds()],
+    ["replayKeybind", () => void syncGlobalKeybinds()],
     ["globalKeybinds", () => void syncGlobalKeybinds()],
     ["autoHighlight", () => recorder.syncHighlights()]
 ];
@@ -173,6 +176,7 @@ export default definePlugin({
         "Save clip": () => recorder.save(),
         "Drop a marker": () => recorder.mark(),
         "Clip everyone's angle": () => void requestPov(),
+        "Watch the last clip over the game": () => void toggleGameOverlay(),
         "Choose capture source": () => recorder.chooseSource(),
         "Open the clip studio": () => recorder.openStudio(),
         "Check the video encoders": () => {
@@ -248,6 +252,7 @@ export default definePlugin({
         window.removeEventListener("keydown", onKeyDown, true);
         unwatchSettings();
         stopGlobalKeybinds();
+        hideGameOverlay();
         unmountOverlay();
         recorder.stop();
         uninstallVoiceTaps();

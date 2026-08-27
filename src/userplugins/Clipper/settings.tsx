@@ -175,6 +175,44 @@ export const settings = definePluginSettings({
         description: "Show the floating Clipper button above the account panel (left click: pick a source, right click: start / stop / save)",
         default: true
     },
+    overlayNotice: {
+        type: OptionType.BOOLEAN,
+        description: "Say that a clip was saved over the game, for a couple of seconds - a line of text, no video, and clicks go through it. Only while Discord is not the window in front. Watching the clip itself is the keybind below, and never happens on its own",
+        default: true
+    },
+    overlayCorner: {
+        type: OptionType.SELECT,
+        description: "Which corner the notice and the clip appear in, on the screen your pointer is on",
+        options: [
+            { label: "Bottom right", value: "bottom-right", default: true },
+            { label: "Bottom left", value: "bottom-left" },
+            { label: "Top right", value: "top-right" },
+            { label: "Top left", value: "top-left" }
+        ]
+    },
+    overlaySize: {
+        type: OptionType.SELECT,
+        description: "How big the clip window is when you call it up",
+        options: [
+            { label: "Small (320px)", value: "small" },
+            { label: "Medium (420px)", value: "medium", default: true },
+            { label: "Large (560px)", value: "large" }
+        ]
+    },
+    overlaySeconds: {
+        type: OptionType.SLIDER,
+        description: "Seconds of the clip to play, counted back from its end - the moment you saved is the one at the end of the buffer. 0 plays the whole thing",
+        markers: [0, 5, 10, 15, 20, 30, 45, 60],
+        default: 10,
+        stickToMarkers: true
+    },
+    overlayVolume: {
+        type: OptionType.SLIDER,
+        description: "How loud that window is. Muted by default, since the game is already making noise - and a browser only ever allows sound here after a click, so this is a request rather than a promise",
+        markers: [0, 10, 25, 50, 75, 100],
+        default: 0,
+        stickToMarkers: false
+    },
     // Remembered capture source, set from the picker. Hidden from the settings UI.
     sourceId: {
         type: OptionType.CUSTOM,
@@ -243,6 +281,18 @@ export const settings = definePluginSettings({
                 note="Saves your own clip and posts a message in the call's chat asking everyone else running Clipper to save theirs. The message is plain text and says what it does, so the people without the plugin see the same thing you sent."
                 value={settings.store.povKeybind}
                 onChange={v => (settings.store.povKeybind = v)}
+            />
+        )
+    },
+    replayKeybind: {
+        type: OptionType.COMPONENT,
+        default: "alt+F8",
+        component: () => (
+            <KeybindInput
+                title="Watch the last clip keybind"
+                note="Plays the clip you saved last over the game, and takes it down again on a second press. Works from inside a game, like the others."
+                value={settings.store.replayKeybind}
+                onChange={v => (settings.store.replayKeybind = v)}
             />
         )
     },

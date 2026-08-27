@@ -12,11 +12,12 @@
  */
 
 import { createHash } from "crypto";
-import { app, desktopCapturer, dialog, globalShortcut, type IpcMainInvokeEvent, screen, session, shell } from "electron";
+import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, type IpcMainInvokeEvent, screen, session, shell } from "electron";
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { get as httpsGet } from "https";
 import { basename, extname, isAbsolute, join } from "path";
 
+import { canOverlay, hideOverlay, type OverlayCorner, type OverlayLook, overlayUp, showOverlay, showToast } from "./overlayWindow";
 // From utils rather than defined here: the renderer needs the same names and
 // cannot import this module, which pulls in fs and electron. Not re-exported
 // either - every value export of a native module must be an IPC handler.
@@ -536,11 +537,13 @@ interface PlatformInfo {
     wayland: boolean;
     /** Vesktop or a fork, which owns the display-media handler itself. */
     vesktop: boolean;
+    /** Whether a window can be placed over a game here at all. */
+    overlay: boolean;
 }
 
 /** What the renderer cannot tell about the host on its own. */
 export function getPlatformInfo(_: IpcMainInvokeEvent): PlatformInfo {
-    return { platform: process.platform, wayland: IS_WAYLAND, vesktop: IS_VESKTOP_APP };
+    return { platform: process.platform, wayland: IS_WAYLAND, vesktop: IS_VESKTOP_APP, overlay: canOverlay() };
 }
 
 export interface CaptureSource {
@@ -768,7 +771,7 @@ export function disarmDisplayMedia(_?: IpcMainInvokeEvent): void {
  * the timeout expires, which costs nothing while idle and adds no latency when
  * a key is actually pressed.
  */
-type ShortcutAction = "save" | "toggle" | "mark" | "pov";
+type ShortcutAction = "save" | "toggle" | "mark" | "pov" | "replay";
 
 const registered = new Map<ShortcutAction, string>();
 let waiters: Array<(action: ShortcutAction | null) => void> = [];
@@ -862,6 +865,90 @@ export function waitForShortcut(_: IpcMainInvokeEvent, timeoutMs = 30_000): Prom
 
 // Electron keeps OS-level binds alive past the window, so drop them on exit.
 app.on("will-quit", () => unregisterShortcuts());
+
+/*
+ * ------------------------------------------------------- the game overlay ---
+ *
+ * A clip played in a window of its own, above everything else, so it can be
+ * watched without leaving the game, and a line of text saying a clip was
+ * written. ./overlayWindow does the work; what is here is the part that must
+ * not trust the renderer: a clip is named, never pathed, and the look is
+ * clamped to something that fits on a screen.
+ *
+ * The clip only ever goes up because the keybind was pressed. Nothing here is
+ * called on its own after a save: somebody is playing, and a video appearing
+ * unasked in the corner is in the way rather than useful.
+ */
+
+const CORNERS: OverlayCorner[] = ["top-left", "top-right", "bottom-left", "bottom-right"];
+
+function clamp(value: unknown, low: number, high: number, fallback: number): number {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+
+    return Math.min(high, Math.max(low, Math.round(number)));
+}
+
+function safeCorner(corner: unknown): OverlayCorner {
+    return CORNERS.includes(corner as OverlayCorner) ? corner as OverlayCorner : "bottom-right";
+}
+
+function safeLook(look: Partial<OverlayLook> | undefined): OverlayLook {
+    return {
+        corner: safeCorner(look?.corner),
+        width: clamp(look?.width, 200, 1280, 420),
+        volume: clamp(look?.volume, 0, 100, 0),
+        seconds: clamp(look?.seconds, 0, 300, 10)
+    };
+}
+
+/** Cuts a line of text down to something that fits, and onto one line. */
+function safeLine(text: unknown, limit: number): string {
+    return String(text ?? "").replace(/\s+/g, " ").trim().slice(0, limit);
+}
+
+/**
+ * Plays a saved clip over the game.
+ *
+ * Returns false when nothing was shown - a missing file, or a platform that
+ * cannot place a window over a game.
+ */
+export function showClipOverlay(_: IpcMainInvokeEvent, dir: string, name: string, look?: Partial<OverlayLook>): boolean {
+    const safe = clipName(name);
+    if (!safe) return false;
+
+    const path = join(resolveDirectory(dir), safe);
+    if (!existsSync(path)) return false;
+
+    return showOverlay(path, safeLook(look));
+}
+
+/** Takes the overlay down, or puts the clip up when nothing is playing. */
+export function toggleClipOverlay(event: IpcMainInvokeEvent, dir: string, name: string, look?: Partial<OverlayLook>): boolean {
+    if (overlayUp()) {
+        hideOverlay();
+        return false;
+    }
+
+    return showClipOverlay(event, dir, name, look);
+}
+
+/**
+ * Says that a clip was written, for a couple of seconds.
+ *
+ * Nothing is shown while the client is the window in front: the replay card is
+ * already there, and this exists for the moment you cannot see the client.
+ */
+export function notifyClipSaved(_: IpcMainInvokeEvent, title: string, note: string, corner?: string): boolean {
+    if (BrowserWindow.getFocusedWindow()) return false;
+
+    return showToast(safeLine(title, 60), safeLine(note, 90), safeCorner(corner));
+}
+
+/** Takes the overlay down. Does nothing when it is not up. */
+export function hideClipOverlay(_?: IpcMainInvokeEvent): void {
+    hideOverlay();
+}
 
 /*
  * ---------------------------------------------------------------- updates ---

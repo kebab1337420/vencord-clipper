@@ -19,6 +19,7 @@
 import { React, useEffect, useMemo, useRef, useState } from "@webpack/common";
 
 import { CLIPS_AVAILABLE } from "../clips";
+import { hideGameOverlay, notifySaved } from "../gameOverlay";
 import { requestPov } from "../multipov";
 import type { CaptureSource } from "../native";
 import { listCaptureSources, recorder, RecorderState, type SavedClip, setPickerOpener, setStudioOpener } from "../recorder";
@@ -952,6 +953,10 @@ export function ClipperOverlay() {
             if (clip && clip !== shown.current) {
                 shown.current = clip;
                 setReplay(clip);
+
+                // A line of text over the game, where this card cannot be
+                // seen. The clip itself only plays on the keybind.
+                notifySaved(clip.name);
             }
         }
 
@@ -1013,7 +1018,7 @@ export function ClipperOverlay() {
                     clip={replay}
                     onStudio={name => setStudio({ initial: name })}
                     onRefresh={() => { shown.current = recorder.lastClip; setReplay(recorder.lastClip); }}
-                    onClose={() => setReplay(null)}
+                    onClose={() => { hideGameOverlay(); setReplay(null); }}
                 />
             )}
 

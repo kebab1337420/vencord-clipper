@@ -398,7 +398,7 @@ firing it only while Discord is focused.
 
 ## Files
 
-Seventy-one modules, so the full list lives in [`docs/modules.md`](docs/modules.md)
+Seventy-two modules, so the full list lives in [`docs/modules.md`](docs/modules.md)
 with a line about each and a short guide to which one a given problem starts
 from. The shape of it:
 

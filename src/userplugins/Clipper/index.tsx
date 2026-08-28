@@ -28,6 +28,7 @@ import { SYSTEM_CHANNEL } from "./mixer";
 import { installPovRequests, requestPov, uninstallPovRequests } from "./multipov";
 import { logger, recorder } from "./recorder";
 import { settings } from "./settings";
+import { toast } from "./toasts";
 import { checkAtLaunch, checkNow } from "./updater";
 import { isTypingTarget, keybindMatches, keybindsSuspended, parseKeybind } from "./utils";
 import { installVoiceTaps, probeVoiceTaps, uninstallVoiceTaps } from "./voiceTaps";
@@ -211,12 +212,7 @@ export default definePlugin({
                 // did the last time the buffer armed: let the next start try it.
                 if (reports.some(r => r.ok)) recorder.retryEncoders();
 
-                Toasts.show({
-                    id: Toasts.genId(),
-                    message: summary,
-                    type: reports.some(r => r.ok) ? Toasts.Type.MESSAGE : Toasts.Type.FAILURE,
-                    options: { duration: 12000, position: Toasts.Position.BOTTOM }
-                });
+                toast(summary, reports.some(r => r.ok) ? Toasts.Type.MESSAGE : Toasts.Type.FAILURE, 12000);
             })();
         },
         "Check for a new Clipper version": () => void checkNow(),
@@ -238,23 +234,13 @@ export default definePlugin({
 
                 logger.info(`Game watchers\n${report}`);
 
-                Toasts.show({
-                    id: Toasts.genId(),
-                    message: report,
-                    type: Toasts.Type.MESSAGE,
-                    options: { duration: 12000, position: Toasts.Position.BOTTOM }
-                });
+                toast(report, Toasts.Type.MESSAGE, 12000);
             })();
         },
         "Check per-person voice audio": () => {
             const report = probeVoiceTaps();
             logger.info(report);
-            Toasts.show({
-                id: Toasts.genId(),
-                message: report,
-                type: Toasts.Type.MESSAGE,
-                options: { duration: 8000, position: Toasts.Position.BOTTOM }
-            });
+            toast(report, Toasts.Type.MESSAGE, 8000);
         },
         "Check the microphone": () => {
             void (async () => {
@@ -262,12 +248,7 @@ export default definePlugin({
 
                 logger.info(`Microphone check\n${report}`);
 
-                Toasts.show({
-                    id: Toasts.genId(),
-                    message: report,
-                    type: Toasts.Type.MESSAGE,
-                    options: { duration: 12000, position: Toasts.Position.BOTTOM }
-                });
+                toast(report, Toasts.Type.MESSAGE, 12000);
             })();
         }
     },

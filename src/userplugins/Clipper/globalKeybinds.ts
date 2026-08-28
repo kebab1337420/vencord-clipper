@@ -20,6 +20,7 @@ import { toggleGameOverlay } from "./gameOverlay";
 import { requestPov } from "./multipov";
 import { logger, recorder } from "./recorder";
 import { settings } from "./settings";
+import { toast } from "./toasts";
 import { formatKeybind, toAccelerator, watchKeybindSuspension } from "./utils";
 
 const Native = VencordNative.pluginHelpers.Clipper as PluginNative<typeof import("./native")>;
@@ -122,11 +123,7 @@ export async function syncGlobalKeybinds(): Promise<void> {
 
         if (failed.length) {
             logger.warn("Global keybinds refused by the system", failed);
-            Toasts.show({
-                id: Toasts.genId(),
-                message: `Clipper: ${failed.join(", ")} is already taken by another app, it only works while Discord is focused`,
-                type: Toasts.Type.FAILURE
-            });
+            toast(`Clipper: ${failed.join(", ")} is already taken by another app, it only works while Discord is focused`, Toasts.Type.FAILURE);
         }
     } catch (e) {
         logger.warn("Could not register the global keybinds", e);

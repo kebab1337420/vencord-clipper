@@ -27,6 +27,7 @@ import { type AudioClip, type AudioSource, type DuckCurve, type Ending, schedule
 import type { ChatLine } from "./chat";
 import { logger } from "./recorder";
 import { pickMimeType, settings } from "./settings";
+import { seekVideo } from "./utils";
 import { speakingAt, VOICE_HZ, voiceDuckAt, type VoiceFileMeta, type VoiceLevels, voiceLevelsTouched, type VoiceTrack } from "./voice";
 import { createVoiceBand, type VoiceBand } from "./voiceBand";
 import { type VoiceMix, voiceMixFor } from "./voiceMix";
@@ -682,23 +683,6 @@ export function cutSilence(
     return { project: next, removed, ranges };
 }
 
-/** The segment a project time falls in, and where inside its source it lands. */
-function sourceAt(project: Project, at: number): { segment: Segment; seconds: number; } | null {
-    let elapsed = 0;
-
-    for (const segment of project.segments) {
-        const length = segmentLength(segment);
-
-        if (at < elapsed + length || segment === project.segments[project.segments.length - 1]) {
-            return { segment, seconds: segment.from + Math.max(0, at - elapsed) * rate(segment.speed) };
-        }
-
-        elapsed += length;
-    }
-
-    return null;
-}
-
 /*
  * The music steps aside while somebody talks.
  *
@@ -752,14 +736,39 @@ export function speechDuck(project: Project, sources: StudioSource[], from: numb
     const talking = new Uint8Array(count);
     let any = false;
 
-    for (let i = 0; i < count; i++) {
-        const found = sourceAt(project, from + i * step);
-        if (!found) continue;
+    /*
+     * The montage is walked alongside the points rather than searched once per
+     * point.
+     *
+     * Both run forwards, so carrying the segment the last point landed in turns
+     * what was a pass over every segment for every twentieth of a second into
+     * one pass of each. A long montage ducked at this resolution is otherwise
+     * the slowest thing in the render for no reason.
+     */
+    const lengths = project.segments.map(segmentLength);
+    let index = 0;
+    let elapsed = 0;
 
-        const voices = byId.get(found.segment.sourceId)?.voices;
+    for (let i = 0; i < count; i++) {
+        const at = from + i * step;
+
+        // The last segment keeps whatever runs past its end, as the montage's
+        // own clock does: a point beyond the last frame belongs to the shot it
+        // ran off, not to nothing.
+        while (index < project.segments.length - 1 && at >= elapsed + lengths[index]) {
+            elapsed += lengths[index];
+            index++;
+        }
+
+        const segment = project.segments[index];
+        if (!segment) break;
+
+        const voices = byId.get(segment.sourceId)?.voices;
         if (!voices?.length) continue;
 
-        if (speakingAt(voices, project.voiceLevels, found.seconds).length) {
+        const seconds = segment.from + Math.max(0, at - elapsed) * rate(segment.speed);
+
+        if (speakingAt(voices, project.voiceLevels, seconds).length) {
             talking[i] = 1;
             any = true;
         }
@@ -832,10 +841,25 @@ export function snapToBeats(project: Project, clip: AudioClip, beats: number[], 
     let elapsed = 0;
     let moved = 0;
 
+    /*
+     * Where the seams were before any of this ran.
+     *
+     * `elapsed` is the montage being built, so it already carries the shifts
+     * made above it, while everything that gets moved at the end - captions,
+     * overlays, sound beds - is still written on the untouched clock. Recording
+     * a seam in the shifted clock and then comparing an untouched time against
+     * it puts a caption on the wrong side of its own seam by as much as the
+     * shifts above it come to.
+     */
+    let origin = 0;
+
     for (let i = 0; i < segments.length - 1; i++) {
         const segment = segments[i];
         const length = segmentLength(segment);
         const seam = elapsed + length;
+        const untouched = origin + length;
+
+        origin = untouched;
 
         let nearest = grid[0];
         for (const beat of grid) {
@@ -854,7 +878,7 @@ export function snapToBeats(project: Project, clip: AudioClip, beats: number[], 
         }
 
         segment.to += delta * speed;
-        shifts.push({ at: seam, delta });
+        shifts.push({ at: untouched, delta });
 
         elapsed = seam + delta;
         moved++;
@@ -2142,22 +2166,6 @@ export async function loadAvatars(tracks: VoiceTrack[]): Promise<AvatarCache> {
     return cache;
 }
 
-function waitFor(video: HTMLVideoElement, event: string, timeout = 8000): Promise<void> {
-    return new Promise(resolve => {
-        let done = false;
-        const settle = () => {
-            if (done) return;
-            done = true;
-            clearTimeout(timer);
-            video.removeEventListener(event, settle);
-            resolve();
-        };
-
-        const timer = setTimeout(settle, timeout);
-        video.addEventListener(event, settle);
-    });
-}
-
 /**
  * Waits for a source to be decodable, and says so when it is not.
  *
@@ -2199,13 +2207,15 @@ function release(video: HTMLVideoElement) {
     video.load();
 }
 
-async function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
-    const target = Math.max(0, time);
-    if (Math.abs(video.currentTime - target) < 0.02) return;
-
-    const seeked = waitFor(video, "seeked", 5000);
-    video.currentTime = target;
-    await seeked;
+/**
+ * The shared seek, at the tolerances a render needs.
+ *
+ * Tighter than the default because half a frame off is a visibly different
+ * picture here, and more patient because the files being walked are the long
+ * ones rather than the few seconds an export of a still takes.
+ */
+function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
+    return seekVideo(video, Math.max(0, time), { within: 0.02, timeout: 5000 });
 }
 
 interface Loaded {
@@ -2502,7 +2512,15 @@ export async function renderProject(project: Project, sources: StudioSource[], o
 
             const entry = loaded.get(segment.sourceId);
             const length = segmentLength(segment);
-            if (!entry || length <= 0) continue;
+
+            // A segment with nothing to play is still on the montage's clock,
+            // so the walk has to step over it rather than stand still: leaving
+            // `elapsed` behind would put every sound and caption after it that
+            // much early, and would end the render short of the whole.
+            if (!entry || length <= 0) {
+                elapsed += length;
+                continue;
+            }
 
             const { video, gain, band } = entry;
 

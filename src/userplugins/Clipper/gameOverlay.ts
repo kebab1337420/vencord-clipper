@@ -33,6 +33,7 @@ import type { OverlayCorner } from "./overlayWindow";
 import { logger, recorder } from "./recorder";
 import { settings } from "./settings";
 import type { StudioAction } from "./studioOverlay";
+import { toast } from "./toasts";
 import { formatKeybind } from "./utils";
 
 const Native = VencordNative.pluginHelpers.Clipper as PluginNative<typeof import("./native")>;
@@ -73,21 +74,13 @@ function warnOnce(message: string): void {
     warned = true;
 
     logger.warn(message);
-    Toasts.show({
-        id: Toasts.genId(),
-        message: `Clipper: ${message}`,
-        type: Toasts.Type.FAILURE
-    });
+    toast(`Clipper: ${message}`, Toasts.Type.FAILURE);
 }
 
 const UNSUPPORTED = "the game overlay needs Windows, macOS or X11 - it cannot place a window over anything here";
 
 function nothingSaved(): void {
-    Toasts.show({
-        id: Toasts.genId(),
-        message: "Clipper: no clip has been saved yet",
-        type: Toasts.Type.MESSAGE
-    });
+    toast("Clipper: no clip has been saved yet", Toasts.Type.MESSAGE);
 }
 
 /** Plays a clip over whatever is on screen. Asked for, never offered. */

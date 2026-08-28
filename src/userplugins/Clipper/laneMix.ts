@@ -745,9 +745,11 @@ async function decodeInto(
 
     const { bed, bedOffset, raw } = found;
 
+    // Two at the least: a curve of one point is refused by the audio graph,
+    // and a clip short enough to land there is one envelope step long.
     const points = bed
-        ? Math.max(1, Math.ceil((bedOffset + bed.duration) * ENV_HZ))
-        : Math.max(1, ...raw.map(lane => Math.ceil((lane.offset + lane.buffer.duration) * ENV_HZ)));
+        ? Math.max(2, Math.ceil((bedOffset + bed.duration) * ENV_HZ))
+        : Math.max(2, ...raw.map(lane => Math.ceil((lane.offset + lane.buffer.duration) * ENV_HZ)));
 
     const { lanes, bedEnvelope } = prepare(bed, bedOffset, raw, points);
 
@@ -878,9 +880,9 @@ async function render(
             let end = i;
             while (end + 1 < points && busy[end + 1]) end++;
 
-            let held = 0;
-            for (let j = i; j <= end; j++) held = Math.max(held, notch[j]);
-            for (let j = i; j <= end; j++) notch[j] = held;
+            let peak = 0;
+            for (let j = i; j <= end; j++) peak = Math.max(peak, notch[j]);
+            for (let j = i; j <= end; j++) notch[j] = peak;
 
             i = end;
         }

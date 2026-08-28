@@ -26,6 +26,7 @@ import type { CaptureSource } from "../native";
 import { listCaptureSources, recorder, RecorderState, type SavedClip, setPickerOpener, setStudioOpener } from "../recorder";
 import { sendClipFitted, sendClipGif } from "../send";
 import { Container, settings } from "../settings";
+import { toast } from "../toasts";
 import { formatBytes } from "../utils";
 import { BufferPreview } from "./BufferPreview";
 import { ClipStudio, STUDIO_CSS } from "./ClipStudio";
@@ -1130,11 +1131,7 @@ export function ClipperOverlay() {
                     noop
                     onError={() => {
                         setStudio(null);
-                        Toasts.show({
-                            id: Toasts.genId(),
-                            message: "The studio hit an error and closed. Your timeline was kept - open it again to carry on.",
-                            type: Toasts.Type.FAILURE
-                        });
+                        toast("The studio hit an error and closed. Your timeline was kept - open it again to carry on.", Toasts.Type.FAILURE);
                     }}
                 >
                     <ClipStudio initial={studio.initial} onClose={() => setStudio(null)} />

@@ -32,7 +32,7 @@ window that shows the same controls over a full-screen game.
 
 | File | Lines | What it is |
 | --- | --- | --- |
-| `index.tsx` | 315 | The plugin definition: what starts, what stops, and where the overlay root is mounted. |
+| `index.tsx` | 296 | The plugin definition: what starts, what stops, and where the overlay root is mounted. |
 | `native.ts` | 1431 | The main process half. Path safety, size caps and every file, `ffmpeg` and keybind operation the renderer asks for. |
 | `settings.tsx` | 453 | The settings the user sees, and their defaults. |
 
@@ -49,7 +49,7 @@ Everything that produces bytes while nothing is being edited.
 | `clipSound.ts` | 238 | The sound the plugin makes when a clip is saved. |
 | `encoders.ts` | 205 | Asking the browser which codecs it will actually accept, rather than assuming. |
 | `game.ts` | 90 | What is being played and when that changes, which is what names a clip. |
-| `nativeClips.ts` | 1162 | Discord's own clip recorder: reading its clips, its metadata and its folder. |
+| `nativeClips.ts` | 1149 | Discord's own clip recorder: reading its clips, its metadata and its folder. |
 
 ## What is a moment
 
@@ -79,7 +79,7 @@ message, only a file that will not open — and it is the part the tests cover.
 | `webm.ts` | 388 | The same repair for WebM, for the encoders that only offer it. |
 | `mux.ts` | 757 | Putting the plugin's picture and the engine's separate audio tracks into one file. |
 | `nativeTracks.ts` | 343 | Pulling one person's audio track out of a native clip. |
-| `laneMix.ts` | 1187 | Rebuilding a clip out of its separate tracks, with each person at the level asked for. |
+| `laneMix.ts` | 1189 | Rebuilding a clip out of its separate tracks, with each person at the level asked for. |
 | `repair.ts` | 78 | Picks the repair that suits the container and gets out of the way. |
 | `shrink.ts` | 253 | Making a clip small enough for the channel's upload limit. |
 | `gif.ts` | 435 | GIF89a, written by hand, because no encoder here produces one. |
@@ -91,7 +91,7 @@ message, only a file that will not open — and it is the part the tests cover.
 | File | Lines | What it is |
 | --- | --- | --- |
 | `components/ClipStudio.tsx` | 6094 | The editor itself: the timeline, every panel, and every keystroke. The largest file here by a distance. |
-| `studio.ts` | 2829 | The render engine. Draws the project to a canvas in real time and records it. |
+| `studio.ts` | 2847 | The render engine. Draws the project to a canvas in real time and records it. |
 | `assets.ts` | 168 | The shelf of sounds and pictures kept between sessions. |
 | `audio.ts` | 593 | Sounds laid on the timeline: decoding, waveforms and playback. |
 | `mixer.ts` | 181 | The mixer model the settings and the studio share. |
@@ -105,7 +105,7 @@ message, only a file that will not open — and it is the part the tests cover.
 
 | File | Lines | What it is |
 | --- | --- | --- |
-| `components/ClipperOverlay.tsx` | 1145 | Everything mounted in the plugin's own React root: the button, the replay card, the studio's mount point. |
+| `components/ClipperOverlay.tsx` | 1142 | Everything mounted in the plugin's own React root: the button, the replay card, the studio's mount point. |
 | `components/ReplayCard.tsx` | 139 | The clip that was just saved, playing straight back. |
 | `components/BufferPreview.tsx` | 218 | Watching the buffer before deciding to write it. |
 | `components/VoicePanel.tsx` | 225 | One channel per person in the call. |
@@ -175,10 +175,10 @@ The always-on-top window, and the two files that decide what it draws.
 | File | Lines | What it is |
 | --- | --- | --- |
 | `overlayWindow.ts` | 389 | The window itself and what the plugin draws in it. |
-| `gameOverlay.ts` | 298 | The renderer's side: what to show, and what came back. |
+| `gameOverlay.ts` | 291 | The renderer's side: what to show, and what came back. |
 | `studioOverlay.ts` | 608 | The cutting room, over the game. |
 | `overlayEdit.ts` | 149 | Carrying out what the overlay editor asked for. |
-| `globalKeybinds.ts` | 167 | System-wide keybinds, which only work from the main process. |
+| `globalKeybinds.ts` | 164 | System-wide keybinds, which only work from the main process. |
 
 ## The call, the library, and everything else
 
@@ -193,7 +193,7 @@ The always-on-top window, and the two files that decide what it draws.
 | `library.ts` | 408 | Clip metadata and categories. |
 | `send.ts` | 160 | Sending a clip to the channel that is open. |
 | `updater.ts` | 269 | Checking for a new version and installing it. |
-| `utils.ts` | 362 | The shared helpers that had no better home. |
+| `utils.ts` | 371 | The shared helpers that had no better home. |
 | `toasts.ts` | 32 | The one line that shows a toast, which five files each had a copy of. |
 
 ## Where to start

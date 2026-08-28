@@ -338,11 +338,20 @@ export function errorMessage(e: unknown): string {
  *
  * The early return is not an optimisation: a browser that is already at `at`
  * fires no `seeked` at all, so without it every frame that needed no seek waits
- * out the whole two seconds before carrying on.
+ * out the whole timeout before carrying on.
+ *
+ * `within` is how close counts as already there, and `timeout` is how long a
+ * seek is waited on before the caller carries on regardless. The defaults suit
+ * grabbing a frame or two out of a short file; a render walking a long one
+ * wants the first tightened and the second lengthened.
  */
-export function seekVideo(video: HTMLVideoElement, at: number): Promise<void> {
+export function seekVideo(
+    video: HTMLVideoElement,
+    at: number,
+    { within = .05, timeout = 2000 }: { within?: number; timeout?: number; } = {}
+): Promise<void> {
     return new Promise<void>(resolve => {
-        if (Math.abs(video.currentTime - at) < .05) return resolve();
+        if (Math.abs(video.currentTime - at) < within) return resolve();
 
         let done = false;
 
@@ -355,7 +364,7 @@ export function seekVideo(video: HTMLVideoElement, at: number): Promise<void> {
             resolve();
         };
 
-        const timer = setTimeout(settle, 2000);
+        const timer = setTimeout(settle, timeout);
         video.addEventListener("seeked", settle);
         video.currentTime = at;
     });

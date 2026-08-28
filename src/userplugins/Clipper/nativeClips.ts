@@ -49,6 +49,7 @@
 import { MediaEngineStore } from "@webpack/common";
 
 import { logger } from "./recorder";
+import { errorMessage } from "./utils";
 
 /** Dropped off the end of a save: the newest frames are still being encoded. */
 const TAIL_MS = 1000;
@@ -402,6 +403,17 @@ interface Guard {
 
 const guards: Guard[] = [];
 
+/**
+ * The engine the shields above were put on.
+ *
+ * Held rather than looked up again on the way out: the media engine is replaced
+ * whenever Discord rebuilds its voice stack, and handing the old instance's
+ * methods to whatever is current now would write one engine's functions onto
+ * another - the second of which never had them shadowed in the first place, so
+ * what it would be left with is the first one's behaviour bolted on for good.
+ */
+let guarded: any = null;
+
 /** Whether this plugin currently expects the engine to be recording. */
 let locked = false;
 
@@ -412,6 +424,7 @@ function guardEngine(found: ClipsEngine): void {
     if (guards.length) return;
 
     const target = found as any;
+    guarded = target;
 
     const shield = (key: string, tearsDown: (args: any[]) => boolean) => {
         const original = target[key];
@@ -445,7 +458,8 @@ function guardEngine(found: ClipsEngine): void {
 }
 
 function unguardEngine(): void {
-    const target = engine() as any;
+    const target = guarded;
+    guarded = null;
 
     /*
      * The list is spent whether or not the engine is still there.
@@ -839,7 +853,7 @@ export function disarm(): void {
     if (!found) {
         armed = null;
         locked = false;
-        guards.length = 0;
+        unguardEngine();
         return;
     }
 
@@ -888,40 +902,13 @@ export function setRecordUser(userId: string, enabled: boolean, kind: RecordKind
  *
  * The native module does not throw `Error`s. What comes back across is a plain
  * object, sometimes carrying `{"error": "..."}` and sometimes only carrying
- * properties that do not enumerate, and both stringify to `[object Object]`.
+ * properties that do not enumerate, and both stringify to `[object Object]` -
+ * which is what the shared reader already digs through. Only the empty case is
+ * worded for this caller, because a refusal that said nothing at all is worth
+ * telling apart from one that never reached the engine.
  */
 function engineError(e: unknown): string {
-    if (e instanceof Error) return e.message || e.name;
-    if (typeof e === "string") return e;
-    if (e === null || e === undefined) return "the engine refused without saying why";
-
-    if (typeof e === "object") {
-        const record = e as Record<string, unknown>;
-
-        for (const key of ["message", "error", "reason", "detail"]) {
-            const value = record[key];
-            if (typeof value === "string" && value) return value;
-        }
-
-        try {
-            const json = JSON.stringify(e);
-            if (json && json !== "{}" && json !== "null") return json;
-        } catch {
-            // Falls through to the property sweep below.
-        }
-
-        try {
-            const parts = Object.getOwnPropertyNames(record)
-                .filter(key => key !== "stack")
-                .map(key => `${key}: ${String(record[key])}`);
-
-            if (parts.length) return parts.join(", ");
-        } catch {
-            // Nothing readable on it.
-        }
-    }
-
-    return String(e);
+    return e === null || e === undefined ? "the engine refused without saying why" : errorMessage(e);
 }
 
 /**

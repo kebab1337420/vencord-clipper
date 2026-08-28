@@ -164,7 +164,7 @@ settings are hidden, `syncVr` returns immediately, and no bridge is spawned.
 | --- | --- | --- |
 | `vr.ts` | 278 | The renderer half: a controller press becomes the same action a keybind fires, and the player's own body becomes a signal. |
 | `vrBridge.ts` | 594 | Main process. Starts the one bridge, restarts it if it dies for a reason another one would not hit, and long-polls the same way the game feeds do. |
-| `vrHelper.ts` | 957 | The bridge itself: C# compiled at first run by PowerShell, calling OpenVR through its function tables. |
+| `vrHelper.ts` | 975 | The bridge itself: C# compiled at first run by PowerShell, calling OpenVR through its function tables. |
 | `vrPanel.ts` | 179 | The notice, drawn again as pixels and hung in front of the player: the one thing in the plugin somebody wearing a headset can actually see. |
 | `vrManifest.ts` | 268 | The action manifest, the default bindings and the application manifest, which is what puts Clipper in SteamVR's own binding panel. |
 | `components/VrBindings.tsx` | 91 | The settings row: whether SteamVR is attached, and the button that opens that panel. |

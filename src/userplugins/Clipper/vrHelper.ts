@@ -674,19 +674,28 @@ namespace Clipper
 
                 while (!Stopping())
                 {
+                    // Null nearly every time round: nothing has been asked
+                    // for. Checked once here rather than at each branch, because
+                    // the branches below are not all plain comparisons, and a
+                    // comparison is the only thing null survives.
                     string command = TakeCommand();
 
-                    // IVRInput index 32, OpenBindingUI: SteamVR's own binding
-                    // panel, opened on our action set. Shown on the desktop as
-                    // well as in the headset, because the person who just
-                    // clicked the button in Discord is looking at a monitor.
-                    if (command == "bindings") openBindings(appKey, setHandle, 0, true);
+                    if (command != null)
+                    {
+                        // IVRInput index 32, OpenBindingUI: SteamVR's own
+                        // binding panel, opened on our action set. Shown on the
+                        // desktop as well as in the headset, because the person
+                        // who just clicked the button in Discord is looking at
+                        // a monitor.
+                        if (command == "bindings") openBindings(appKey, setHandle, 0, true);
 
-                    // A picture to put in front of the player's eyes, painted
-                    // in the browser and left in a file because a few hundred
-                    // kilobytes of pixels do not belong on a line-by-line pipe.
-                    else if (command.StartsWith("panel ")) until = ShowPanel(overlay, panel, command);
-                    else if (command == "panelhide") { HidePanel(overlay, panel); until = DateTime.MinValue; }
+                        // A picture to put in front of the player's eyes,
+                        // painted in the browser and left in a file because a
+                        // few hundred kilobytes of pixels do not belong on a
+                        // line-by-line pipe.
+                        else if (command.StartsWith("panel ")) until = ShowPanel(overlay, panel, command);
+                        else if (command == "panelhide") { HidePanel(overlay, panel); until = DateTime.MinValue; }
+                    }
 
                     /*
                      * The countdown is kept here rather than in the plugin.
@@ -931,6 +940,15 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# Before anything is written, including the compile failure below.
+#
+# A pipe gets whatever [Console]::OutputEncoding says, and on a machine that is
+# not set to English that is the OEM code page rather than UTF-8: every accented
+# character in a message from Windows or from PowerShell itself arrives at the
+# plugin as a replacement character, and the one place those messages are ever
+# read is a settings row explaining why the bridge is not running.
+try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }
 
 $source = @'
 ${CSHARP}

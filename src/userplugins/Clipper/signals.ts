@@ -77,7 +77,7 @@ const WEIGHTS: Record<string, number> = {
     /** The picture went dark: a death, a round end, a loading screen. */
     blackout: 0.9,
 
-    /** Both hands going far faster than a gesture. Only ever reported in VR. */
+    /** The faster hand going far faster than a gesture. Only ever reported in VR. */
     hands: 1.1,
     /** And the head whipping round to follow something. */
     turn: 0.7,

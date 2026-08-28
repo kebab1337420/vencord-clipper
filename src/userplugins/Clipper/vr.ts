@@ -106,7 +106,8 @@ export async function syncVr(): Promise<void> {
     }
 
     if (status.problem) logger.warn(status.problem);
-    else logger.info(status.running ? `SteamVR ${status.runtime} is bound to the clip controls` : "Waiting for SteamVR to start");
+    else if (status.running) logger.info(`SteamVR ${status.runtime} is bound to the clip controls`);
+    else logger.info(status.waiting || "Waiting for SteamVR to start");
 
     signals.claim("vr");
 
@@ -153,22 +154,54 @@ export async function openVrBindings(): Promise<boolean> {
     }
 }
 
-/** A line for the toolbox and the settings panel saying what is hooked up. */
-export async function vrReport(): Promise<string> {
-    if (!settings.store.vrInstalled) return "";
-    if (!supported()) return "The SteamVR controls need the desktop client.";
-    if (!settings.store.vrControls) return "The SteamVR controls are off. Turn them on in the Clipper settings.";
+/** What to say about the VR side, and whether it is actually attached. */
+export interface VrLine {
+    /** One sentence for the toolbox and the settings panel. */
+    text: string;
+    /** Whether there is a SteamVR session right now. */
+    attached: boolean;
+}
+
+/**
+ * The state of the VR side, as a sentence and as a fact.
+ *
+ * Both together and from one call, because the panel needs both and they must
+ * agree: reading whether the bridge is attached out of the wording of the
+ * sentence is how a button that opens SteamVR's binding panel ends up enabled
+ * while there is no SteamVR to open it on.
+ */
+export async function vrLine(): Promise<VrLine> {
+    if (!settings.store.vrInstalled) return { text: "", attached: false };
+    if (!supported()) return { text: "The SteamVR controls need the desktop client.", attached: false };
+    if (!settings.store.vrControls) return { text: "The SteamVR controls are off. Turn them on in the Clipper settings.", attached: false };
 
     try {
         const status = await Native.vrBridgeStatus();
 
-        if (status.problem) return status.problem;
-        if (status.running) return `SteamVR ${status.runtime} is bound to the clip controls. Rebind them from the SteamVR settings, under Controller Bindings, as Clipper.`;
+        /*
+         * Said in the order they matter: something that needs doing about it,
+         * then what is attached, then what is being waited for. Whether the
+         * binding panel can be opened is a separate question with a separate
+         * answer - a bridge can be attached and still have something wrong
+         * with it, and that is exactly when somebody wants the panel.
+         */
+        if (status.problem) return { text: status.problem, attached: status.running };
+        if (status.running) return { text: `SteamVR ${status.runtime} is bound to the clip controls. Rebind them from the SteamVR settings, under Controller Bindings, as Clipper.`, attached: true };
 
-        return "Waiting for SteamVR to start. Nothing else needs doing - put the headset on and the controls attach by themselves.";
+        // Whatever the bridge is waiting for, said in its own words - "SteamVR
+        // is not running" and "no headset is connected" want different things
+        // doing about them, and neither is a fault.
+        const why = status.waiting || "Waiting for SteamVR to start";
+
+        return { text: `${why}. Nothing else needs doing - put the headset on and the controls attach by themselves.`, attached: false };
     } catch (e) {
-        return `The SteamVR bridge could not be reached (${(e as Error).message}).`;
+        return { text: `The SteamVR bridge could not be reached (${(e as Error).message}).`, attached: false };
     }
+}
+
+/** A line for the toolbox saying what is hooked up. */
+export async function vrReport(): Promise<string> {
+    return (await vrLine()).text;
 }
 
 /**

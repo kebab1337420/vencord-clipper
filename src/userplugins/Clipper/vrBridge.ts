@@ -15,14 +15,23 @@
  * The supervision matters more here than anywhere else in the plugin, because
  * the thing being supervised is only reachable some of the time. SteamVR is not
  * running when Discord starts, it starts when somebody puts a headset on, and it
- * stops again when they take it off - and none of that is an error. So a bridge
- * that cannot attach is not a failure to report to anybody, it is a retry in
- * fifteen seconds, quietly, for as long as the setting is on.
+ * stops again when they take it off - and none of that is an error.
  *
- * The one thing that is worth saying out loud is a SteamVR too old to have the
- * interfaces, because no amount of retrying fixes that. It is remembered and
- * repeated in the toolbox rather than logged once at the moment nobody was
- * looking.
+ * Which is why the retrying is not done here. One bridge process runs for as
+ * long as the setting is on and does its own waiting, because restarting it
+ * means recompiling its C# - a second of a core, and it was being paid four
+ * times a minute for as long as somebody left Discord open with no headset on.
+ * What is left here is a supervisor for the case the process actually dies.
+ *
+ * The bridge says which of three things is true, and only one of them is a
+ * problem: attached, waiting for something outside anybody's control, or
+ * stopped by something no amount of retrying fixes - a SteamVR too old for the
+ * interfaces, an action manifest it will not take. Only the last is remembered
+ * and repeated in the toolbox, and it is also the one case where no replacement
+ * bridge is started: the next one would compile the same C# and fail the same
+ * way, which is the fifteen-second cycle this file exists to avoid. The middle
+ * one is a sentence about why, because "no headset is connected" and "SteamVR is
+ * not running" want different things doing about them.
  */
 
 import { type ChildProcess, spawn } from "child_process";
@@ -33,7 +42,14 @@ import { join } from "path";
 import { SCRIPT } from "./vrHelper";
 import { ACTION_SET, apiLibrary, APP_KEY, scriptPath, VR_ACTIONS, type VrAction, writeActionManifest, writeAppManifest } from "./vrManifest";
 
-/** How long to leave SteamVR alone before trying to attach again. */
+/**
+ * How long to wait before starting another bridge, after one has died.
+ *
+ * Not how often SteamVR is tried: the bridge does that itself, from inside, for
+ * the cost of a function call. This is the far rarer case of the process going
+ * away - killed, crashed, or stopped by something it could not get past - and
+ * fifteen seconds of nothing is the right answer to a thing that just failed.
+ */
 const RETRY_MS = 15_000;
 
 /**
@@ -56,6 +72,8 @@ export interface VrStatus {
     runtime: string;
     /** The last thing that went wrong and is not just SteamVR being off. */
     problem: string;
+    /** Why there is no session, when that is nobody's fault. */
+    waiting: string;
 }
 
 export type VrEvent =
@@ -66,15 +84,22 @@ let child: ChildProcess | null = null;
 let wanted = false;
 let runtime = "";
 let problem = "";
+let waiting = "";
+/** Whether the last bridge stopped for a reason another one would hit too. */
+let fatal = false;
 let retry: NodeJS.Timeout | null = null;
 
 /**
  * Actions waiting to be collected, and the newest motion reading.
  *
- * Kept apart on purpose. A press is a thing that happened and must not be lost
- * because the renderer was busy; a motion reading is a thing that is true right
- * now, and the only one worth having is the last one. Delivering a queue of
- * stale ones would report a flail that finished several seconds ago.
+ * Kept apart on purpose. A press is a thing that happened, and is kept until
+ * somebody collects it; a motion reading is a thing that is true right now, and
+ * the only one worth having is the last one. Delivering a queue of stale ones
+ * would report a flail that finished several seconds ago.
+ *
+ * The press queue is bounded, and the oldest goes first. Nine unread presses
+ * means nothing has collected any of them for several minutes, and replaying
+ * the oldest of those at that point would save a clip of something long gone.
  */
 let presses: VrAction[] = [];
 let motion: VrEvent | null = null;
@@ -107,36 +132,59 @@ function hand(event: VrEvent) {
     if (presses.length > 8) presses.shift();
 }
 
-/** Turns one line of the bridge's output into something to act on. */
-function line(text: string) {
+/**
+ * Turns one line of the bridge's output into something to act on, and says
+ * whether it was the bridge saying which way the start went.
+ *
+ * Returned rather than worked out afterwards from whether one of the three
+ * strings is now set: a waiting line with an empty reason is still an answer,
+ * and reading it as a string would leave the caller parked for the full
+ * three-quarters of a minute the timeout allows.
+ */
+function line(text: string): boolean {
     const trimmed = text.trim();
 
     // PowerShell writes things of its own from time to time, and none of them
     // are ours. Anything that is not a JSON object is simply not for us.
-    if (!trimmed.startsWith("{")) return;
+    if (!trimmed.startsWith("{")) return false;
 
     let message: any;
     try {
         message = JSON.parse(trimmed);
     } catch {
-        return;
+        return false;
     }
 
     if (message.t === "ready") {
         runtime = String(message.runtime ?? "");
         problem = "";
-        return;
+        waiting = "";
+        fatal = false;
+        return true;
     }
 
+    // Not attached, and nothing anybody did wrong: SteamVR is off, or it is on
+    // with the headset still on the desk. Kept as a sentence rather than as a
+    // problem, so the settings panel can say which it is.
+    if (message.t === "waiting") {
+        runtime = "";
+        waiting = String(message.reason ?? "");
+        return true;
+    }
+
+    // An error is by definition something no retry fixes: the bridge reports
+    // everything it can wait out as waiting, from inside, without stopping. So
+    // this both remembers the message and stops another bridge being started.
     if (message.t === "error") {
         problem = String(message.message ?? "The SteamVR bridge failed for a reason it did not give");
-        return;
+        fatal = true;
+        return true;
     }
 
     if (message.t === "action") {
         const action = VR_ACTIONS.find(name => name === message.name);
         if (action) hand({ kind: "action", action });
-        return;
+        return false;
     }
 
     if (message.t === "motion") {
@@ -146,10 +194,23 @@ function line(text: string) {
             head: Number(message.head) || 0
         });
     }
+
+    return false;
 }
 
 function later() {
-    if (retry || !wanted) return;
+    /*
+     * Nothing is scheduled after a fatal stop. The bridge only reports one for
+     * something a second bridge would hit as well, and a second bridge is a
+     * PowerShell start and a C# compile - a little over a second of a core,
+     * four times a minute, for as long as Discord stays open. On the machine
+     * where the compile itself is what failed, that is every fifteen seconds
+     * for nothing, for ever.
+     *
+     * Turning the setting off and on again clears it, which is where somebody
+     * who has fixed the cause will go anyway.
+     */
+    if (retry || !wanted || fatal) return;
 
     retry = setTimeout(() => {
         retry = null;
@@ -202,6 +263,7 @@ function open(): Promise<void> {
 
     child = started;
     runtime = "";
+    waiting = "";
 
     return new Promise<void>(resolve => {
         let settled = false;
@@ -226,9 +288,9 @@ function open(): Promise<void> {
             rest = lines.pop() ?? "";
 
             for (const one of lines) {
-                line(one);
-                // Ready or failed, either way there is an answer to give back.
-                if (runtime || problem) done();
+                // Attached, waiting or stopped: all three are an answer, and
+                // the caller has been holding on since the process was started.
+                if (line(one)) done();
             }
         });
 
@@ -247,6 +309,7 @@ function open(): Promise<void> {
             if (child === started) {
                 child = null;
                 runtime = "";
+                waiting = "";
             }
 
             // Every waiter is woken with nothing rather than left parked: the
@@ -271,6 +334,8 @@ function shut(): void {
     const going = child;
     child = null;
     runtime = "";
+    waiting = "";
+    fatal = false;
     presses = [];
     motion = null;
 
@@ -337,7 +402,7 @@ export function closeBridge(): Promise<void> {
 }
 
 export function status(): VrStatus {
-    return { running: child !== null && runtime !== "", wanted, runtime, problem };
+    return { running: child !== null && runtime !== "", wanted, runtime, problem, waiting };
 }
 
 /**

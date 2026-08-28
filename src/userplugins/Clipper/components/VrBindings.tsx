@@ -23,13 +23,14 @@ import { Heading } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import { useEffect, useState } from "@webpack/common";
 
-import { openVrBindings, vrReport } from "../vr";
+import { openVrBindings, vrLine } from "../vr";
 
 /** How often the row re-reads the bridge. Slow: it is a settings panel. */
 const REFRESH_MS = 4000;
 
 export function VrBindings() {
     const [status, setStatus] = useState("Checking...");
+    const [attached, setAttached] = useState(false);
     const [opening, setOpening] = useState(false);
 
     /*
@@ -41,8 +42,11 @@ export function VrBindings() {
     useEffect(() => {
         let alive = true;
 
-        const read = () => void vrReport().then(text => {
-            if (alive) setStatus(text);
+        const read = () => void vrLine().then(line => {
+            if (!alive) return;
+
+            setStatus(line.text);
+            setAttached(line.attached);
         });
 
         read();
@@ -53,8 +57,6 @@ export function VrBindings() {
             clearInterval(timer);
         };
     }, []);
-
-    const attached = status.startsWith("SteamVR ");
 
     return (
         <section style={{ marginBottom: 20 }}>
@@ -78,10 +80,11 @@ export function VrBindings() {
             </div>
 
             <Paragraph style={{ marginTop: 6, color: "var(--text-muted, #949ba4)" }}>
-                Out of the box: double-tap B on the right controller to save a clip, hold A to drop a
-                marker, double-tap the left one to start or stop the buffer, hold it to ask the call
-                for their angle. A double tap and a hold rather than a plain press, so a default never
-                fires in the middle of a game - change any of them in the panel above.
+                Out of the box, two binds and both on the right hand: double-tap B to save a clip,
+                hold A to drop a marker. A double tap and a hold rather than a plain press, so a
+                default never fires in the middle of a game, and nothing at all on the left hand.
+                Starting the buffer and asking the call for their angle are there too, unbound - add
+                a button for either in the panel above, or move any of it somewhere better.
             </Paragraph>
         </section>
     );

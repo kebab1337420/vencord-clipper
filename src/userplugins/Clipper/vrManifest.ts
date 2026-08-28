@@ -49,8 +49,22 @@ export const ACTION_SET = "/actions/clipper";
  *
  * `replay` is missing on purpose: it opens a window on the desktop, and nobody
  * wearing a headset can see the desktop.
+ *
+ * All four are offered; only the first two start on a button. An action nobody
+ * has bound costs nothing at all - it sits in the panel waiting to be given a
+ * button, which is where somebody who wants it will go looking.
  */
 export const VR_ACTIONS = ["save", "mark", "toggle", "pov"] as const;
+
+/**
+ * The two that get a button out of the box.
+ *
+ * A controller has about four buttons that are not already the game's, and a
+ * default binding is a button taken from whatever is being played. Two is what
+ * the plugin is actually for - clip that, and mark this - and the other two are
+ * worth a trip to the binding panel by anybody who wants them.
+ */
+const BOUND_BY_DEFAULT = ["save", "mark"] as const;
 
 export type VrAction = typeof VR_ACTIONS[number];
 
@@ -108,36 +122,60 @@ export function apiLibrary(): string | null {
 }
 
 /**
+ * How long a long press has to be held, in seconds.
+ *
+ * `long_press_delay` and a number, both of which matter: an earlier version of
+ * this wrote `long_press_time` and the string "0.4", and SteamVR ignores a
+ * parameter it does not know without saying anything, so the hold silently ran
+ * at whatever the default is. The name and the shape are SteamVR's own, out of
+ * the binding files it ships with.
+ */
+const LONG_PRESS = 0.4;
+
+/**
+ * How each of the two defaults is activated.
+ *
+ * Here rather than at the call site so that BOUND_BY_DEFAULT is the one place
+ * the defaults are listed: adding a third is this line, the button, and nothing
+ * else.
+ */
+const ACTIVATORS: Record<typeof BOUND_BY_DEFAULT[number], "double" | "long"> = {
+    save: "double",
+    mark: "long"
+};
+
+/**
  * One suggested binding, in the shape SteamVR's binding files use.
  *
- * A double click or a long press rather than a plain click for all four, because
- * a single press of a face button belongs to the game being played. A default
- * that fired every time somebody reloaded would be worse than no default at all.
+ * A double click or a long press rather than a plain click, because a single
+ * press of a face button belongs to the game being played. A default that fired
+ * every time somebody reloaded would be worse than no default at all.
  */
 function source(path: string, activator: "double" | "long", action: VrAction) {
     return {
         path,
         mode: "button",
         inputs: { [activator]: { output: `${ACTION_SET}/in/${action}` } },
-        parameters: activator === "long" ? { long_press_time: "0.4" } : {}
+        parameters: activator === "long" ? { long_press_delay: LONG_PRESS } : {}
     };
 }
 
-function bindings(controller: string, buttons: Record<VrAction, string>) {
+/**
+ * The default binding file for one controller.
+ *
+ * Two sources, both on the right hand, and nothing on the left. Everything else
+ * the plugin can do is in the panel this file opens in, unbound.
+ */
+function bindings(controller: string, buttons: Record<typeof BOUND_BY_DEFAULT[number], string>) {
     return {
         app_key: APP_KEY,
         controller_type: controller,
-        description: "Where Clipper's actions start out. Change any of them here.",
+        description: "Where Clipper's two default binds start out. Change them here, and add the rest.",
         name: "Clipper defaults",
         action_manifest_version: 0,
         bindings: {
             [ACTION_SET]: {
-                sources: [
-                    source(buttons.save, "double", "save"),
-                    source(buttons.mark, "long", "mark"),
-                    source(buttons.toggle, "double", "toggle"),
-                    source(buttons.pov, "long", "pov")
-                ]
+                sources: BOUND_BY_DEFAULT.map(action => source(buttons[action], ACTIVATORS[action], action))
             }
         }
     };
@@ -147,9 +185,10 @@ function bindings(controller: string, buttons: Record<VrAction, string>) {
  * Writes the action manifest and the default bindings, and hands back the path
  * to the manifest.
  *
- * Only two controllers get defaults. They are the two most people are holding,
- * and every other controller still gets the actions - they simply start unbound,
- * which is the state the binding panel exists to fix.
+ * Only two controllers get defaults, and only two actions do. They are the two
+ * controllers most people are holding, and the two things the plugin is for;
+ * everything else - the other actions, and every other controller - starts
+ * unbound, which is the state the binding panel exists to fix.
  */
 export function writeActionManifest(): string {
     const dir = folder();
@@ -163,29 +202,27 @@ export function writeActionManifest(): string {
             { controller_type: "oculus_touch", binding_url: "bindings_oculus_touch.json" }
         ],
         action_sets: [{ name: ACTION_SET, usage: "leftright" }],
+        // Every one of them optional, including the two with a default: the
+        // plugin has to work with nothing bound at all, because that is what a
+        // controller SteamVR has no default file for looks like. "optional" and
+        // "mandatory" are also the only two SteamVR itself ships.
         actions: VR_ACTIONS.map(action => ({
             name: `${ACTION_SET}/in/${action}`,
             type: "boolean",
-            requirement: action === "save" ? "suggested" : "optional"
+            requirement: "optional"
         })),
         localization: [localization]
     };
 
-    // Index controllers have A and B on both hands; Touch has A and B on the
-    // right and X and Y on the left. Same four places under the thumb either way.
-    writeFileSync(join(dir, "bindings_knuckles.json"), JSON.stringify(bindings("knuckles", {
+    // A and B on the right hand, which both of these controllers have in the
+    // same place under the thumb. The left hand is left entirely alone.
+    const buttons = {
         save: "/user/hand/right/input/b",
-        mark: "/user/hand/right/input/a",
-        toggle: "/user/hand/left/input/b",
-        pov: "/user/hand/left/input/a"
-    }), null, 4), "utf8");
+        mark: "/user/hand/right/input/a"
+    };
 
-    writeFileSync(join(dir, "bindings_oculus_touch.json"), JSON.stringify(bindings("oculus_touch", {
-        save: "/user/hand/right/input/b",
-        mark: "/user/hand/right/input/a",
-        toggle: "/user/hand/left/input/y",
-        pov: "/user/hand/left/input/x"
-    }), null, 4), "utf8");
+    writeFileSync(join(dir, "bindings_knuckles.json"), JSON.stringify(bindings("knuckles", buttons), null, 4), "utf8");
+    writeFileSync(join(dir, "bindings_oculus_touch.json"), JSON.stringify(bindings("oculus_touch", buttons), null, 4), "utf8");
 
     const path = join(dir, "actions.json");
     writeFileSync(path, JSON.stringify(manifest, null, 4), "utf8");

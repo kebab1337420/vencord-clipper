@@ -1,6 +1,6 @@
 # The module map
 
-Seventy-one files, about thirty-four thousand lines. The root `README.md` says what
+Seventy-one files, about thirty-five thousand lines. The root `README.md` says what
 the plugin does for the person using it; this says where each part of it lives,
 so that a change can start from the right file instead of from a search.
 
@@ -125,6 +125,24 @@ SteamVR, for the person who cannot see any of the above because they are wearing
 a headset. The controller binds are the point; the motion is a side effect of
 having to open an OpenVR session for them anyway.
 
+Four actions are offered and two are bound out of the box, both on the right
+hand. A default binding is a button taken from whatever is being played, and a
+controller has about four that are not already the game's, so the other two sit
+in SteamVR's binding panel waiting for anybody who wants them.
+
+One bridge process runs for as long as the setting is on, attached or not, and
+does its own waiting. The alternative — exiting whenever SteamVR is not there
+and being restarted fifteen seconds later — recompiled its C# on every attempt,
+which measured a little over a second of a core, four times a minute, for as
+long as Discord was open with no headset on.
+
+It reports one of three things, and the difference between the last two is the
+whole of the supervision: attached, waiting for something that will come right
+on its own, or stopped by something that will not. Only the last is shown to
+anybody, and it is also the only case where no replacement is started — the
+same C#, compiled again, fails again, and the machine where the compile itself
+is what failed would pay that cycle for ever.
+
 All of it is switched off until `VRinstaller.ps1` at the repository root sets
 `vrInstalled` in the client's `settings.json`. Everything below is compiled into
 the bundle regardless — there is one build — but with that setting clear the VR
@@ -132,11 +150,11 @@ settings are hidden, `syncVr` returns immediately, and no bridge is spawned.
 
 | File | Lines | What it is |
 | --- | --- | --- |
-| `vr.ts` | 210 | The renderer half: a controller press becomes the same action a keybind fires, and the player's own body becomes a signal. |
-| `vrBridge.ts` | 395 | Main process. Starts the bridge, restarts it when a headset goes on, and long-polls the same way the game feeds do. |
-| `vrHelper.ts` | 421 | The bridge itself: C# compiled at first run by PowerShell, calling OpenVR through its function tables. |
-| `vrManifest.ts` | 231 | The action manifest, the default bindings and the application manifest, which is what puts Clipper in SteamVR's own binding panel. |
-| `components/VrBindings.tsx` | 88 | The settings row: whether SteamVR is attached, and the button that opens that panel. |
+| `vr.ts` | 247 | The renderer half: a controller press becomes the same action a keybind fires, and the player's own body becomes a signal. |
+| `vrBridge.ts` | 460 | Main process. Starts the one bridge, restarts it if it dies for a reason another one would not hit, and long-polls the same way the game feeds do. |
+| `vrHelper.ts` | 654 | The bridge itself: C# compiled at first run by PowerShell, calling OpenVR through its function tables. |
+| `vrManifest.ts` | 268 | The action manifest, the default bindings and the application manifest, which is what puts Clipper in SteamVR's own binding panel. |
+| `components/VrBindings.tsx` | 91 | The settings row: whether SteamVR is attached, and the button that opens that panel. |
 
 ## Over the game
 
@@ -185,8 +203,9 @@ The always-on-top window, and the two files that decide what it draws.
   screen; `angles.ts` is what it had to choose between, and `audio.ts` lined
   them up.
 - **A controller bind does nothing.** `vrBridge.ts` says whether it ever
-  attached; the binding itself belongs to SteamVR, and `vrManifest.ts` is only
-  what it was offered to start from.
+  attached, and the settings row says why not if it did not. The binding itself
+  belongs to SteamVR, and `vrManifest.ts` is only what it was offered to start
+  from — two of the four actions start unbound on purpose.
 - **It cannot read or write a file.** `native.ts`. Nothing else can.
 
 ## Tests

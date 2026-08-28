@@ -14,10 +14,15 @@
 #      Equibop settings file it finds
 #   3. tells you to restart Discord, because settings.json is read at startup
 #
+# Discord has to be closed while this runs. It keeps its whole settings file in
+# memory and writes all of it back when anything changes, so a running client
+# would overwrite these two keys within minutes and leave no sign of it.
+#
 # Usage:
 #   VRinstaller.ps1              install the VR side
 #   VRinstaller.ps1 -Uninstall   remove it and delete what it generated
 #   VRinstaller.ps1 -Status      say what is set up, change nothing
+#   VRinstaller.ps1 -Force       write anyway, with Discord still running
 #
 # Exit codes: 0 = done, 1 = nothing was changed.
 
@@ -25,7 +30,9 @@ param(
     # takes the VR side back out, and removes the files it generated
     [switch] $Uninstall,
     # reports and exits without writing anything
-    [switch] $Status
+    [switch] $Status,
+    # writes even with a client running, and accepts losing the change
+    [switch] $Force
 )
 
 $ErrorActionPreference = "Stop"
@@ -55,6 +62,40 @@ function Find-SteamVR {
     return $null
 }
 
+# ------------------------------------------------------------------ client --
+# Which processes would overwrite one particular settings file.
+#
+# Asked per file rather than of the machine, because the clients do not share
+# these: somebody with Vesktop installed and an unpatched Discord open is not in
+# any danger, and being refused would have them closing something for nothing.
+#
+# The Vencord folder is the one every Vencord-patched Discord writes to, and
+# which branch is patched cannot be told from here, so all four count for it.
+function Get-Owners([string] $file) {
+    $folder = Split-Path (Split-Path $file -Parent) -Parent | Split-Path -Leaf
+
+    # Case-insensitive, which is what matches both spellings of the last two.
+    switch ($folder) {
+        "Vencord" { return @("Discord", "DiscordPTB", "DiscordCanary", "DiscordDevelopment") }
+        "vesktop" { return @("Vesktop") }
+        "equibop" { return @("Equibop") }
+    }
+
+    return @()
+}
+
+# Whatever is running that would overwrite one of the files about to be written.
+#
+# Every one of these keeps its settings in memory and writes the whole thing
+# back when any setting changes, so a key added underneath a running client
+# survives only until the next time somebody touches a toggle. Refusing is much
+# kinder than a change that silently comes undone an hour later.
+function Get-RunningClients([string[]] $files) {
+    @($files | ForEach-Object { Get-Owners $_ }) |
+        Sort-Object -Unique |
+        ForEach-Object { if (Get-Process -Name $_ -ErrorAction SilentlyContinue) { $_ } }
+}
+
 # ----------------------------------------------------------------- settings --
 # Every client that could be running the plugin keeps its Vencord settings in a
 # folder of its own, and somebody with both Discord and Vesktop expects one run
@@ -66,20 +107,24 @@ function Get-SettingsFiles {
         Sort-Object -Unique
 }
 
-# The Clipper block, found by walking the braces rather than by parsing the file.
-#
 # settings.json is not read as JSON anywhere in this script, and that is
 # deliberate. It belongs to Vencord and to every other plugin the user has, and
 # both PowerShell versions damage it on the way through: 5.1 collapses two keys
 # that differ only in case into one, 7 refuses the file outright for the same
 # reason. Either way, writing the result back would quietly lose somebody else's
-# settings. So the file is treated as text and only the few bytes that belong to
-# this script are touched.
-function Get-ClipperBlock([string] $text) {
-    $at = $text.IndexOf('"Clipper"')
-    if ($at -lt 0) { return $null }
+# settings. So the file is treated as text, walked rather than parsed, and only
+# the few bytes that belong to this script are touched.
 
-    $open = $text.IndexOf('{', $at)
+# The object starting at or after $from, as the offsets of its two braces.
+function Get-Block([string] $text, [int] $from) {
+    $open = -1
+
+    for ($i = $from; $i -lt $text.Length; $i++) {
+        if ([char]::IsWhiteSpace($text[$i])) { continue }
+        if ($text[$i] -eq '{') { $open = $i }
+        break
+    }
+
     if ($open -lt 0) { return $null }
 
     $depth = 0
@@ -107,6 +152,70 @@ function Get-ClipperBlock([string] $text) {
     return $null
 }
 
+# Where the value of one member of one object starts, or -1.
+#
+# Reads strings properly rather than searching for the key, and only looks at
+# the object's own members: a key name is a perfectly ordinary thing to find
+# inside somebody else's string value, and acting on one would put these
+# settings somewhere they do not belong.
+function Find-Member([string] $text, [int] $open, [int] $close, [string] $name) {
+    $depth = 0
+    $i = $open + 1
+
+    while ($i -lt $close) {
+        $c = $text[$i]
+
+        if ($c -eq '"') {
+            $start = ++$i
+            $escaped = $false
+
+            while ($i -lt $close) {
+                $d = $text[$i]
+                if ($escaped) { $escaped = $false; $i++; continue }
+                if ($d -eq '\') { $escaped = $true; $i++; continue }
+                if ($d -eq '"') { break }
+                $i++
+            }
+
+            $literal = $text.Substring($start, $i - $start)
+            $i++
+
+            if ($depth -eq 0 -and $literal -eq $name) {
+                $j = $i
+                while ($j -lt $close -and [char]::IsWhiteSpace($text[$j])) { $j++ }
+                if ($j -lt $close -and $text[$j] -eq ':') { return $j + 1 }
+            }
+
+            continue
+        }
+
+        if ($c -eq '{' -or $c -eq '[') { $depth++ }
+        elseif ($c -eq '}' -or $c -eq ']') { $depth-- }
+
+        $i++
+    }
+
+    return -1
+}
+
+# The Clipper block, reached the only way it is safe to reach it: the root
+# object, then its plugins member, then Clipper inside that.
+function Get-ClipperBlock([string] $text) {
+    $root = Get-Block $text 0
+    if (-not $root) { return $null }
+
+    $at = Find-Member $text $root.Start $root.End "plugins"
+    if ($at -lt 0) { return $null }
+
+    $plugins = Get-Block $text $at
+    if (-not $plugins) { return $null }
+
+    $at = Find-Member $text $plugins.Start $plugins.End "Clipper"
+    if ($at -lt 0) { return $null }
+
+    return Get-Block $text $at
+}
+
 function Set-ClipperSetting([string] $file, [hashtable] $values) {
     $text = [IO.File]::ReadAllText($file)
     $block = Get-ClipperBlock $text
@@ -125,6 +234,11 @@ function Set-ClipperSetting([string] $file, [hashtable] $values) {
 
     $break = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
 
+    # Clipper has been opened but has nothing stored, so there is no member to
+    # put a comma in front of. One gets written without, and the next one after
+    # it goes in ahead of it and can have its comma back.
+    $empty = $body.Substring(1, $body.Length - 2).Trim().Length -eq 0
+
     foreach ($key in $values.Keys) {
         $value = if ($values[$key]) { "true" } else { "false" }
         $pattern = '("' + [regex]::Escape($key) + '"\s*:\s*)(?:true|false)'
@@ -133,7 +247,9 @@ function Set-ClipperSetting([string] $file, [hashtable] $values) {
         if ($regex.IsMatch($body)) {
             $body = $regex.Replace($body, ('${1}' + $value), 1)
         } else {
-            $body = $body.Insert(1, $break + $indent + '"' + $key + '": ' + $value + ',')
+            $comma = if ($empty) { "" } else { "," }
+            $body = $body.Insert(1, $break + $indent + '"' + $key + '": ' + $value + $comma)
+            $empty = $false
         }
     }
 
@@ -188,6 +304,23 @@ if ($files.Count -eq 0) {
 }
 
 $steamVR = Find-SteamVR
+
+# Asked before anything is written, and not before -Status, which only reads.
+if (-not $Status) {
+    $open = @(Get-RunningClients $files)
+
+    if ($open.Count -gt 0 -and -not $Force) {
+        Write-Host "[ERROR] Close $($open -join ', ') first."
+        Write-Host "        A running client writes its whole settings file back whenever anything"
+        Write-Host "        changes, which would undo this without saying so. Nothing was changed."
+        Write-Host "        Run with -Force to write anyway."
+        exit 1
+    }
+
+    if ($open.Count -gt 0) {
+        Write-Host "      [!] $($open -join ', ') still running. This may be overwritten."
+    }
+}
 
 if ($Status) {
     Write-Host "SteamVR: $(if ($steamVR) { $steamVR } else { 'not found' })"
@@ -246,7 +379,7 @@ if ($Uninstall) {
     }
 
     Write-Host ""
-    Write-Host "Done. Restart Discord for the VR settings to disappear."
+    Write-Host "Done. Start Discord again; the VR settings will be gone."
     Write-Host "SteamVR keeps whatever bindings you made; they are its files, not the plugin's."
     exit 0
 }
@@ -280,11 +413,12 @@ if ($done -eq 0) {
 }
 
 Write-Host ""
-Write-Host "Done. Restart Discord, then:"
+Write-Host "Done. Start Discord, then:"
 Write-Host "  - the plugin settings gain a VR section"
 Write-Host "  - put the headset on and the controls attach by themselves"
-Write-Host "  - double-tap B on the right controller to save a clip, hold A to drop a marker,"
-Write-Host "    double-tap the left one to start or stop the buffer, hold it to ask for angles"
-Write-Host "  - rebind any of that in SteamVR, under Settings, Controller Bindings, Clipper,"
-Write-Host "    or from the button in the plugin's VR section"
+Write-Host "  - two binds out of the box, both on the right controller: double-tap B to save"
+Write-Host "    a clip, hold A to drop a marker. Nothing at all on the left hand."
+Write-Host "  - starting the buffer and asking the call for their angle are there too, unbound."
+Write-Host "    Add a button for either in SteamVR, under Settings, Controller Bindings,"
+Write-Host "    Clipper, or from the button in the plugin's VR section"
 exit 0

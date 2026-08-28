@@ -175,15 +175,18 @@ obviously can't really make every single feature possible because it isn't a ded
   headset, so this part is opt-in and starts switched off: nothing about it
   appears in the settings and nothing ever attaches to SteamVR until
   `VRinstaller.ps1` is run (`VRinstaller.ps1 -Uninstall` puts it back). Once it
-  is on, the four binds are offered to SteamVR as actions, which puts Clipper in the same
+  is on, four actions are offered to SteamVR, which puts Clipper in the same
   Controller Bindings panel every VR game is rebound from — the plugin draws no
   binding screen of its own because SteamVR already owns one, and a bind made
-  there survives the plugin being reinstalled. Out of the box: double-tap B on
-  the right controller to save, hold A to drop a marker, double-tap the left one
-  to start or stop the buffer, hold it to ask the call for their angle. A double
-  tap and a hold rather than a plain press, so a default never fires in the
-  middle of a game. It attaches when a headset goes on and lets go when it comes
-  off; Discord never starts SteamVR by itself. While it is attached, how fast the
+  there survives the plugin being reinstalled. Only two of the four start on a
+  button, and both are on the right hand: double-tap B to save a clip, hold A to
+  drop a marker. A double tap and a hold rather than a plain press, so a default
+  never fires in the middle of a game — and nothing at all on the left hand,
+  because a controller has about four buttons that are not already the game's.
+  Starting the buffer and asking the call for their angle are offered too but
+  start unbound; add a button for either in that panel. It attaches when a
+  headset goes on and lets go when it comes off; Discord never starts SteamVR by
+  itself. While it is attached, how fast the
   hands and head are actually moving is fed to the marker as corroboration — on
   its own it never marks anything, however hard you swing, because somebody
   playing a rhythm game swings for the whole song
@@ -371,7 +374,7 @@ quietly — run `install.bat` again in that case.
 | Add an audio source | Same section, *Add an audio source*, then pick the input device |
 | Undo a montage edit | `Ctrl + Z`, `Ctrl + Shift + Z` to redo |
 | Trim the selected segment | *From the playhead* under Start / End, or `←` / `→` then the same button |
-| Clip from a VR controller | Plugin settings → *VR* → *SteamVR controls*, then *Open SteamVR bindings* to change them |
+| Clip from a VR controller | Double-tap **B** on the right controller; hold **A** for a marker. Plugin settings → *VR* → *Open SteamVR bindings* to change them or add more |
 
 Pick what to record from the plugin's own picker (overlay button, chat bar
 button, or toolbox): the game window, or the whole screen if you alt-tab a lot.

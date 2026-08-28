@@ -21,11 +21,19 @@
  * like: a moment is a jump above the room's own normal, held long enough not to
  * be a door slamming, and then nothing for a while so one burst of laughter
  * lands one marker rather than six.
+ *
+ * The bar is set where one person alone cannot reach it. Somebody swearing at
+ * their own bad play is the commonest loud second of an evening and the least
+ * worth keeping, so the score is built to need either several people at once or
+ * your own microphone properly going - and it has to hold for two seconds,
+ * which a single shout does not. `highlightSensitivity` moves the whole bar for
+ * a call that is quieter or rowdier than most.
  */
 
 import { Logger } from "@utils/Logger";
 
 import { MIC_CHANNEL } from "./mixer";
+import { settings } from "./settings";
 import { voiceActivity } from "./voice";
 
 const logger = new Logger("Clipper");
@@ -34,13 +42,19 @@ const logger = new Logger("Clipper");
 const TICK_MS = 100;
 
 /** A voice below this is background, not somebody making a point. */
-const VOICE_FLOOR = 0.35;
+const VOICE_FLOOR = 0.45;
 
-/** How long a jump has to hold before it is a moment, in ticks. */
-const HOLD_TICKS = 10;
+/**
+ * How long a jump has to hold before it is a moment, in ticks.
+ *
+ * Two seconds. One person shouting at a bad play is over well inside that,
+ * which is the whole difference between the moment worth a marker and the
+ * hundred that are not.
+ */
+const HOLD_TICKS = 20;
 
 /** Nothing else is marked for this long afterwards. */
-const COOLDOWN_MS = 20_000;
+const COOLDOWN_MS = 45_000;
 
 /**
  * How fast the baseline follows the room, as a share of each tick.
@@ -50,9 +64,26 @@ const COOLDOWN_MS = 20_000;
  */
 const BASELINE_RISE = 0.0015;
 
-/** The jump over the baseline that counts, and the floor under it. */
-const JUMP = 1.6;
-const MIN_SCORE = 1.2;
+/**
+ * The jump over the baseline that counts, and the floor under it.
+ *
+ * One voice contributes one, plus its own level, so a single person can never
+ * score more than 2 however hard they yell: the floor sits above that on
+ * purpose. Reaching it takes two people at once, or your own microphone, which
+ * is weighed heavily enough below to get there alone.
+ */
+const JUMP = 1.9;
+const MIN_SCORE = 2.1;
+
+/** What your own microphone is worth against a voice from the call. */
+const MIC_WEIGHT = 2.2;
+
+/** What each setting multiplies the bar by. */
+const SENSITIVITY: Record<string, number> = { loose: 0.75, normal: 1, strict: 1.4 };
+
+function sensitivity(): number {
+    return SENSITIVITY[settings.store.highlightSensitivity as string] ?? 1;
+}
 
 export interface HighlightHooks {
     /** Level of one of the recorder's own channels, 0 to 1. */
@@ -128,7 +159,7 @@ class HighlightWatcher {
 
         const mic = hooks.channelLevel(MIC_CHANNEL);
 
-        return { value: voices + loudest + mic * 1.5, voices, mic };
+        return { value: voices + loudest + mic * MIC_WEIGHT, voices, mic };
     }
 
     private tick(): void {
@@ -136,7 +167,7 @@ class HighlightWatcher {
         if (!hooks) return;
 
         const { value, voices, mic } = this.score();
-        const bar = Math.max(MIN_SCORE, this.baseline * JUMP);
+        const bar = Math.max(MIN_SCORE, this.baseline * JUMP) * sensitivity();
 
         // The baseline only ever drifts towards what is being heard, so a long
         // shouting match slowly becomes this room's normal instead of marking

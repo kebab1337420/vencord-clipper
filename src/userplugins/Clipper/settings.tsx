@@ -41,8 +41,17 @@ export const settings = definePluginSettings({
     },
     autoHighlight: {
         type: OptionType.BOOLEAN,
-        description: "Drop a marker by itself when the call gets loud - several people talking over each other, or you shouting at your own screen. Measured against how loud the last minute was, so a lively call does not mark itself constantly",
+        description: "Drop a marker by itself when the call gets loud - several people talking over each other, or you shouting at your own screen. Measured against how loud the last minute was, and held for two seconds, so a lively call does not mark itself constantly and one person swearing at a bad play is not a moment",
         default: true
+    },
+    highlightSensitivity: {
+        type: OptionType.SELECT,
+        description: "How much has to happen before a marker drops by itself",
+        options: [
+            { label: "Strict - only the call properly going off", value: "strict" },
+            { label: "Normal", value: "normal", default: true },
+            { label: "Loose - one raised voice is enough", value: "loose" }
+        ]
     },
     autoHighlightSave: {
         type: OptionType.BOOLEAN,

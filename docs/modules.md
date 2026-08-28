@@ -141,7 +141,14 @@ whole of the supervision: attached, waiting for something that will come right
 on its own, or stopped by something that will not. Only the last is shown to
 anybody, and it is also the only case where no replacement is started — the
 same C#, compiled again, fails again, and the machine where the compile itself
-is what failed would pay that cycle for ever.
+is what failed would pay that cycle for ever. A bridge that dies three times
+without saying any of the three is treated the same way, since whatever killed
+it is not going to be talked out of it either.
+
+There is a fourth, which exists because collapsing it into the third was a bug:
+a warning is something wrong with a session that is attached and working, such
+as actions SteamVR does not recognise. It is shown like a problem, and the
+bridge after it is still started.
 
 All of it is switched off until `VRinstaller.ps1` at the repository root sets
 `vrInstalled` in the client's `settings.json`. Everything below is compiled into
@@ -151,8 +158,8 @@ settings are hidden, `syncVr` returns immediately, and no bridge is spawned.
 | File | Lines | What it is |
 | --- | --- | --- |
 | `vr.ts` | 247 | The renderer half: a controller press becomes the same action a keybind fires, and the player's own body becomes a signal. |
-| `vrBridge.ts` | 460 | Main process. Starts the one bridge, restarts it if it dies for a reason another one would not hit, and long-polls the same way the game feeds do. |
-| `vrHelper.ts` | 654 | The bridge itself: C# compiled at first run by PowerShell, calling OpenVR through its function tables. |
+| `vrBridge.ts` | 503 | Main process. Starts the one bridge, restarts it if it dies for a reason another one would not hit, and long-polls the same way the game feeds do. |
+| `vrHelper.ts` | 687 | The bridge itself: C# compiled at first run by PowerShell, calling OpenVR through its function tables. |
 | `vrManifest.ts` | 268 | The action manifest, the default bindings and the application manifest, which is what puts Clipper in SteamVR's own binding panel. |
 | `components/VrBindings.tsx` | 91 | The settings row: whether SteamVR is attached, and the button that opens that panel. |
 

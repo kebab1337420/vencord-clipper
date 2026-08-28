@@ -198,6 +198,22 @@ namespace Clipper
         }
 
         /*
+         * Something is wrong with a session that is otherwise working.
+         *
+         * Deliberately not an error: an error is a thing the plugin stops
+         * starting bridges over, and this session is up and delivering presses.
+         * The one that goes through here is a set SteamVR knows with actions in
+         * it that it does not, which leaves buttons that can never be bound and
+         * nothing anywhere saying why - worth saying, not worth giving up over,
+         * and above all not worth refusing to start the next bridge over after
+         * a crash that had nothing to do with it.
+         */
+        private static void Warn(string message)
+        {
+            Say("{\\"t\\":\\"warning\\",\\"message\\":\\"" + Esc(message) + "\\"}");
+        }
+
+        /*
          * Why there is no session, in words somebody can act on.
          *
          * The headset codes say nothing about whether SteamVR is running, and an
@@ -225,7 +241,13 @@ namespace Clipper
          */
         private static string Refused(int error)
         {
-            return "SteamVR will not accept a connection from a background application like this one (error " + error + "), and will not start doing so on its own";
+            string what;
+
+            if (error == 123) what = "SteamVR has decided this is a utility application, and does not give those a session";
+            else if (error == 130) what = "SteamVR does not accept the kind of application the bridge asks to be";
+            else what = "SteamVR refused the connection outright";
+
+            return what + " (error " + error + "), and waiting will not change that";
         }
 
         /*
@@ -528,8 +550,9 @@ namespace Clipper
 
             // After the ready line rather than before it, because the plugin
             // clears the last problem when a bridge attaches - and this one is
-            // still true of the bridge that just did.
-            if (missing.Length > 0) Fail("SteamVR did not recognise these actions, and nothing can be bound to them: " + missing);
+            // still true of the bridge that just did. Said again after every
+            // re-attach, for the same reason.
+            if (missing.Length > 0) Warn("SteamVR did not recognise these actions, and nothing can be bound to them: " + missing);
 
             try
             {
@@ -650,5 +673,15 @@ try {
     exit 1
 }
 
-[Clipper.Bridge]::Run($Api, $Actions, $Manifest, $AppKey, $ActionList)
+# Wrapped, because nothing else catches this. An exception on the way out of Run
+# - a function table slot that is not where the header says it is, a pointer that
+# is not what it claims - would otherwise reach PowerShell, be printed to standard
+# error, and leave the plugin holding a dead bridge it thinks is worth starting
+# again every fifteen seconds, compiling all of the above each time.
+try {
+    [Clipper.Bridge]::Run($Api, $Actions, $Manifest, $AppKey, $ActionList)
+} catch {
+    Write-Output ('{"t":"error","message":"The bridge stopped: ' + ($_.Exception.Message -replace '["\\\\]', ' ' -replace '\\s+', ' ') + '"}')
+    exit 1
+}
 `;

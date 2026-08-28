@@ -32,6 +32,11 @@
  * way, which is the fifteen-second cycle this file exists to avoid. The middle
  * one is a sentence about why, because "no headset is connected" and "SteamVR is
  * not running" want different things doing about them.
+ *
+ * There is a fourth thing it can say, and the distinction is the whole reason
+ * the three above are not two: a warning is something wrong with a session that
+ * is nonetheless attached and working. It is shown like a problem and retried
+ * like an attachment, because the bridge after it is still worth starting.
  */
 
 import { type ChildProcess, spawn } from "child_process";
@@ -60,6 +65,17 @@ const RETRY_MS = 15_000;
  */
 const READY_MS = 45_000;
 
+/**
+ * How many bridges may die without a word before the plugin stops starting them.
+ *
+ * A bridge that said anything - attached, or waiting, or why it gave up - is
+ * understood, and what to do about it is known. One that exits having said
+ * nothing is not: PowerShell refused the script, something killed it, the
+ * machine is out of whatever it needed. Three of those is enough to conclude
+ * that the fourth will go the same way, and each one costs a C# compile.
+ */
+const STILLBORN_LIMIT = 3;
+
 /** How long a bridge asked to stop gets to shut SteamVR down tidily. */
 const GRACE_MS = 2000;
 
@@ -87,6 +103,8 @@ let problem = "";
 let waiting = "";
 /** Whether the last bridge stopped for a reason another one would hit too. */
 let fatal = false;
+/** Bridges that have died without ever saying anything at all. */
+let stillborn = 0;
 let retry: NodeJS.Timeout | null = null;
 
 /**
@@ -166,9 +184,24 @@ function line(text: string): boolean {
     // Not attached, and nothing anybody did wrong: SteamVR is off, or it is on
     // with the headset still on the desk. Kept as a sentence rather than as a
     // problem, so the settings panel can say which it is.
+    //
+    // It clears the last problem as well, because the bridge is demonstrably
+    // alive and accounting for itself. Without that, one stray line on
+    // PowerShell's error stream outranks everything the bridge says for the rest
+    // of the session - and on a machine with no headset there is never an attach
+    // to clear it.
     if (message.t === "waiting") {
         runtime = "";
+        problem = "";
         waiting = String(message.reason ?? "");
+        return true;
+    }
+
+    // Attached, working, and something about it is wrong anyway. Shown like a
+    // problem, but no reason to stop starting bridges: the session it is about
+    // is running, and the next one deserves the same chance this one got.
+    if (message.t === "warning") {
+        problem = String(message.message ?? "The SteamVR bridge reported something wrong without saying what");
         return true;
     }
 
@@ -307,6 +340,15 @@ function open(): Promise<void> {
 
         started.on("exit", () => {
             if (child === started) {
+                // Counted before the two are cleared, because whether this one
+                // ever said anything is exactly what they hold.
+                if (!runtime && !waiting && !fatal) {
+                    if (++stillborn >= STILLBORN_LIMIT) {
+                        fatal = true;
+                        if (!problem) problem = `The SteamVR bridge stopped ${STILLBORN_LIMIT} times without saying why. Switch the VR controls off and on again to try it once more.`;
+                    }
+                } else stillborn = 0;
+
                 child = null;
                 runtime = "";
                 waiting = "";
@@ -336,6 +378,7 @@ function shut(): void {
     runtime = "";
     waiting = "";
     fatal = false;
+    stillborn = 0;
     presses = [];
     motion = null;
 

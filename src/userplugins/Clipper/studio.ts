@@ -25,7 +25,7 @@
 
 import { type AudioClip, type AudioSource, type DuckCurve, type Ending, scheduleClips, stretchToRate } from "./audio";
 import type { ChatLine } from "./chat";
-import { logger } from "./recorder";
+import { buildMixBus, logger } from "./recorder";
 import { pickMimeType, settings } from "./settings";
 import { seekVideo } from "./utils";
 import { speakingAt, VOICE_HZ, voiceDuckAt, type VoiceFileMeta, type VoiceLevels, voiceLevelsTouched, type VoiceTrack } from "./voice";
@@ -2253,7 +2253,7 @@ function setGain(ctx: AudioContext, gain: GainNode, value: number): void {
  * a context, so both are built here and shared by every segment cutting into the
  * same file.
  */
-async function loadSources(project: Project, sources: StudioSource[], ctx: AudioContext, dest: MediaStreamAudioDestinationNode): Promise<Map<string, Loaded>> {
+async function loadSources(project: Project, sources: StudioSource[], ctx: AudioContext, dest: AudioNode): Promise<Map<string, Loaded>> {
     const needed = new Set(project.segments.map(s => s.sourceId));
 
     // The angles are played alongside their segment, so their files have to be
@@ -2337,9 +2337,15 @@ export async function renderProject(project: Project, sources: StudioSource[], o
     const audioCtx = new AudioContext();
     const dest = audioCtx.createMediaStreamDestination();
 
+    // Everything below is summed into this rather than straight into the
+    // destination: a segment's own sound, a music bed and a rebuilt voice mix
+    // all play at once here, and three signals added together go over full
+    // scale long before any one of them does.
+    const bus = buildMixBus(audioCtx, dest);
+
     let loaded: Map<string, Loaded>;
     try {
-        loaded = await loadSources(project, sources, audioCtx, dest);
+        loaded = await loadSources(project, sources, audioCtx, bus);
         if (!loaded.size) throw new Error("None of the timeline sources could be loaded");
     } catch (e) {
         // An audio context holds a hardware handle and Chromium caps how many a
@@ -2643,7 +2649,7 @@ export async function renderProject(project: Project, sources: StudioSource[], o
                 try {
                     voiceGain = audioCtx.createGain();
                     voiceGain.gain.value = base;
-                    voiceGain.connect(dest);
+                    voiceGain.connect(bus);
 
                     voiceBand = createVoiceBand(audioCtx);
                     voiceBand.output.connect(voiceGain);
@@ -2690,7 +2696,7 @@ export async function renderProject(project: Project, sources: StudioSource[], o
 
             const stopSounds = clips.length
                 ? scheduleClips(
-                    audioCtx, dest, clips, sounds, audioCtx.currentTime, elapsed, elapsed + length,
+                    audioCtx, bus, clips, sounds, audioCtx.currentTime, elapsed, elapsed + length,
                     last ? projectEnding(project) : undefined,
                     speechDuck(project, sources, elapsed, elapsed + length)
                 )

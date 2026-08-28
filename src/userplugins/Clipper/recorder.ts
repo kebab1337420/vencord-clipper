@@ -187,6 +187,60 @@ function evenSize(n: number): number {
     return Math.max(2, Math.round(n / 2) * 2);
 }
 
+/*
+ * Where the mix is held, in dBFS, and where it is allowed to peak.
+ *
+ * Nothing in a Web Audio graph is bounded. Every channel below has its own gain
+ * and they are all added together, so two sources that each sit just under full
+ * scale come out of the sum above it, and the encoder is handed a signal it
+ * cannot represent. Measured on clips this plugin had already written: true
+ * peaks between +1.3 and +3.0 dBFS on every one of them, with the loudness
+ * range untouched - so the sound was never squashed, it was clipped, and every
+ * player and every re-encode after that flattened the tops off it.
+ *
+ * A decibel of headroom and a ceiling two below full scale. The gap between the
+ * two is for the codec: a lossy encoder reconstructs a waveform that overshoots
+ * the samples it was given, by a decibel or two on this material, and a mix
+ * mastered exactly to zero comes back out of Opus above it.
+ */
+const HEADROOM_DB = -1;
+const CEILING_DB = -2;
+
+/** Decibels to the linear gain a Web Audio node wants. */
+function fromDb(db: number): number {
+    return Math.pow(10, db / 20);
+}
+
+/**
+ * The last stage every channel is summed into, here and in the studio render.
+ *
+ * A safety net and not an effect: the ceiling is two decibels under full scale
+ * on a signal that runs at around -12 LUFS, so it is doing nothing at all for
+ * the great majority of any clip and only ever catches the peaks that would
+ * otherwise have been clipped flat. That is the opposite of what a compressor
+ * on a mix bus is normally for, and it is why the ratio is a wall rather than
+ * a slope: anything gentler leaves part of the overshoot in place.
+ *
+ * The node costs about six milliseconds of latency, which is a fifth of a frame
+ * at 30 FPS and far below anything anybody can hear against a picture.
+ */
+export function buildMixBus(ctx: BaseAudioContext, destination: AudioNode): AudioNode {
+    const master = ctx.createGain();
+    master.gain.value = fromDb(HEADROOM_DB);
+
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = CEILING_DB;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.25;
+
+    master.connect(limiter);
+    limiter.connect(destination);
+
+    return master;
+}
+
 /** What the last save produced, enough to cut it down or send it somewhere. */
 export interface SavedClip {
     name: string;
@@ -230,6 +284,8 @@ class ClipRecorder {
     private systemStream: MediaStream | null = null;
     private audioCtx: AudioContext | null = null;
     private destination: MediaStreamAudioDestinationNode | null = null;
+    /** What the channels are summed into, in front of the destination. */
+    private bus: AudioNode | null = null;
     private recorder: MediaRecorder | null = null;
 
     /** Extra input devices opened for the mix, kept so they can be stopped. */
@@ -621,6 +677,7 @@ class ClipRecorder {
 
         this.audioCtx = new AudioContext();
         this.destination = this.audioCtx.createMediaStreamDestination();
+        this.bus = buildMixBus(this.audioCtx, this.destination);
 
         let systemSource: MediaStreamAudioSourceNode | null = null;
 
@@ -674,6 +731,7 @@ class ClipRecorder {
             this.audioCtx.close().catch(() => void 0);
             this.audioCtx = null;
             this.destination = null;
+            this.bus = null;
 
             return displayTracks[0];
         }
@@ -689,8 +747,8 @@ class ClipRecorder {
      * it is moved later.
      */
     private connectChannel(id: string, source: AudioNode, level: number, factor = 1) {
-        const { audioCtx: ctx, destination } = this;
-        if (!ctx || !destination) return;
+        const { audioCtx: ctx, bus } = this;
+        if (!ctx || !bus) return;
 
         const gain = ctx.createGain();
         gain.gain.value = level * factor;
@@ -705,7 +763,7 @@ class ClipRecorder {
         meter.fftSize = id === SYSTEM_CHANNEL ? 1024 : 256;
 
         source.connect(gain);
-        gain.connect(destination);
+        gain.connect(bus);
         gain.connect(meter);
 
         this.channels.set(id, {
@@ -1442,6 +1500,7 @@ class ClipRecorder {
         this.stream = this.systemStream = null;
         this.audioCtx = null;
         this.destination = null;
+        this.bus = null;
     }
 
     /**

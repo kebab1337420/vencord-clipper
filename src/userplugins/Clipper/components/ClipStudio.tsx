@@ -5532,15 +5532,17 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                                 and nothing is ducked.
                                             </Hint>
                                         ) : (
-                                            <Hint summary="One mixed track - a mute costs the others">
+                                            <Hint summary="One mixed track - a mute is a dip, not a cut">
                                                 The call reached this client already mixed, everybody summed into one
-                                                signal, so a level here can only move the whole montage while that
-                                                person is making noise. A mute is absolute: wherever they can be heard
-                                                the sound is cut, and anybody talking across them loses those instants
-                                                too. The percentage beside a mute is how much of the clip goes with
-                                                them. Turn the native engine on in the plugin's settings and a
-                                                recording keeps one track per person, where a mute costs nobody else
-                                                anything.
+                                                signal, so a level here can only move the band a voice lives in while
+                                                that person is making noise. A mute takes 15dB out of that band for
+                                                as long as they are audible, which puts them under the game rather
+                                                than out of the clip: the game, the music and the low end play on at
+                                                full level, and anybody talking across them is dulled for those
+                                                instants. The percentage beside a mute is how much of the clip the
+                                                dip covers. Turn the native engine on in the plugin's settings and a
+                                                recording keeps one track per person, where a mute is exact and costs
+                                                nobody else anything.
                                             </Hint>
                                         )}
 
@@ -5567,7 +5569,7 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                                                     {gain === 0
                                                                         ? separated.has(person.id)
                                                                             ? "muted - lifted out of the mix"
-                                                                            : `muted - silences ${Math.round(mutedFraction(person) * 100)}% of the clip`
+                                                                            : `muted - dips ${Math.round(mutedFraction(person) * 100)}% of the clip`
                                                                         : `${Math.round(gain * 100)}%`}
                                                                 </b>
                                                             </label>
@@ -5601,10 +5603,12 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                             <Hint summary="What this mute costs">
                                                 The mute works on the band that voice lives in, not on the whole
                                                 soundtrack: the game, the music and the low end carry on at full
-                                                volume while the muted person drops out. What it cannot do is tell two
-                                                voices apart - two people talking at once are literally the same
-                                                samples - so anybody talking across them sounds muffled for those
-                                                instants.
+                                                volume while the muted person is pushed down under them. What it
+                                                cannot do is tell two voices apart - two people talking at once are
+                                                literally the same samples - so anybody talking across them is dulled
+                                                for those instants, and the muted person is quiet rather than gone.
+                                                A recording with a track per person is the only place a mute is
+                                                absolute.
                                             </Hint>
                                         )}
 

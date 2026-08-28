@@ -258,6 +258,8 @@ export interface SavedClip {
 class ClipRecorder {
     /** Whether a save has already said out loud that the engine would not write. */
     private nativeSaveWarned = false;
+    /** Saves in a row the engine answered with nothing at all. */
+    private nativeFailures = 0;
 
     /** Whether Discord's own clip engine is armed alongside our buffer. */
     private native = false;
@@ -1631,7 +1633,12 @@ class ClipRecorder {
                      * game, about a clip that was in fact saved. What they need
                      * to know is what they lost, which is the track per person.
                      */
-                    logger.error("The native clip engine could not save, falling back to the plugin's own buffer", e);
+                    logger.error(
+                        engineTornDown()
+                            ? "The native clip engine has no capture for this source and would not hand over its per-person audio either, falling back to the plugin's own buffer"
+                            : "The native clip engine could not save, falling back to the plugin's own buffer",
+                        e
+                    );
 
                     if (!this.nativeSaveWarned) {
                         this.nativeSaveWarned = true;
@@ -1639,16 +1646,27 @@ class ClipRecorder {
                     }
 
                     /*
-                     * Its answer for this source, not a bad moment: every save
-                     * until the buffer is armed again would go the same way.
+                     * A dead capture is not a reason to stop asking.
                      *
-                     * Disarmed rather than merely ignored, because an arming
-                     * left standing keeps the helper process alive and keeps
-                     * this plugin's shield over the engine's teardown calls -
-                     * both of them held for a buffer that will never be read.
+                     * This used to disarm the moment the engine tore its
+                     * capture down, on the grounds that the answer for this
+                     * source would not change. The answer does not change, and
+                     * the answer is worth having: with no capture the engine
+                     * still records a track per person, and a pictureless file
+                     * full of those tracks is exactly what `saveNative` folds
+                     * into the plugin's own clip. Disarming there is what left
+                     * every clip on a machine capturing a screen with one mixed
+                     * soundtrack and a mute that could only duck.
+                     *
+                     * What is worth giving up on is an engine that answers
+                     * nothing at all. Two of those in a row and the arming goes,
+                     * because an arming left standing keeps the helper process
+                     * alive and keeps this plugin's shield over the engine's
+                     * teardown calls - both of them held for a buffer nothing
+                     * will ever read.
                      */
-                    if (engineTornDown()) {
-                        logger.info("Leaving the native clip engine out for the rest of this buffer.");
+                    if (++this.nativeFailures >= 2) {
+                        logger.info("Leaving the native clip engine out for the rest of this buffer: it has answered two saves in a row with nothing.");
                         disarm();
                         this.native = false;
                     }
@@ -1944,6 +1962,7 @@ class ClipRecorder {
 
         this.native = true;
         this.nativeSaveWarned = false;
+        this.nativeFailures = 0;
 
         /*
          * The same message either way, because the difference does not concern
@@ -2063,6 +2082,7 @@ class ClipRecorder {
          * hour later, in the studio. So it says so.
          */
         if (!(seconds > 0)) {
+            this.nativeFailures++;
             logger.warn(`The native clip engine had nothing buffered (it reported ${reported}); falling back to the plugin's own buffer.`);
             toast("The native engine had no footage buffered - saved the plugin's mixed recording instead", Toasts.Type.MESSAGE);
             return false;
@@ -2070,6 +2090,10 @@ class ClipRecorder {
 
         const saved = path.split(/[\\/]/).pop() || name;
         const data = await Native.readClip(settings.store.saveDirectory, saved);
+
+        // It answered with a file, so whatever else is wrong with it, the
+        // engine is not the thing to give up on.
+        this.nativeFailures = 0;
 
         /*
          * A clip with no picture is not a clip.

@@ -527,6 +527,31 @@ const DUCK_BACK = 3;
 const DUCK_AHEAD = 1;
 
 /**
+ * How far down a mute may take the speech band when the person has no track.
+ *
+ * This used to be zero, and zero was the wrong instruction. On a recording that
+ * arrived mixed, a mute at zero cuts everything a voice can reach for as long
+ * as the muted person is audible at all - measured across real clips, between a
+ * quarter and three fifths of the running time - so muting one person in a
+ * seven-person call handed back a clip whose game, music and other voices were
+ * hollowed out for most of its length. What was asked for was one voice gone,
+ * not the clip gone.
+ *
+ * So the floor moved off zero, and a mute on a mixed recording is a hard dip
+ * rather than a cut: 15dB out of the band that carries the words, held only
+ * while that person is audible, which puts them under a game's own noise
+ * without emptying the moment around them. It is not the mute that a track per
+ * person gives, and nothing done to one mixed signal can be: two people talking
+ * at once are the same samples. That mute is `nativeClips.ts`, and where its
+ * tracks exist none of this runs at all.
+ *
+ * The number is the honest half of a trade rather than a tuning. Below about
+ * -20dB the rest of the clip starts to sound gutted again, and above about
+ * -10dB the muted person can still be followed.
+ */
+const MUTE_FLOOR = 0.18;
+
+/**
  * The same, for somebody who has been muted outright.
  *
  * 600ms behind and 400ms ahead. Wider than the duck because the flag is not a
@@ -585,7 +610,7 @@ function silencedAt(track: VoiceTrack, seconds: number): boolean {
 }
 
 /**
- * How much of a track's own recording a mute would silence, from 0 to 1.
+ * How much of a clip a mute would dip, from 0 to 1.
  *
  * Shown in the panel next to anyone set to zero, because a mute on a mixed
  * recording has a price and the person paying it should see it before they
@@ -614,7 +639,7 @@ export function voiceGainOf(levels: VoiceLevels | undefined, userId: string): nu
 }
 
 /**
- * How loud the speech in the clip should be at an instant, so that the
+ * How loud the speech band in the clip should be at an instant, so that the
  * per-person levels are heard in the file.
  *
  * A level, not a master volume. What it drives is the notch in `voiceBand.ts`,
@@ -633,28 +658,27 @@ export function voiceGainOf(levels: VoiceLevels | undefined, userId: string): nu
  *
  * Two rules, because a mute and a slider are different instructions:
  *
- *   - a mute is absolute. Wherever the muted person is heard, the speech band
- *     goes to its floor. They are unintelligible for the whole clip, which is
- *     the only thing a mute can honestly mean on a mixed recording, and
- *     anybody talking across them is dulled along with them.
+ *   - a mute is a hard dip, not a cut. Wherever the muted person is heard, the
+ *     speech band drops to `MUTE_FLOOR` and no further, so they go under the
+ *     game rather than taking it with them. See the note on that number for
+ *     what it costs either way.
  *   - a partial level is proportional. Each speaker's share of an instant is
  *     their level over the total heard, so the shares add up to one: someone
  *     talking alone owns the moment, two at once pull half each.
  *
- * The second half of the mute rule is the reason this is the fallback and not
- * the answer. Two people talking at once are the same samples, and no filter
- * separates them, so the notch that takes one voice out takes the other's
- * clarity with it. A mute that only ducked where somebody talked across the
- * muted person was offered as a setting, and it was a trap: the moments a mute
- * exists for are exactly the moments somebody is talking over them, so the
- * setting let the muted person through precisely where they most needed to be
- * gone. It is out. Muting exactly, with the rest of the call left alone, is a
- * job for a recording with a track per person - `nativeClips.ts` - not for
- * anything that can be done to one mixed signal after the fact.
+ * The floor is the reason this is the fallback and not the answer. Two people
+ * talking at once are the same samples, and no filter separates them, so the
+ * notch that takes one voice out takes the other's clarity with it - and a
+ * notch deep enough to make the mute absolute takes the whole clip's middle
+ * with it for as long as the muted person keeps talking. Muting exactly, with
+ * the rest of the call left alone, is a job for a recording with a track per
+ * person - `nativeClips.ts` - not for anything that can be done to one mixed
+ * signal after the fact.
  *
  * So what is left to get right here is *how much* of the call a mute takes with
- * it, and that is entirely `MUTE_BACK` and `MUTE_AHEAD`. Both are deliberately
- * small; see the note on them for the measurements.
+ * it, and that is `MUTE_FLOOR` for the depth and `MUTE_BACK` and `MUTE_AHEAD`
+ * for the width. All three are deliberately small; see the notes on them for
+ * the measurements.
  *
  * Worth knowing while reading the numbers: the engine's per-user levels do not
  * arrive on every client, and where they do not every sample is the flat
@@ -669,14 +693,13 @@ export function voiceDuckAt(
     if (!tracks.length || !levels) return 1;
 
     /*
-     * The muted people first, on their own window, and silence wins outright.
+     * The muted people first, on their own window, and the deepest dip wins.
      *
      * A pass of its own because the two rules read different windows, and
-     * because no share of an instant averages down to nothing. Ducking by a
-     * muted person's share was tried instead, so that whoever talked across
-     * them would survive: it leaves them audible under the other voice, which
-     * is not a mute. Between the two failures, the one that keeps a muted
-     * person out of the clip is the one that matches the instruction.
+     * because no share of an instant averages down to the floor: a person
+     * muted while three others talk would come out barely touched under the
+     * proportional rule, which is not what a mute says. Whoever is muted sets
+     * the depth for the instant, and everyone else's share is left out of it.
      */
     for (const track of tracks) {
         if (voiceGainOf(levels, track.id) !== 0) continue;
@@ -690,10 +713,11 @@ export function voiceDuckAt(
          * mixed signal the only way to keep the other voice is to keep the
          * muted one under it, so the setting turned every overlapping moment -
          * which is most of a conversation - into the muted person still being
-         * heard. Zero here costs whoever was talking across them their clarity
-         * for those instants, and nothing outside the speech band at all.
+         * heard. The floor pays for that differently: whoever talks across them
+         * loses 15dB of the band they share for those instants and keeps the
+         * rest, instead of losing all of it.
          */
-        return 0;
+        return MUTE_FLOOR;
     }
 
     const heard: { id: string; level: number; }[] = [];
@@ -712,7 +736,10 @@ export function voiceDuckAt(
     let gain = 1;
     for (const { id, level } of heard) gain += (level / total) * (voiceGainOf(levels, id) - 1);
 
-    return Math.min(2, Math.max(0, gain));
+    // Floored like a mute is, and for the same reason: a slider pulled to
+    // nothing on somebody who owns the moment is a mute in all but name, and it
+    // has no more right to empty the clip than one.
+    return Math.min(2, Math.max(MUTE_FLOOR, gain));
 }
 
 /** True when any person on the project has been moved off 1. */

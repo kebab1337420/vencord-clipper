@@ -353,10 +353,13 @@ function pauseOffering(why: string): void {
 }
 
 /**
- * Whether the engine has given up on the source this buffer was armed with.
+ * Whether the engine gave up on capturing the source this buffer was armed with.
  *
- * The caller uses it to stop coming back: a teardown is not a bad moment, it is
- * the engine's answer for this source, and the next save would get the same one.
+ * A statement about the picture and nothing else. The engine goes on recording
+ * a track per person after its capture session has died - that is the file
+ * `saveNative` catches and hands to the muxer, call audio over no video at all -
+ * so the caller uses this to stop expecting a picture from the engine, not to
+ * stop asking it for anything.
  */
 export function engineTornDown(): boolean {
     return torndown;
@@ -922,18 +925,24 @@ export async function saveNativeClip(filepath: string, seconds: number, metadata
     if (!found?.saveClipEx) throw new Error("The native clip engine is not available.");
 
     /*
-     * Nothing to ask for, so nothing is asked.
+     * A dead capture is not an empty ring, and this used to treat it as one.
      *
-     * When the engine tore its capture down on the source it was offered, its
-     * ring buffer holds no video and no window of it can be written. The four
-     * requests below would each come back
-     * `FinishedAddingTracks failed to find appropriate starting and ending
-     * timestamp`, which is the muxer's way of saying the ring was empty, and
-     * the caller would show the last of them to somebody who wanted a clip.
-     * The plugin's own buffer has been filling the whole time, so failing here
-     * immediately and plainly is what gets them that clip soonest.
+     * When the engine tears its capture down on the source it was offered - a
+     * screen id, which the native side reads as a window handle and resolves to
+     * `HWND(0x0)` - the video half of its ring holds nothing and no window of
+     * it can be written. The audio half carries on: the engine keys audio by
+     * user on the way in and goes on doing it with no capture session at all,
+     * which is the pictureless file `saveNative` already knows how to take
+     * apart. Refusing here threw that away and left every clip on this machine
+     * with one mixed soundtrack, which is the one file a mute can do nothing
+     * honest with.
+     *
+     * So a teardown now costs the request its window rather than the whole
+     * call. A windowed request needs the video timestamps the ring has not got;
+     * the last attempt names no window at all, and that is the one that comes
+     * back with the tracks.
      */
-    if (torndown) throw new Error("the engine tore its capture down when it was given the source, so its buffer holds nothing");
+    if (torndown) logger.info("The engine has no capture for this source; asking it for the per-person audio alone.");
 
     const at = now();
     if (at == null) throw new Error("The native clip engine has no clock.");
@@ -985,9 +994,14 @@ export async function saveNativeClip(filepath: string, seconds: number, metadata
 
     const attempts: { label: string; request: SaveRequest; }[] = [];
 
-    for (const span of [to - from, Math.round((to - from) / 2), 4000]) {
-        if (span < MIN_SPAN_MS || span > to - from) continue;
-        attempts.push({ label: `${span / 1000}s window`, request: windowed(span) });
+    // Skipped outright once the capture is dead: every one of them is bounded
+    // by video timestamps that were never written, so they cost a muxer failure
+    // each and answer nothing the last attempt does not.
+    if (!torndown) {
+        for (const span of [to - from, Math.round((to - from) / 2), 4000]) {
+            if (span < MIN_SPAN_MS || span > to - from) continue;
+            attempts.push({ label: `${span / 1000}s window`, request: windowed(span) });
+        }
     }
 
     attempts.push({ label: "whatever the engine is holding", request: base });

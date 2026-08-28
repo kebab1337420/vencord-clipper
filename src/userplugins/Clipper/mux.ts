@@ -37,12 +37,9 @@
 
 import { Logger } from "@utils/Logger";
 
-import { type Box, boxes, descend, find } from "./boxes";
+import { type Box, boxes, descend, find, handlerName, NON_SYNC } from "./boxes";
 
 const logger = new Logger("Clipper");
-
-/** `sample_is_non_sync_sample`, the one flag bit that matters here. */
-const NON_SYNC = 0x00010000;
 
 /** Movie timescale of the file written out. Milliseconds, for legibility. */
 const MOVIE_TIMESCALE = 1000;
@@ -84,17 +81,6 @@ function handlerType(view: DataView, hdlr: Box): string {
         view.getUint8(hdlr.start + 8), view.getUint8(hdlr.start + 9),
         view.getUint8(hdlr.start + 10), view.getUint8(hdlr.start + 11)
     );
-}
-
-function handlerName(data: Uint8Array, hdlr: Box): string {
-    // 4 version and flags, 4 predefined, 4 handler type, 12 reserved.
-    const at = hdlr.start + 24;
-    if (at >= hdlr.end) return "";
-
-    let end = data.indexOf(0, at);
-    if (end === -1 || end > hdlr.end) end = hdlr.end;
-
-    return new TextDecoder().decode(data.subarray(at, end));
 }
 
 /* ------------------------------------------------------------------ reading */

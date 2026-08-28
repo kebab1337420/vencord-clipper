@@ -37,6 +37,13 @@
  * the three above are not two: a warning is something wrong with a session that
  * is nonetheless attached and working. It is shown like a problem and retried
  * like an attachment, because the bridge after it is still worth starting.
+ *
+ * One refinement on top of that: where an error lands decides whether it is
+ * final. Before a session was ever up, it is about the bridge, and the next
+ * bridge is the same bridge - same C#, same manifest, same SteamVR. After one
+ * was up and delivering presses, it is about that session, and what it usually
+ * is, a call into a SteamVR that has just gone away, is over by the time
+ * another one starts. Those get a few more goes before the plugin gives up.
  */
 
 import { type ChildProcess, spawn } from "child_process";
@@ -76,6 +83,18 @@ const READY_MS = 45_000;
  */
 const STILLBORN_LIMIT = 3;
 
+/**
+ * How many sessions may come up and then fail before the plugin gives up.
+ *
+ * Retrying those is right: what they hit was true of a session that had already
+ * worked, and most of it - SteamVR being shut down underneath the bridge, a
+ * headset unplugged mid-call - is over before the next bridge starts. Retrying
+ * for ever is not, because a bridge that attaches and dies every fifteen
+ * seconds costs exactly the same PowerShell start and C# compile as one that
+ * never attaches at all. Three is where the benefit of the doubt runs out.
+ */
+const CRASH_LIMIT = 3;
+
 /** How long a bridge asked to stop gets to shut SteamVR down tidily. */
 const GRACE_MS = 2000;
 
@@ -105,6 +124,8 @@ let waiting = "";
 let fatal = false;
 /** Bridges that have died without ever saying anything at all. */
 let stillborn = 0;
+/** Sessions that came up, worked, and then failed. */
+let crashed = 0;
 let retry: NodeJS.Timeout | null = null;
 
 /**
@@ -205,12 +226,19 @@ function line(text: string): boolean {
         return true;
     }
 
-    // An error is by definition something no retry fixes: the bridge reports
-    // everything it can wait out as waiting, from inside, without stopping. So
-    // this both remembers the message and stops another bridge being started.
+    // An error is something the bridge could not wait out: everything it can
+    // wait out is reported as waiting instead, from inside, without stopping.
+    // So this remembers the message, and usually stops another bridge being
+    // started.
+    //
+    // Usually, because where it lands decides. One that arrives before a
+    // session was ever up is about the bridge itself, and the bridge after it
+    // is identical. One that arrives after a session was up and working is
+    // about that session, and is worth a few more attempts - counted, so that a
+    // session which comes up and falls over every time still stops eventually.
     if (message.t === "error") {
         problem = String(message.message ?? "The SteamVR bridge failed for a reason it did not give");
-        fatal = true;
+        fatal = !runtime || ++crashed >= CRASH_LIMIT;
         return true;
     }
 
@@ -241,7 +269,8 @@ function later() {
      * for nothing, for ever.
      *
      * Turning the setting off and on again clears it, which is where somebody
-     * who has fixed the cause will go anyway.
+     * who has fixed the cause will go anyway; so does starting Discord again,
+     * since the bridge is started fresh from a setting that is already on.
      */
     if (retry || !wanted || fatal) return;
 
@@ -297,6 +326,14 @@ function open(): Promise<void> {
     child = started;
     runtime = "";
     waiting = "";
+    // Cleared with the two above it, and for the same reason: all three are
+    // about the bridge that was, and this is a new one. Nothing reaches here
+    // while a fatal stop stands except a deliberate start - the plugin starting
+    // with the setting already on, or the setting being turned on - and either
+    // one is somebody asking for another go. The retry timer, which is nobody
+    // asking, checks the flag in later() and stays away. The two counts are not
+    // cleared, so a bridge that keeps dying the same way still runs out.
+    fatal = false;
 
     return new Promise<void>(resolve => {
         let settled = false;
@@ -379,6 +416,7 @@ function shut(): void {
     waiting = "";
     fatal = false;
     stillborn = 0;
+    crashed = 0;
     presses = [];
     motion = null;
 

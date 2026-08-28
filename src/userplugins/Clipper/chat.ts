@@ -56,7 +56,7 @@ interface HeldLine extends Omit<ChatLine, "at"> {
  * capture taken outside a call falls back to whatever text channel is on
  * screen, which is the only other thing the person recording can be reading.
  */
-function watchedChannel(): string | undefined {
+export function watchedChannel(): string | undefined {
     try {
         return SelectedChannelStore.getVoiceChannelId() ?? SelectedChannelStore.getChannelId() ?? undefined;
     } catch {

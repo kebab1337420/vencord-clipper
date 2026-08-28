@@ -93,7 +93,7 @@ function folder(): string {
  * case, which is what a real machine looks like - so the first that is actually
  * on disk wins.
  */
-export function runtimePath(): string | null {
+function runtimePath(): string | null {
     const registry = join(process.env.LOCALAPPDATA ?? "", "openvr", "openvrpaths.vrpath");
 
     try {

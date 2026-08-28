@@ -27,6 +27,7 @@ import { Logger } from "@utils/Logger";
 
 import { loadClipUrl, probeRange, writeClipCopy } from "./clips";
 import { encodeGif } from "./gif";
+import { seekVideo as seek } from "./utils";
 
 const logger = new Logger("Clipper");
 
@@ -194,26 +195,6 @@ async function grabFrames(url: string, { from, to, fps = DEFAULT_FPS, width = DE
     }
 
     return frames;
-}
-
-/** Seeks and waits, giving up rather than hanging on a frame that never lands. */
-function seek(video: HTMLVideoElement, at: number): Promise<void> {
-    return new Promise<void>(resolve => {
-        let done = false;
-
-        const settle = () => {
-            if (done) return;
-
-            done = true;
-            clearTimeout(timer);
-            video.removeEventListener("seeked", settle);
-            resolve();
-        };
-
-        const timer = setTimeout(settle, 2000);
-        video.addEventListener("seeked", settle);
-        video.currentTime = at;
-    });
 }
 
 /** Redraws every frame smaller, through a canvas, since ImageData cannot scale. */

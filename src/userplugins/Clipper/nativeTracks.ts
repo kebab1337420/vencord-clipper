@@ -38,7 +38,7 @@
 
 import { Logger } from "@utils/Logger";
 
-import { type Box, boxes, descend, find } from "./boxes";
+import { type Box, boxes, descend, find, handlerName } from "./boxes";
 
 const logger = new Logger("Clipper");
 
@@ -60,23 +60,6 @@ interface NativeTrack {
     offset: number;
     /** The track's AAC frames, each behind an ADTS header. */
     adts: Uint8Array;
-}
-
-/**
- * The name an MP4 handler box carries, which is where Discord writes the id.
- *
- * The box is a version byte, three flags, four reserved words and then the
- * name - as a C string on what ffmpeg writes, so a trailing NUL is dropped
- * rather than being handed on as part of the id.
- */
-function handlerName(data: Uint8Array, hdlr: Box): string {
-    const at = hdlr.start + 24;
-    if (at >= hdlr.end) return "";
-
-    let { end } = hdlr;
-    if (data[end - 1] === 0) end--;
-
-    return new TextDecoder().decode(data.subarray(at, end));
 }
 
 /** The sample entries of one track, as [offset, size] pairs into the file. */

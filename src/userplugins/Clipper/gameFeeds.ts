@@ -35,7 +35,7 @@
  * is what it is for.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { createServer, type Server } from "http";
 import { get as httpsGet } from "https";
 import { homedir } from "os";
@@ -83,11 +83,26 @@ let configPath = "";
 let leagueTimer: ReturnType<typeof setInterval> | null = null;
 let problems: string[] = [];
 
+/** How many problems are worth keeping. */
+const MAX_PROBLEMS = 12;
+
 let queued: GameEvent[] = [];
 let waiters: Array<(event: GameEvent | null) => void> = [];
 
 /** What is actually up, so asking for the same thing again changes nothing. */
 let listening = { cs2: false, league: false };
+
+/**
+ * Remembers what went wrong, without letting it pile up.
+ *
+ * A listener that fails after it came up can fail again as often as the game
+ * posts, and this list is read by a settings panel: the first few sentences say
+ * what is wrong and every repeat after them is the same sentence again.
+ */
+function note(message: string): void {
+    if (problems.length >= MAX_PROBLEMS || problems.includes(message)) return;
+    problems.push(message);
+}
 
 /**
  * The tail of the queue every start is put through, so none of them overlap.
@@ -228,10 +243,17 @@ function startServer(): Promise<number> {
             let body = "";
             let over = false;
 
-            req.on("data", (chunk: Buffer) => {
+            // Decoded by the stream rather than chunk by chunk: a multi-byte
+            // character split across a packet boundary becomes a pair of
+            // replacement characters when each half is converted on its own,
+            // and one of those - in a map name, in somebody's clan tag - makes
+            // the whole post unparseable and drops it in silence.
+            req.setEncoding("utf8");
+
+            req.on("data", (chunk: string) => {
                 if (over) return;
 
-                body += chunk.toString("utf8");
+                body += chunk;
                 if (body.length > MAX_BODY) {
                     over = true;
                     body = "";
@@ -260,11 +282,23 @@ function startServer(): Promise<number> {
                 return;
             }
 
-            problems.push(`The Counter-Strike listener could not open a port (${e.code ?? e.message})`);
+            note(`The Counter-Strike listener could not open a port (${e.code ?? e.message})`);
             try {
                 listener.close();
             } catch {
                 // Never opened.
+            }
+
+            // An error can also arrive long after the listen succeeded, and
+            // that is the shape worth handling: the promise below has resolved,
+            // so nothing here reaches the caller, and leaving the handle in
+            // place has alreadyUp() report a listener that is shut as running -
+            // the feed would then never be rebuilt for the rest of the session.
+            // Cleared, so the next start puts it back up.
+            if (server === listener) {
+                server = null;
+                port = 0;
+                listening = { ...listening, cs2: false };
             }
 
             resolve(0);
@@ -336,7 +370,7 @@ function cs2ConfigDirectory(): string {
 function writeCs2Config(at: number): string {
     const dir = cs2ConfigDirectory();
     if (!dir) {
-        problems.push("Counter-Strike 2 is not installed where Steam usually puts it, so its config was not written");
+        note("Counter-Strike 2 is not installed where Steam usually puts it, so its config was not written");
         return "";
     }
 
@@ -367,8 +401,31 @@ function writeCs2Config(at: number): string {
         writeFileSync(file, body, "utf8");
         return file;
     } catch (e) {
-        problems.push(`Counter-Strike 2's config could not be written (${(e as Error).message})`);
+        note(`Counter-Strike 2's config could not be written (${(e as Error).message})`);
         return "";
+    }
+}
+
+/**
+ * Takes that config back out of the game's folder.
+ *
+ * Not tidiness. The file names a port, and the moment nothing is listening on
+ * it there is nothing there - but Counter-Strike goes on reading the config at
+ * every launch and posting its whole state at every round to a port nobody
+ * holds. That outlives the setting being turned off, and it outlives the plugin
+ * being removed, for as long as the file sits there.
+ */
+function dropCs2Config(): void {
+    const file = configPath;
+    configPath = "";
+
+    if (!file) return;
+
+    try {
+        unlinkSync(file);
+    } catch {
+        // Already gone, or the folder is no longer writable. Either way the
+        // config names a dead port and there is nothing further to do here.
     }
 }
 
@@ -549,7 +606,7 @@ function startLeague(): void {
             if (leagueWarned) return;
 
             leagueWarned = true;
-            problems.push(`League of Legends could not be read (${(e as Error).message})`);
+            note(`League of Legends could not be read (${(e as Error).message})`);
         });
     }, LEAGUE_MS);
 }
@@ -622,7 +679,9 @@ function stopFeeds(): void {
 
     server = null;
     port = 0;
-    configPath = "";
+
+    dropCs2Config();
+
     queued = [];
 
     const waiting = waiters;

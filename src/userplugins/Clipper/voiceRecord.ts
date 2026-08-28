@@ -30,12 +30,11 @@ import { Logger } from "@utils/Logger";
 
 import { lengthBytes, repairBytes } from "./repair";
 import { settings } from "./settings";
+// The main buffer's own, so both sides cut on the same boundaries.
+import { TIMESLICE } from "./utils";
 import { type VoiceTap, voiceTaps } from "./voiceTaps";
 
 const logger = new Logger("Clipper", "#f0b132");
-
-/** Same as the main buffer's, so both sides cut on the same boundaries. */
-const TIMESLICE = 1000;
 
 /** How often to look for a receiver that has opened since the last look. */
 const SCAN_MS = 2000;

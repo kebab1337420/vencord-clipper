@@ -22,10 +22,11 @@ import type { PluginNative } from "@utils/types";
 
 import { deleteClip, readClipBytes, typeOfClip, writeClipBytes } from "./clips";
 import { dropMeta, readMeta, setMeta } from "./library";
-import { errorMessage, logger, recorder } from "./recorder";
+import { logger, recorder } from "./recorder";
 import { trimBytes } from "./repair";
 import { sendClipRange } from "./send";
 import type { StudioAction } from "./studioOverlay";
+import { errorMessage } from "./utils";
 
 const Native = VencordNative.pluginHelpers.Clipper as PluginNative<typeof import("./native")>;
 

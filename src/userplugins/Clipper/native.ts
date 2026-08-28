@@ -1264,17 +1264,31 @@ interface ManifestEntry {
     sha256?: string;
 }
 
-/** The file list a build left behind, or null for a release published without one. */
+/**
+ * The file list a build left behind, or null for a release published without one.
+ *
+ * Only a 404 answers null. Everything else - a rate limit, a proxy's error page,
+ * a body that is not the JSON it should be - throws, because this list is what
+ * carries the hashes. Reading a failure to fetch it as "this release has no
+ * manifest" would fall back to the unchecked path and install a bundle nothing
+ * was compared against, and the moment that happens is exactly the moment
+ * something is interfering with the fetch.
+ */
 async function fetchManifest(tag: string): Promise<Record<string, ManifestEntry> | null> {
     const { status, body } = await httpGet(`https://raw.githubusercontent.com/${UPDATE_REPO}/${tag}/prebuilt/build-info.json`);
-    if (status !== 200) return null;
+    if (status === 404) return null;
+    if (status !== 200) throw new Error(`The release's file list answered ${status}, so there is nothing to check the bundle against`);
 
+    let files: unknown;
     try {
-        const { files } = JSON.parse(body.toString("utf8"));
-        return files && typeof files === "object" ? files : null;
+        ({ files } = JSON.parse(body.toString("utf8")));
     } catch {
-        return null;
+        throw new Error("The release's file list could not be read, so there is nothing to check the bundle against");
     }
+
+    if (!files || typeof files !== "object") throw new Error("The release's file list names no files");
+
+    return files as Record<string, ManifestEntry>;
 }
 
 /**
@@ -1342,7 +1356,61 @@ export async function downloadUpdate(_: IpcMainInvokeEvent, tag: string): Promis
             throw new Error("There is no Clipper in that release's renderer");
         }
 
-        for (const name of written) renameSync(join(staging, name), join(dir, name));
+        /*
+         * The swap, which is the one part of this that can still go wrong.
+         *
+         * Twelve renames are twelve chances to fail, and the likeliest failure
+         * is not exotic: renderer.js is loaded by the very process replacing it,
+         * and Windows refuses to move over a file that is held open. Stopping
+         * half way would leave a patcher from one release beside a renderer from
+         * another - a client that does not start - and the staging folder, the
+         * only other copy of anything, is deleted on the way out.
+         *
+         * So each live file is moved aside before its replacement is put down,
+         * and if any single rename fails every step already taken is undone.
+         */
+        const backup = join(staging, ".previous");
+        mkdirSync(backup, { recursive: true });
+
+        /** Names whose live file has been moved aside. */
+        const moved: string[] = [];
+        /** And those that have a new file in place. */
+        const placed: string[] = [];
+
+        try {
+            for (const name of written) {
+                const live = join(dir, name);
+
+                if (existsSync(live)) {
+                    renameSync(live, join(backup, name));
+                    moved.push(name);
+                }
+
+                renameSync(join(staging, name), live);
+                placed.push(name);
+            }
+        } catch (e) {
+            // The new files first, so the old ones have somewhere to go back
+            // to. A name this install did not carry before is simply removed.
+            for (const name of placed) {
+                try {
+                    unlinkSync(join(dir, name));
+                } catch {
+                    // Held open, in which case the restore below cannot step
+                    // over it either. Nothing here can do better than say so.
+                }
+            }
+
+            for (const name of moved) {
+                try {
+                    renameSync(join(backup, name), join(dir, name));
+                } catch {
+                    // Nothing further to try from here.
+                }
+            }
+
+            throw new Error(`The update could not be put in place (${(e as Error).message}). The bundle that was there has been put back.`);
+        }
 
         return written;
     } finally {

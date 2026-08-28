@@ -21,9 +21,14 @@
  * The same machinery cuts a clip down to a range without going near an encoder:
  * a fragment is a self-contained unit, so keeping a run of them and rebasing the
  * result is a lossless trim, at the cost of landing on fragment boundaries.
+ *
+ * The box walk is this file's own, for the reason ./boxes gives: it scans while
+ * it rewrites and wants the header offset of every box, which is a different
+ * walk rather than the same one with a flag. The sample flag is shared, since
+ * that is a number in a specification rather than a way of reading.
  */
 
-const NON_SYNC = 0x00010000;
+import { NON_SYNC } from "./boxes";
 
 /** Largest hole, in milliseconds, that still counts as continuous footage. */
 const MAX_GAP = 3000;

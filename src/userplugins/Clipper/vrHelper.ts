@@ -58,6 +58,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 
 namespace Clipper
@@ -169,10 +170,33 @@ namespace Clipper
             return (T) (object) Marshal.GetDelegateForFunctionPointer(fn, typeof(T));
         }
 
+        /*
+         * One string, made safe to sit inside the JSON written by hand above.
+         *
+         * The control characters are replaced rather than escaped, because
+         * every message that comes through here is a sentence meant for a
+         * person and none of them mean anything as a tab or a newline. What
+         * matters is that none of them survive: a raw control character inside
+         * a JSON string makes the whole line unparseable, and an unparseable
+         * line is dropped in silence at the other end. For an error line that
+         * means a bridge which gave its reason and had it thrown away, leaving
+         * the plugin to work out three bridges later that something is wrong.
+         */
         private static string Esc(string text)
         {
             if (text == null) return "";
-            return text.Replace("\\\\", "\\\\\\\\").Replace("\\"", "\\\\\\"").Replace("\\r", " ").Replace("\\n", " ");
+
+            StringBuilder built = new StringBuilder(text.Length);
+
+            foreach (char c in text)
+            {
+                if (c == '\\\\') built.Append("\\\\\\\\");
+                else if (c == '"') built.Append("\\\\\\"");
+                else if (c < ' ' || c == (char) 127) built.Append(' ');
+                else built.Append(c);
+            }
+
+            return built.ToString();
         }
 
         private static void Say(string line)

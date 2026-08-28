@@ -1,6 +1,6 @@
 # The module map
 
-Seventy-one files, about thirty-five thousand lines. The root `README.md` says what
+Seventy-two files, about thirty-five thousand lines. The root `README.md` says what
 the plugin does for the person using it; this says where each part of it lives,
 so that a change can start from the right file instead of from a search.
 
@@ -32,9 +32,9 @@ window that shows the same controls over a full-screen game.
 
 | File | Lines | What it is |
 | --- | --- | --- |
-| `index.tsx` | 313 | The plugin definition: what starts, what stops, and where the overlay root is mounted. |
-| `native.ts` | 1363 | The main process half. Path safety, size caps and every file, `ffmpeg` and keybind operation the renderer asks for. |
-| `settings.tsx` | 433 | The settings the user sees, and their defaults. |
+| `index.tsx` | 315 | The plugin definition: what starts, what stops, and where the overlay root is mounted. |
+| `native.ts` | 1431 | The main process half. Path safety, size caps and every file, `ffmpeg` and keybind operation the renderer asks for. |
+| `settings.tsx` | 453 | The settings the user sees, and their defaults. |
 
 ## Capture
 
@@ -42,8 +42,8 @@ Everything that produces bytes while nothing is being edited.
 
 | File | Lines | What it is |
 | --- | --- | --- |
-| `recorder.ts` | 2602 | The rolling buffer: the capture stream, the timeslices, the ring, and saving a clip out of it. |
-| `voiceRecord.ts` | 361 | One rolling buffer per person in the call, so a clip can be remixed after the fact. |
+| `recorder.ts` | 2588 | The rolling buffer: the capture stream, the timeslices, the ring, and saving a clip out of it. |
+| `voiceRecord.ts` | 360 | One rolling buffer per person in the call, so a clip can be remixed after the fact. |
 | `voiceTaps.ts` | 428 | Taking each speaker's audio before Discord mixes it down. |
 | `micInput.ts` | 946 | The microphone, taken the way Discord itself takes it, including its processing settings. |
 | `clipSound.ts` | 238 | The sound the plugin makes when a clip is saved. |
@@ -64,8 +64,8 @@ asked for, and a marker comes from the picture or from the game saying so.
 | `signals.ts` | 265 | The board every detector pins to. Levels fade, events decay, testimony jumps the queue. |
 | `gameAudio.ts` | 215 | Telling a gunshot from a shout by the shape of the sound. Off: the call is in the same stream. |
 | `gameVideo.ts` | 326 | Motion, red washes, colour draining and cuts to black, on a 64x36 copy of the frame. |
-| `gameEvents.ts` | 147 | The renderer half of the game integrations: a long poll, straight onto the board. |
-| `gameFeeds.ts` | 674 | Main process. Counter-Strike 2's state posts, League of Legends' live client API. |
+| `gameEvents.ts` | 150 | The renderer half of the game integrations: a long poll, straight onto the board. |
+| `gameFeeds.ts` | 733 | Main process. Counter-Strike 2's state posts, League of Legends' live client API. |
 
 ## Reading and repairing files
 
@@ -74,23 +74,23 @@ message, only a file that will not open — and it is the part the tests cover.
 
 | File | Lines | What it is |
 | --- | --- | --- |
-| `boxes.ts` | 81 | The one careful walk over an MP4 box list, shared by everything that reads one. |
-| `mp4.ts` | 537 | Fragmented MP4: rebasing a buffer to zero, cutting a range out losslessly, reading a length and the audio tracks. |
+| `boxes.ts` | 103 | The one careful walk over an MP4 box list, shared by everything that reads one. |
+| `mp4.ts` | 542 | Fragmented MP4: rebasing a buffer to zero, cutting a range out losslessly, reading a length and the audio tracks. |
 | `webm.ts` | 388 | The same repair for WebM, for the encoders that only offer it. |
-| `mux.ts` | 771 | Putting the plugin's picture and the engine's separate audio tracks into one file. |
-| `nativeTracks.ts` | 360 | Pulling one person's audio track out of a native clip. |
+| `mux.ts` | 757 | Putting the plugin's picture and the engine's separate audio tracks into one file. |
+| `nativeTracks.ts` | 343 | Pulling one person's audio track out of a native clip. |
 | `laneMix.ts` | 1187 | Rebuilding a clip out of its separate tracks, with each person at the level asked for. |
 | `repair.ts` | 78 | Picks the repair that suits the container and gets out of the way. |
-| `shrink.ts` | 274 | Making a clip small enough for the channel's upload limit. |
+| `shrink.ts` | 253 | Making a clip small enough for the channel's upload limit. |
 | `gif.ts` | 435 | GIF89a, written by hand, because no encoder here produces one. |
-| `gifExport.ts` | 244 | Turning a piece of a clip into a GIF small enough to send. |
+| `gifExport.ts` | 225 | Turning a piece of a clip into a GIF small enough to send. |
 | `thumbnail.ts` | 119 | The still frame that stands for a clip in the library. |
 
 ## The studio
 
 | File | Lines | What it is |
 | --- | --- | --- |
-| `components/ClipStudio.tsx` | 5913 | The editor itself: the timeline, every panel, and every keystroke. The largest file here by a distance. |
+| `components/ClipStudio.tsx` | 6094 | The editor itself: the timeline, every panel, and every keystroke. The largest file here by a distance. |
 | `studio.ts` | 2829 | The render engine. Draws the project to a canvas in real time and records it. |
 | `assets.ts` | 168 | The shelf of sounds and pictures kept between sessions. |
 | `audio.ts` | 593 | Sounds laid on the timeline: decoding, waveforms and playback. |
@@ -98,7 +98,7 @@ message, only a file that will not open — and it is the part the tests cover.
 | `voiceMix.ts` | 188 | One file's separated soundtrack, kept around so it is not rebuilt on every scrub. |
 | `voiceBand.ts` | 188 | Turning one voice down without turning the whole clip down with it. |
 | `components/AudioTimeline.tsx` | 202 | The sound lane. |
-| `components/CutRuler.tsx` | 171 | The ruler and its cut marks. |
+| `components/CutRuler.tsx` | 188 | The ruler and its cut marks. |
 | `components/VoiceLanes.tsx` | 138 | Who was talking, drawn under the timeline. |
 
 ## The overlay and the panels
@@ -145,6 +145,11 @@ is what failed would pay that cycle for ever. A bridge that dies three times
 without saying any of the three is treated the same way, since whatever killed
 it is not going to be talked out of it either.
 
+Where the failure lands is the exception. One that arrives before a session was
+ever up is about the bridge, and the next bridge is identical; one that arrives
+after a session was up and working is about that session, and whatever it hit
+is usually gone by the time another starts. Those are retried, three times.
+
 There is a fourth, which exists because collapsing it into the third was a bug:
 a warning is something wrong with a session that is attached and working, such
 as actions SteamVR does not recognise. It is shown like a problem, and the
@@ -157,9 +162,9 @@ settings are hidden, `syncVr` returns immediately, and no bridge is spawned.
 
 | File | Lines | What it is |
 | --- | --- | --- |
-| `vr.ts` | 247 | The renderer half: a controller press becomes the same action a keybind fires, and the player's own body becomes a signal. |
-| `vrBridge.ts` | 503 | Main process. Starts the one bridge, restarts it if it dies for a reason another one would not hit, and long-polls the same way the game feeds do. |
-| `vrHelper.ts` | 687 | The bridge itself: C# compiled at first run by PowerShell, calling OpenVR through its function tables. |
+| `vr.ts` | 251 | The renderer half: a controller press becomes the same action a keybind fires, and the player's own body becomes a signal. |
+| `vrBridge.ts` | 541 | Main process. Starts the one bridge, restarts it if it dies for a reason another one would not hit, and long-polls the same way the game feeds do. |
+| `vrHelper.ts` | 711 | The bridge itself: C# compiled at first run by PowerShell, calling OpenVR through its function tables. |
 | `vrManifest.ts` | 268 | The action manifest, the default bindings and the application manifest, which is what puts Clipper in SteamVR's own binding panel. |
 | `components/VrBindings.tsx` | 91 | The settings row: whether SteamVR is attached, and the button that opens that panel. |
 
@@ -170,9 +175,9 @@ The always-on-top window, and the two files that decide what it draws.
 | File | Lines | What it is |
 | --- | --- | --- |
 | `overlayWindow.ts` | 389 | The window itself and what the plugin draws in it. |
-| `gameOverlay.ts` | 292 | The renderer's side: what to show, and what came back. |
+| `gameOverlay.ts` | 298 | The renderer's side: what to show, and what came back. |
 | `studioOverlay.ts` | 608 | The cutting room, over the game. |
-| `overlayEdit.ts` | 148 | Carrying out what the overlay editor asked for. |
+| `overlayEdit.ts` | 149 | Carrying out what the overlay editor asked for. |
 | `globalKeybinds.ts` | 167 | System-wide keybinds, which only work from the main process. |
 
 ## The call, the library, and everything else
@@ -180,15 +185,16 @@ The always-on-top window, and the two files that decide what it draws.
 | File | Lines | What it is |
 | --- | --- | --- |
 | `voice.ts` | 730 | Who is in the voice channel, and what Discord says they are doing. |
-| `multipov.ts` | 357 | One key press, everybody's angle. |
-| `angles.ts` | 114 | The angles other people posted for the same moment. |
+| `multipov.ts` | 354 | One key press, everybody's angle. |
+| `angles.ts` | 110 | The angles other people posted for the same moment. |
 | `angleCut.ts` | 384 | Cutting between those angles: who is on screen, second by second, and one soundtrack under it. |
 | `chat.ts` | 208 | What the chat said while it was happening. |
 | `clips.ts` | 329 | Access to the clip folder. |
 | `library.ts` | 408 | Clip metadata and categories. |
-| `send.ts` | 163 | Sending a clip to the channel that is open. |
-| `updater.ts` | 275 | Checking for a new version and installing it. |
-| `utils.ts` | 272 | The shared helpers that had no better home. |
+| `send.ts` | 160 | Sending a clip to the channel that is open. |
+| `updater.ts` | 269 | Checking for a new version and installing it. |
+| `utils.ts` | 362 | The shared helpers that had no better home. |
+| `toasts.ts` | 32 | The one line that shows a toast, which five files each had a copy of. |
 
 ## Where to start
 

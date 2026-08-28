@@ -105,9 +105,13 @@ export async function syncVr(): Promise<void> {
         return;
     }
 
+    // Not alternatives: a session can be attached and have something wrong with
+    // it at the same time, and the log is the only place the version it
+    // attached to is ever written down.
+    if (status.running) logger.info(`SteamVR ${status.runtime} is bound to the clip controls`);
+
     if (status.problem) logger.warn(status.problem);
-    else if (status.running) logger.info(`SteamVR ${status.runtime} is bound to the clip controls`);
-    else logger.info(status.waiting || "Waiting for SteamVR to start");
+    else if (!status.running) logger.info(status.waiting || "Waiting for SteamVR to start");
 
     signals.claim("vr");
 

@@ -24,6 +24,8 @@ import { Alerts, Toasts } from "@webpack/common";
 
 import type { UpdateInfo } from "./native";
 import { settings } from "./settings";
+import { toast as showToast } from "./toasts";
+import { errorMessage } from "./utils";
 
 const Native = VencordNative.pluginHelpers.Clipper as PluginNative<typeof import("./native")>;
 const logger = new Logger("Clipper");
@@ -82,17 +84,9 @@ function change(patch: Partial<UpdateState>): void {
     }
 }
 
-function errorMessage(e: unknown): string {
-    return e instanceof Error ? e.message : String(e);
-}
-
+/** An update failure is read once and dismissed, so it is given a moment. */
 function toast(message: string, type: string): void {
-    Toasts.show({
-        id: Toasts.genId(),
-        message,
-        type,
-        options: { duration: 6000, position: Toasts.Position.BOTTOM }
-    });
+    showToast(message, type, 6000);
 }
 
 /**

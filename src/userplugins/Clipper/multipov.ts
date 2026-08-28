@@ -45,6 +45,7 @@ import { FluxDispatcher, SelectedChannelStore, Toasts, UserStore } from "@webpac
 import { notifyOverlay } from "./gameOverlay";
 import { logger, recorder } from "./recorder";
 import { settings } from "./settings";
+import { toast as showToast } from "./toasts";
 import { nameOf, voiceParticipants } from "./voice";
 
 /**
@@ -112,13 +113,9 @@ let lastAsked = 0;
 /** The pending take-downs, cleared if the plugin stops before they fire. */
 let cleanups = new Set<ReturnType<typeof setTimeout>>();
 
+/** Every toast here talks over a game, so they all get the long dwell. */
 function toast(message: string, type: string, duration = 5000) {
-    Toasts.show({
-        id: Toasts.genId(),
-        message,
-        type,
-        options: { duration, position: Toasts.Position.BOTTOM }
-    });
+    showToast(message, type, duration);
 }
 
 /** A name cut to fit a line over the game, which holds 90 characters in all. */

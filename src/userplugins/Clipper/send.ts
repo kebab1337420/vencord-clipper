@@ -26,6 +26,7 @@ import { clipToGif, type GifRequest, saveGif } from "./gifExport";
 import { logger } from "./recorder";
 import { trimBytes } from "./repair";
 import { shrinkVideo } from "./shrink";
+import { toast } from "./toasts";
 import { formatBytes } from "./utils";
 
 /**
@@ -54,10 +55,6 @@ function attach(file: File): boolean {
 
 /** A step of a long job, for a caller that has somewhere to show it. */
 type Progress = (step: string) => void;
-
-function toast(message: string, type: string) {
-    Toasts.show({ id: Toasts.genId(), message, type });
-}
 
 /**
  * Attaches part of a clip, leaving the file on disk alone.

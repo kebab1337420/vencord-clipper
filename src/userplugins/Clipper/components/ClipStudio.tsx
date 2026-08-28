@@ -116,6 +116,7 @@ import {
     type ZoomKey
 } from "../studio";
 import { writeThumbnail } from "../thumbnail";
+import { toast } from "../toasts";
 import { formatBytes, formatTime } from "../utils";
 import { fromMeta, mutedFraction, voiceDuckAt, voiceGainOf, voiceLevelsTouched,type VoiceTrack } from "../voice";
 import { createVoiceBand, type VoiceBand } from "../voiceBand";
@@ -1243,10 +1244,6 @@ const DROP_IMAGE = /\.(png|jpe?g|webp|gif|avif|bmp)$/i;
 /** The native reader's own caps, which a drop does not pass through. */
 const DROP_VIDEO_BYTES = 512 * 1024 * 1024;
 const DROP_SOUND_BYTES = 64 * 1024 * 1024;
-
-function toast(message: string, type: string) {
-    Toasts.show({ id: Toasts.genId(), message, type });
-}
 
 /** Reads a video's real range without showing it, for a source being added. */
 async function probeFile(url: string): Promise<{ start: number; end: number; width: number; height: number; }> {

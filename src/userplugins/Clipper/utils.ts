@@ -270,3 +270,93 @@ export function suspendKeybinds(): () => void {
         if (!suspensions) onSuspension?.(false);
     };
 }
+
+
+/**
+ * Chunk interval, in ms. Smaller = finer trimming, more overhead.
+ *
+ * Here rather than in ./recorder because ./voiceRecord cuts on the same
+ * boundaries and cannot import it - the recorder imports the voice buffers, so
+ * the other direction is a cycle. It had its own copy of the number and a
+ * comment saying the two had to agree, which is the arrangement where they
+ * quietly stop agreeing.
+ */
+export const TIMESLICE = 1000;
+
+/**
+ * Something readable out of anything that was thrown.
+ *
+ * `String(e)` alone is what put `[object Object]` in front of a user instead of
+ * a reason: the native voice module rejects with plain objects rather than
+ * `Error`s, and a plain object stringifies to nothing at all. Anything that
+ * came from across the IPC boundary has to be dug into by hand, including the
+ * non-enumerable properties an `Error` from another realm keeps its message in.
+ */
+export function errorMessage(e: unknown): string {
+    if (e instanceof Error) return e.message || e.name;
+    if (typeof e === "string") return e;
+    if (e === null || e === undefined) return "no reason given";
+
+    if (typeof e === "object") {
+        const record = e as Record<string, unknown>;
+
+        for (const key of ["message", "error", "reason", "detail", "description"]) {
+            const value = record[key];
+            if (typeof value === "string" && value) return value;
+            if (value && typeof value === "object") {
+                const nested = errorMessage(value);
+                if (nested && nested !== "[object Object]") return nested;
+            }
+        }
+
+        try {
+            const json = JSON.stringify(e);
+            if (json && json !== "{}" && json !== "null") return json;
+        } catch {
+            // Circular, or something with a throwing getter. The properties are
+            // still worth reading one at a time.
+        }
+
+        try {
+            const parts: string[] = [];
+            for (const key of Object.getOwnPropertyNames(record)) {
+                if (key === "stack") continue;
+                parts.push(`${key}: ${String(record[key])}`);
+            }
+
+            if (parts.length) return parts.join(", ");
+        } catch {
+            // Nothing readable on it at all, which String() will say as well.
+        }
+    }
+
+    return String(e);
+}
+
+/**
+ * Seeks and waits, giving up rather than hanging on a frame that never lands.
+ *
+ * The early return is not an optimisation: a browser that is already at `at`
+ * fires no `seeked` at all, so without it every frame that needed no seek waits
+ * out the whole two seconds before carrying on.
+ */
+export function seekVideo(video: HTMLVideoElement, at: number): Promise<void> {
+    return new Promise<void>(resolve => {
+        if (Math.abs(video.currentTime - at) < .05) return resolve();
+
+        let done = false;
+
+        const settle = () => {
+            if (done) return;
+
+            done = true;
+            clearTimeout(timer);
+            video.removeEventListener("seeked", settle);
+            resolve();
+        };
+
+        const timer = setTimeout(settle, 2000);
+        video.addEventListener("seeked", settle);
+        video.currentTime = at;
+    });
+}

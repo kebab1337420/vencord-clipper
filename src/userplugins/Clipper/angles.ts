@@ -20,7 +20,11 @@
  */
 
 import { Logger } from "@utils/Logger";
-import { MessageStore, SelectedChannelStore } from "@webpack/common";
+import { MessageStore } from "@webpack/common";
+
+// The same channel the chat lines are kept from, and for the same reason: the
+// angles for a clip are posted where the clip was talked about.
+import { watchedChannel } from "./chat";
 
 const logger = new Logger("Clipper");
 
@@ -37,14 +41,6 @@ export interface PostedAngle {
     author: string;
     /** Epoch ms the message was sent. */
     sentAt: number;
-}
-
-function watchedChannel(): string | undefined {
-    try {
-        return SelectedChannelStore.getVoiceChannelId() ?? SelectedChannelStore.getChannelId() ?? undefined;
-    } catch {
-        return undefined;
-    }
 }
 
 function isVideo(attachment: any): boolean {

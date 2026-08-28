@@ -71,7 +71,7 @@ import { Logger } from "@utils/Logger";
 import { loadVoiceTrack } from "./clips";
 import { hasVoiceTracks, readNativeAudio } from "./nativeTracks";
 import { type VoiceFileMeta, voiceGainOf, type VoiceLevels } from "./voice";
-import { cascade } from "./voiceBand";
+import { cascade, LOW_HZ, SECTIONS } from "./voiceBand";
 import type { MixTarget, VoiceMix } from "./voiceMix";
 
 const logger = new Logger("Clipper");
@@ -123,20 +123,20 @@ const PAD_BEHIND = 0.35;
 const BAND_LO = 200;
 const BAND_HI = 4000;
 
-/**
- * Where the voice is taken to live.
+/*
+ * The corner and the cascade come from ./voiceBand, along with the filter they
+ * are handed to. They were copied down here once, and a measured number with a
+ * copy of itself in another file is a number that will be tuned in one of them.
  *
- * Only the bottom is kept now. `voiceBand.ts` also lets everything above 12kHz
- * back through, on the grounds that a game's air is up there and a voice is
- * not - and on a real clip that is simply false: while one person spoke, the
- * bed above 12kHz measured 34dB over a quiet room and sat 4.7dB louder than
- * everything left under 45Hz. That band is their sibilance, and with the whole
- * middle of the bed cut away there was nothing left to mask it. It is the
- * whistle a mute used to leave behind. The game loses nothing worth having:
+ * One difference from that file is deliberate and lives here: it also lets
+ * everything above 12kHz back through, on the grounds that a game's air is up
+ * there and a voice is not. On a real clip that is false - while one person
+ * spoke, the bed above 12kHz measured 34dB over a quiet room and sat 4.7dB
+ * louder than everything left under 45Hz. That band is their sibilance, and
+ * with the whole middle of the bed cut away there is nothing left to mask it.
+ * So only the bottom is kept here, and the game loses nothing worth having:
  * with nobody talking the same band is 22dB under the bed's own middle.
  */
-const LOW_HZ = 45;
-const SECTIONS = 4;
 
 /**
  * How much louder than the bed the voices come back while the notch is open.

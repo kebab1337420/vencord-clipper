@@ -26,6 +26,7 @@
 import { Logger } from "@utils/Logger";
 
 import { probeRange } from "./clips";
+import { seekVideo as seek } from "./utils";
 
 const logger = new Logger("Clipper");
 
@@ -248,27 +249,5 @@ async function transcode(video: HTMLVideoElement, { width, height, fps, bitrate,
             recorder.start(1000);
             draw();
         }).catch(error => finish(error instanceof Error ? error : new Error(String(error))));
-    });
-}
-
-/** Seeks and waits, giving up rather than hanging on a frame that never lands. */
-function seek(video: HTMLVideoElement, at: number): Promise<void> {
-    return new Promise<void>(resolve => {
-        if (Math.abs(video.currentTime - at) < .05) return resolve();
-
-        let done = false;
-
-        const settle = () => {
-            if (done) return;
-
-            done = true;
-            clearTimeout(timer);
-            video.removeEventListener("seeked", settle);
-            resolve();
-        };
-
-        const timer = setTimeout(settle, 2000);
-        video.addEventListener("seeked", settle);
-        video.currentTime = at;
     });
 }

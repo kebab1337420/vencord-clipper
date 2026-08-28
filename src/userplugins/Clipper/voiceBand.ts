@@ -68,7 +68,7 @@
  * consonants. The game gives up very little for its removal: with nobody
  * talking that same band measures 22dB under the middle of the mix.
  */
-const LOW_HZ = 45;
+export const LOW_HZ = 45;
 
 /**
  * Sections in the cascade. Each biquad is 12dB per octave, so four is 48.
@@ -80,7 +80,7 @@ const LOW_HZ = 45;
  * down instead of 41dB, and it is the first octave above the corner that
  * decides whether a mute holds.
  */
-const SECTIONS = 4;
+export const SECTIONS = 4;
 
 /** Butterworth, so the cascade has no resonant lump at the corner. */
 const Q = Math.SQRT1_2;

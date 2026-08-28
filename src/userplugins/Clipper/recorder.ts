@@ -32,7 +32,8 @@ import { hasVideoTrack } from "./nativeTracks";
 import { lengthBytes, repairBytes, trimBytes } from "./repair";
 import { Container, extensionFor, mimeTypeChain, settings } from "./settings";
 import { writeThumbnail } from "./thumbnail";
-import { formatBytes, timestampName } from "./utils";
+import { toast } from "./toasts";
+import { errorMessage, formatBytes, TIMESLICE, timestampName } from "./utils";
 import { shiftTracks, toMeta, voiceActivity, type VoiceFileMeta, voiceParticipants,type VoiceTrack } from "./voice";
 import { voiceBuffers } from "./voiceRecord";
 
@@ -66,9 +67,6 @@ interface TimedChunk {
     /** Timestamp (ms) at which the chunk was handed to us. */
     at: number;
 }
-
-/** Chunk interval, in ms. Smaller = finer trimming, more overhead. */
-const TIMESLICE = 1000;
 
 /** How often the client's memory is looked at while the buffer runs. */
 const MEMORY_WATCH_MS = 60_000;
@@ -904,9 +902,21 @@ class ClipRecorder {
         const cutoff = Date.now() - (settings.store.clipLength * 1000 + TIMESLICE);
         while (this.chunks.length && this.chunks[0].at < cutoff) this.chunks.shift();
 
-        // A mark whose footage has been dropped points at nothing.
-        const start = this.bufferStart;
-        if (this.marks.length) this.marks = this.marks.filter(m => m >= start);
+        /*
+         * A mark whose footage has been dropped points at nothing.
+         *
+         * Measured against the oldest chunk only while there is one. With none
+         * in hand - the first timeslice after arming, and again after every
+         * encoder swap - the buffer starts, by definition, now, and a mark taken
+         * a moment ago would be thrown out for sitting behind footage that has
+         * not been dropped so much as not yet arrived. That is the case somebody
+         * marking the instant they start the buffer lands in every time, and it
+         * announced itself as "0 in the buffer" right after they pressed the key.
+         */
+        const oldest = this.chunks[0];
+        const floor = oldest ? oldest.at - TIMESLICE : cutoff;
+
+        if (this.marks.length) this.marks = this.marks.filter(m => m >= floor);
     }
 
     /**
@@ -1065,8 +1075,21 @@ class ClipRecorder {
         const mine = this.generation;
         const relayed = await this.buildRelay();
 
-        // Stopped while the canvas was starting: this buffer is not ours to arm.
-        if (mine !== this.generation) return;
+        /*
+         * Stopped while the canvas was starting: this buffer is not ours to arm,
+         * and the canvas goes with it.
+         *
+         * cleanup() ran to completion before buildRelay() returned, so the
+         * stopper it installed was written over a null that nobody will call
+         * again - and the draw loop behind it would go on painting a stopped
+         * capture, every frame, for the rest of the session.
+         */
+        if (mine !== this.generation) {
+            this.relay?.();
+            this.relay = null;
+            relayed?.getTracks().forEach(t => t.stop());
+            return;
+        }
 
         if (relayed) {
             this.recordStream = relayed;
@@ -1117,7 +1140,14 @@ class ClipRecorder {
         canvas.height = height;
 
         const ctx = canvas.getContext("2d", { alpha: false });
-        if (!ctx) return null;
+        if (!ctx) {
+            // Playing since the await above, and nothing else will stop it: the
+            // stopper that does is installed at the end of this function, which
+            // this returns before reaching.
+            video.pause();
+            video.srcObject = null;
+            return null;
+        }
 
         let stopped = false;
         let drawn = 0;
@@ -1877,12 +1907,22 @@ class ClipRecorder {
     private grantConsent(): void {
         if (!settings.store.nativeEngine) return;
 
+        const present = new Set<string>();
+
         for (const person of voiceParticipants()) {
+            present.add(person.id);
             if (this.consented.has(person.id)) continue;
 
             setRecordUser(person.id, true);
             this.consented.add(person.id);
         }
+
+        // Forgotten as they leave, rather than only when the buffer stops. This
+        // set exists to keep the engine from being told twice, and somebody who
+        // leaves and comes back is a fresh arrival as far as the engine is
+        // concerned while still being an old acquaintance here - so they would
+        // never be told about again. That is the exact case the poll is for.
+        for (const id of this.consented) if (!present.has(id)) this.consented.delete(id);
     }
 
     /**
@@ -2225,56 +2265,6 @@ export function setStudioOpener(open: ((name?: string) => void) | null) {
     studioOpener = open;
 }
 
-/**
- * Something readable out of anything that was thrown.
- *
- * `String(e)` alone is what put `[object Object]` in front of a user instead of
- * a reason: the native voice module rejects with plain objects rather than
- * `Error`s, and a plain object stringifies to nothing at all. Anything that
- * came from across the IPC boundary has to be dug into by hand, including the
- * non-enumerable properties an `Error` from another realm keeps its message in.
- */
-export function errorMessage(e: unknown): string {
-    if (e instanceof Error) return e.message || e.name;
-    if (typeof e === "string") return e;
-    if (e === null || e === undefined) return "no reason given";
-
-    if (typeof e === "object") {
-        const record = e as Record<string, unknown>;
-
-        for (const key of ["message", "error", "reason", "detail", "description"]) {
-            const value = record[key];
-            if (typeof value === "string" && value) return value;
-            if (value && typeof value === "object") {
-                const nested = errorMessage(value);
-                if (nested && nested !== "[object Object]") return nested;
-            }
-        }
-
-        try {
-            const json = JSON.stringify(e);
-            if (json && json !== "{}" && json !== "null") return json;
-        } catch {
-            // Circular, or something with a throwing getter. The properties are
-            // still worth reading one at a time.
-        }
-
-        try {
-            const parts: string[] = [];
-            for (const key of Object.getOwnPropertyNames(record)) {
-                if (key === "stack") continue;
-                parts.push(`${key}: ${String(record[key])}`);
-            }
-
-            if (parts.length) return parts.join(", ");
-        } catch {
-            // Nothing readable on it at all, which String() will say as well.
-        }
-    }
-
-    return String(e);
-}
-
 /** Absolute folder clips land in, for display in the settings. */
 export async function resolveClipFolder(): Promise<string> {
     if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return "";
@@ -2590,10 +2580,6 @@ function shift(markers: number[], by: number): number[] {
 
 function copy(text: string) {
     navigator.clipboard?.writeText(text).catch(() => void 0);
-}
-
-function toast(message: string, type: string) {
-    Toasts.show({ id: Toasts.genId(), message, type });
 }
 
 // Native helper (main process). Falls back to downloads when unavailable.

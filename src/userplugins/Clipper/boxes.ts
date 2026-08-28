@@ -20,6 +20,9 @@
  * a different walk rather than the same one with a flag.
  */
 
+/** `sample_is_non_sync_sample`: the one sample flag bit anything here reads. */
+export const NON_SYNC = 0x00010000;
+
 export interface Box {
     type: string;
     /** First byte of the payload, past the size and type. */
@@ -78,4 +81,23 @@ export function descend(data: Uint8Array, view: DataView, box: Box, path: string
     }
 
     return current;
+}
+
+/**
+ * The name an MP4 `hdlr` box carries.
+ *
+ * A version byte, three flags, four predefined bytes, the four-byte handler
+ * type and twelve reserved: the name starts twenty-four bytes into the payload.
+ * What follows is a C string on everything that writes one, so it stops at the
+ * first NUL - and reading it any other way is how a track's name comes back
+ * with a stray byte on the end of it and stops matching what it is compared to.
+ */
+export function handlerName(data: Uint8Array, hdlr: Box): string {
+    const at = hdlr.start + 24;
+    if (at >= hdlr.end) return "";
+
+    let end = data.indexOf(0, at);
+    if (end === -1 || end > hdlr.end) end = hdlr.end;
+
+    return new TextDecoder().decode(data.subarray(at, end));
 }

@@ -340,43 +340,22 @@ firing it only while Discord is focused.
 
 ## Files
 
-| File | Role |
+Sixty-one modules, so the full list lives in [`docs/modules.md`](docs/modules.md)
+with a line about each and a short guide to which one a given problem starts
+from. The shape of it:
+
+| Where | What runs there |
 | --- | --- |
-| `index.tsx` | Plugin definition, in-client keybind listener, toolbox actions |
-| `settings.tsx` | All settings + mime type resolution |
-| `recorder.ts` | Capture, rolling buffer, saving |
-| `clips.ts` | Clip folder access: listing, loading, renaming, deleting, frame export |
-| `mixer.ts` | Audio channel levels and the input device list behind the sound mixer |
-| `micInput.ts` | Opens the microphone Discord is set to, and gates it the way Discord gates it |
-| `clipSound.ts` | The sound played on save, and the ducking that keeps it out of the clip |
-| `library.ts` | Clip categories: game detection and the `clipper-library.json` sidecar |
-| `studio.ts` | Timeline model and the montage render engine (canvas + WebAudio) |
-| `webm.ts` | Rebases the buffered WebM timeline so saved clips start at zero |
-| `globalKeybinds.ts` | System-wide keybind registration and dispatch |
-| `highlights.ts` | Watches the call and the microphone, and marks the loud moments |
-| `send.ts` | Attaching a clip to the message box, re-encoding it first when it is too big |
-| `shrink.ts` | Re-encodes a clip down to a size limit through MediaRecorder |
-| `gif.ts` | GIF89a encoder: median-cut palette, LZW, frame differencing |
-| `gifExport.ts` | Turns part of a clip into a GIF that comes in under the limit |
-| `multipov.ts` | Asks the call for everyone's angle, and answers the same request |
-| `angles.ts` | Finds the angles posted in the channel, and fetches one to compose with |
-| `chat.ts` | Rolling buffer of what the channel said, for the overlay burned into the render |
-| `audio.ts` | Decoding, beat detection, time stretching and the envelope alignment |
-| `components/BufferPreview.tsx` | Plays the live buffer and picks the window to save |
-| `components/ReplayCard.tsx` | The clip that was just saved, playing back in the corner |
-| `updater.ts` | Version check at launch, and the install that follows it |
-| `native.ts` | Main process: file write, source listing, global shortcuts, bundle updates |
-| `utils.ts` | Keybind parsing / accelerators, formatting helpers |
-| `components/ClipperOverlay.tsx` | Floating button, source picker, capture options |
-| `components/ClipStudio.tsx` | Clip library, categories, timeline, effects, captions, render |
-| `components/AudioMixer.tsx` | Sound mixer rows, in the settings and in the studio sidebar |
-| `components/VoicePanel.tsx` | One mixer channel per person in the call, with a live meter |
-| `voiceRecord.ts` | One rolling buffer per person, saved as tracks beside the clip |
-| `components/SettingsSection.tsx` | Section headers that group the settings panel |
-| `components/ClipperChatButton.tsx` | Chat bar button |
-| `components/KeybindInput.tsx` | Keybind picker used by the settings |
-| `components/SaveDirectoryInput.tsx` | Clip folder picker used by the settings |
-| `components/UpdateStatus.tsx` | Installed version, check / install / restart buttons |
+| `index.tsx`, `settings.tsx` | The plugin definition and the settings the user sees |
+| `native.ts` | The only file in the main process, and the plugin's only access to the disc, `ffmpeg` and the system keyboard |
+| `recorder.ts`, `voiceRecord.ts`, `voiceTaps.ts`, `micInput.ts` | The rolling buffers, and the per-person audio that makes a clip remixable |
+| `boxes.ts`, `mp4.ts`, `webm.ts`, `mux.ts`, `laneMix.ts` | Reading and repairing the files, byte by byte |
+| `components/ClipStudio.tsx`, `studio.ts` | The editor, and the engine that renders what it describes |
+| `components/ClipperOverlay.tsx` | The plugin's own React root, mounted outside Discord's tree |
+| `overlayWindow.ts`, `gameOverlay.ts`, `studioOverlay.ts` | The always-on-top window that puts all of it over a full-screen game |
+
+Unit tests cover the byte-level readers, the part that fails without saying
+anything. Run them with `.\scripts\test.ps1`.
 
 ## Known limitations
 

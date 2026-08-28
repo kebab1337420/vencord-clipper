@@ -43,6 +43,16 @@ export interface VoiceMix {
     modelled: string[];
     tooQuiet: string[];
     /**
+     * Why somebody has no usable track, in words, keyed by user id.
+     *
+     * Four things look identical from the panel - a person who never spoke, a
+     * person the engine was never told it could record, a track that would not
+     * decode, and a track that holds nothing but silence - and they call for
+     * four different answers. Only filled for people worth explaining, so an
+     * ordinary clip carries an empty map and says nothing.
+     */
+    why?: Record<string, string>;
+    /**
      * Whether the mix came from the file's own per-person tracks.
      *
      * Worth saying out loud because the two paths are not the same promise.

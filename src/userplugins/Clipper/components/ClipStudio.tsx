@@ -437,6 +437,13 @@ export const STUDIO_CSS = `
 .vc-clipper-voice-body .vc-clipper-field {
     margin: 0;
 }
+.vc-clipper-voice-why {
+    display: block;
+    margin-top: 2px;
+    color: var(--text-muted, #949ba4);
+    font-size: 11px;
+    line-height: 1.3;
+}
 .vc-clipper-voice-item button {
     flex: 0 0 auto;
     width: auto;
@@ -5583,6 +5590,14 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                                                 onChange={e => patchVoice(person.id, Number(e.currentTarget.value), `voice-${person.id}`)}
                                                             />
                                                         </div>
+
+                                                        {/* Said here rather than in a warning at the bottom, because it
+                                                            is about this person and nobody else: four different reasons
+                                                            all end in a slider that does not do what it says, and only
+                                                            the person it happened to makes them tell apart. */}
+                                                        {voiceMix?.why?.[person.id] && (
+                                                            <small className="vc-clipper-voice-why">{voiceMix.why[person.id]}</small>
+                                                        )}
                                                     </div>
 
                                                     <button

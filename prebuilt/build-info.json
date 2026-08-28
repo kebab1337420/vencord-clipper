@@ -1,58 +1,58 @@
-﻿{
-    "vencordVersion":  "1.15.2",
-    "vencordCommit":  "ef29bbe",
-    "plugin":  "Clipper",
-    "clipperVersion":  "4.1.0",
-    "clipperCommit":  "a05500d",
-    "builtAt":  "2026-08-29T01:25:06",
-    "files":  {
-                  "patcher.js":  {
-                                     "size":  132510,
-                                     "sha256":  "68b03bbaf5b1f88e6b1fc410490f486f6add110ad4bd15be5373920f2288c195"
-                                 },
-                  "patcher.js.LEGAL.txt":  {
-                                               "size":  964,
-                                               "sha256":  "3a77a1f63d0bbc71bb238ce6a16f90288fa19aa4fe01655e23e10757526671c7"
-                                           },
-                  "preload.js":  {
-                                     "size":  2400,
-                                     "sha256":  "5e20c5a405b60d533e7106133b6b8d1954c56aff198d34c6f4fbb6fc3088597d"
-                                 },
-                  "renderer.css":  {
-                                       "size":  42178,
-                                       "sha256":  "96411110eb3ad1fafeeff831a02a09305ec687318be3d311e710cebb9ca78fad"
-                                   },
-                  "renderer.js":  {
-                                      "size":  1077532,
-                                      "sha256":  "8e68d21ffe179675716b997539f644023391edd182621cf5f48d9f58b9053770"
-                                  },
-                  "renderer.js.LEGAL.txt":  {
-                                                "size":  1880,
-                                                "sha256":  "180a18086f32719f048206e5516fa98449bd49c3967811969c34c8c7facf1bfc"
-                                            },
-                  "vencordDesktopMain.js":  {
-                                                "size":  128453,
-                                                "sha256":  "73507a0cdf54434d3b98994c6a478840cfb28cede3c09edb319af1d2f2fde90c"
-                                            },
-                  "vencordDesktopMain.js.LEGAL.txt":  {
-                                                          "size":  964,
-                                                          "sha256":  "3a77a1f63d0bbc71bb238ce6a16f90288fa19aa4fe01655e23e10757526671c7"
-                                                      },
-                  "vencordDesktopPreload.js":  {
-                                                   "size":  2312,
-                                                   "sha256":  "ea54316d96ea5ec2c4ef941003088002fd16e83d9f8f239622957469f61f21f1"
-                                               },
-                  "vencordDesktopRenderer.css":  {
-                                                     "size":  42178,
-                                                     "sha256":  "96411110eb3ad1fafeeff831a02a09305ec687318be3d311e710cebb9ca78fad"
-                                                 },
-                  "vencordDesktopRenderer.js":  {
-                                                    "size":  1085093,
-                                                    "sha256":  "21e642311284d73b6eda100dde26590be62b2ec89309b1856e54a68dea33cffb"
-                                                },
-                  "vencordDesktopRenderer.js.LEGAL.txt":  {
-                                                              "size":  1880,
-                                                              "sha256":  "180a18086f32719f048206e5516fa98449bd49c3967811969c34c8c7facf1bfc"
-                                                          }
-              }
+{
+  "vencordVersion": "1.15.2",
+  "vencordCommit": "ef29bbe",
+  "plugin": "Clipper",
+  "clipperVersion": "4.1.0",
+  "clipperCommit": "cd95a6f",
+  "builtAt": "2026-08-29T01:54:54",
+  "files": {
+    "patcher.js": {
+      "size": 132510,
+      "sha256": "68b03bbaf5b1f88e6b1fc410490f486f6add110ad4bd15be5373920f2288c195"
+    },
+    "patcher.js.LEGAL.txt": {
+      "size": 964,
+      "sha256": "3a77a1f63d0bbc71bb238ce6a16f90288fa19aa4fe01655e23e10757526671c7"
+    },
+    "preload.js": {
+      "size": 2400,
+      "sha256": "5e20c5a405b60d533e7106133b6b8d1954c56aff198d34c6f4fbb6fc3088597d"
+    },
+    "renderer.css": {
+      "size": 42178,
+      "sha256": "96411110eb3ad1fafeeff831a02a09305ec687318be3d311e710cebb9ca78fad"
+    },
+    "renderer.js": {
+      "size": 1079054,
+      "sha256": "2ae7f874e6071f3a72b0137b722dffea06d09219459a22b5c8451180092d0d0d"
+    },
+    "renderer.js.LEGAL.txt": {
+      "size": 1880,
+      "sha256": "180a18086f32719f048206e5516fa98449bd49c3967811969c34c8c7facf1bfc"
+    },
+    "vencordDesktopMain.js": {
+      "size": 128453,
+      "sha256": "73507a0cdf54434d3b98994c6a478840cfb28cede3c09edb319af1d2f2fde90c"
+    },
+    "vencordDesktopMain.js.LEGAL.txt": {
+      "size": 964,
+      "sha256": "3a77a1f63d0bbc71bb238ce6a16f90288fa19aa4fe01655e23e10757526671c7"
+    },
+    "vencordDesktopPreload.js": {
+      "size": 2312,
+      "sha256": "ea54316d96ea5ec2c4ef941003088002fd16e83d9f8f239622957469f61f21f1"
+    },
+    "vencordDesktopRenderer.css": {
+      "size": 42178,
+      "sha256": "96411110eb3ad1fafeeff831a02a09305ec687318be3d311e710cebb9ca78fad"
+    },
+    "vencordDesktopRenderer.js": {
+      "size": 1086615,
+      "sha256": "39631c758cc4c3056400b435b124646bcac41ec2b1756fc3d6215040cc5580e9"
+    },
+    "vencordDesktopRenderer.js.LEGAL.txt": {
+      "size": 1880,
+      "sha256": "180a18086f32719f048206e5516fa98449bd49c3967811969c34c8c7facf1bfc"
+    }
+  }
 }

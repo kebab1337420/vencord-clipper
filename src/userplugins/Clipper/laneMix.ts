@@ -246,6 +246,26 @@ const LAG_FIT = 0.25;
 const LAG_SPAN = 8;
 
 /** One person's own recording, before anything has been measured about it. */
+/**
+ * Loud enough to be somebody, rather than an encoder's idea of nothing.
+ *
+ * A track the engine wrote for somebody who never made a sound is not empty:
+ * it is a run of AAC frames that decode to values a few parts in a million
+ * from zero. That is well under anything a microphone gate would pass, and
+ * telling it apart from a real recording is what lets the panel say "they
+ * never spoke" instead of leaving somebody to guess.
+ */
+const SILENT_PEAK = 1e-4;
+
+function silent(buffer: AudioBuffer): boolean {
+    for (let c = 0; c < buffer.numberOfChannels; c++) {
+        const data = buffer.getChannelData(c);
+        for (let i = 0; i < data.length; i++) if (Math.abs(data[i]) > SILENT_PEAK) return false;
+    }
+
+    return true;
+}
+
 interface RawLane {
     userId: string;
     name: string;
@@ -278,6 +298,8 @@ interface Held {
     bedEnvelope: Float32Array;
     lanes: Lane[];
     points: number;
+    /** Why anybody in the call has no usable track here. See `VoiceMix.why`. */
+    why: Record<string, string>;
 }
 
 /**
@@ -715,7 +737,7 @@ function prepare(
 /** Decodes a file's tracks once, or hands back the ones already decoded. */
 async function heldFor(
     key: string,
-    load: () => Promise<{ bed: AudioBuffer | null; bedOffset: number; raw: RawLane[]; } | null>
+    load: () => Promise<{ bed: AudioBuffer | null; bedOffset: number; raw: RawLane[]; why?: Record<string, string>; } | null>
 ): Promise<Held | null> {
     if (held?.key === key) return held;
     if (bare.has(key)) return null;
@@ -734,7 +756,7 @@ async function heldFor(
 /** The body of `heldFor`, once it has decided that a decode has to happen. */
 async function decodeInto(
     key: string,
-    load: () => Promise<{ bed: AudioBuffer | null; bedOffset: number; raw: RawLane[]; } | null>
+    load: () => Promise<{ bed: AudioBuffer | null; bedOffset: number; raw: RawLane[]; why?: Record<string, string>; } | null>
 ): Promise<Held | null> {
     const found = await load();
 
@@ -758,7 +780,7 @@ async function decodeInto(
         + lanes.map(lane => `${lane.name} x${lane.gain.toFixed(2)} @${(lane.offset * 1000).toFixed(0)}ms`).join(", ")
     );
 
-    held = { key, bed, bedOffset, bedEnvelope, lanes, points };
+    held = { key, bed, bedOffset, bedEnvelope, lanes, points, why: found.why ?? {} };
     return held;
 }
 
@@ -791,7 +813,7 @@ async function render(
     roster: string[],
     onProgress?: (done: number) => void
 ): Promise<VoiceMix | null> {
-    const { bed, bedOffset, bedEnvelope, lanes, points } = found;
+    const { bed, bedOffset, bedEnvelope, lanes, points, why } = found;
 
     onProgress?.(0.5);
 
@@ -1035,7 +1057,11 @@ async function render(
     for (const person of missing) duck[person] = voiceGainOf(levels, person);
 
     if (missing.length) {
-        logger.warn(`"${id}" has no track for ${missing.join(", ")}: their level is left to the duck`);
+        logger.warn(
+            `"${id}" has no track for `
+            + missing.map(person => why[person] ? `${person} (${why[person]})` : person).join(", ")
+            + ": their level is left to the duck"
+        );
     }
 
     return {
@@ -1047,6 +1073,7 @@ async function render(
         // the most exact of the lot.
         modelled: lanes.map(lane => lane.userId),
         tooQuiet: missing,
+        why: Object.keys(why).length ? why : undefined,
         exact: true
     };
 }
@@ -1116,10 +1143,37 @@ export async function nativeLaneMixFor(
         // the others are only ever there when the first would not decode.
         const at = bedBuffers.findIndex(buffer => buffer !== null);
 
+        /*
+         * Four ways to have nothing, told apart before they are lost.
+         *
+         * By the time the mix is rendered, everybody without a lane looks the
+         * same: absent. They are not. A track can be missing from the file
+         * because the engine was never told it could record that person; it can
+         * be in the file and refuse to decode; it can decode into silence
+         * because they never said anything. Each of those is a different thing
+         * to do about it, and the panel can only say so if it is written down
+         * here, where the difference is still visible.
+         */
+        const why: Record<string, string> = {};
+
+        for (let i = 0; i < voices.length; i++) {
+            const id = voices[i].userId as string;
+            const lane = lanes[i];
+
+            if (!lane) why[id] = "their track is in the file but would not decode";
+            else if (silent(lane.buffer)) why[id] = "their track was recorded and holds nothing but silence - they never spoke";
+        }
+
+        for (const id of named.keys()) {
+            if (voices.some(track => track.userId === id)) continue;
+            why[id] = "the engine wrote no track for them: it is told person by person who it may record, and they were not in the call when it was told";
+        }
+
         return {
             bed: at < 0 ? null : bedBuffers[at],
             bedOffset: at < 0 ? 0 : beds[at].offset,
-            raw: lanes.filter((lane): lane is RawLane => lane !== null)
+            raw: lanes.filter((lane): lane is RawLane => lane !== null),
+            why
         };
     });
 
@@ -1174,7 +1228,25 @@ export async function laneMixFor(
 
         const [bed, lanes] = await Promise.all([readBed(), Promise.all(metas.map(readLane))]);
 
-        return { bed, bedOffset: 0, raw: lanes.filter((lane): lane is RawLane => lane !== null) };
+        // The same four cases as the engine's file, in this path's own words:
+        // here a person has no track because the client never opened a receiver
+        // for them, which is what happens to everybody when the voice is
+        // decoded and mixed natively before the renderer sees it.
+        const why: Record<string, string> = {};
+
+        for (let i = 0; i < metas.length; i++) {
+            const lane = lanes[i];
+
+            if (!lane) why[metas[i].id] = "their track was saved beside the clip but would not decode";
+            else if (silent(lane.buffer)) why[metas[i].id] = "their track was recorded and holds nothing but silence - they never spoke";
+        }
+
+        for (const voice of target.voices) {
+            if (metas.some(meta => meta.id === voice.id)) continue;
+            why[voice.id] = "no track was tapped for them: this client never opened a receiver of its own for their voice";
+        }
+
+        return { bed, bedOffset: 0, raw: lanes.filter((lane): lane is RawLane => lane !== null), why };
     });
 
     if (!found) return null;

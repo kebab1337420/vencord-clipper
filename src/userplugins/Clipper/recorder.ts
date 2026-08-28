@@ -15,7 +15,7 @@
 import { showNotification } from "@api/Notifications";
 import { Logger } from "@utils/Logger";
 import type { PluginNative } from "@utils/types";
-import { Toasts, UserStore } from "@webpack/common";
+import { FluxDispatcher, Toasts, UserStore } from "@webpack/common";
 
 import { type ChatLine, chatLog, shiftChat } from "./chat";
 import { playClipSound } from "./clipSound";
@@ -40,6 +40,16 @@ import { voiceBuffers } from "./voiceRecord";
 export const logger = new Logger("Clipper", "#f0b132");
 
 export type RecorderState = "idle" | "starting" | "recording" | "saving";
+
+/**
+ * How often the consent poll re-reads the call, in milliseconds.
+ *
+ * A backstop rather than the mechanism: `VOICE_STATE_UPDATES` does the real
+ * work now, and this only catches an event that never arrived. It was three
+ * seconds when it was the only path, and three seconds of somebody's first
+ * sentence is the part of a clip most likely to be worth keeping.
+ */
+const CONSENT_MS = 1000;
 
 /** A slice of the buffer picked by hand, as epoch milliseconds. */
 interface ClipWindow {
@@ -277,6 +287,19 @@ class ClipRecorder {
     private consented = new Set<string>();
     /** Poll that keeps that set level with the voice channel. */
     private consentTicker: ReturnType<typeof setInterval> | null = null;
+    /**
+     * The same, on the client's own word rather than on a timer.
+     *
+     * The poll alone leaves a window: somebody joins, and until the next tick
+     * the engine has not been told it may record them, so whatever they say in
+     * that gap is in no track and cannot be muted or lifted afterwards. The
+     * store fires the moment the voice state changes, which closes the window
+     * to as near nothing as this side can get. The poll stays underneath it,
+     * because a missed event is silent and a missed tick is not.
+     */
+    private onVoiceStates = () => this.grantConsent();
+    /** Whether the subscription above is currently attached. */
+    private consentBound = false;
     /** Poll that writes down what the client is holding. See `watchMemory`. */
     private memoryTicker: ReturnType<typeof setInterval> | null = null;
     private stream: MediaStream | null = null;
@@ -1458,6 +1481,11 @@ class ClipRecorder {
         this.consentTicker = null;
         this.consented.clear();
 
+        if (this.consentBound) {
+            FluxDispatcher.unsubscribe("VOICE_STATE_UPDATES" as any, this.onVoiceStates);
+            this.consentBound = false;
+        }
+
         if (this.native) {
             disarm();
             this.native = false;
@@ -1958,7 +1986,12 @@ class ClipRecorder {
         this.consented.clear();
         this.grantConsent();
 
-        this.consentTicker ??= setInterval(() => this.grantConsent(), 3000);
+        if (!this.consentBound) {
+            FluxDispatcher.subscribe("VOICE_STATE_UPDATES" as any, this.onVoiceStates);
+            this.consentBound = true;
+        }
+
+        this.consentTicker ??= setInterval(() => this.grantConsent(), CONSENT_MS);
 
         this.native = true;
         this.nativeSaveWarned = false;

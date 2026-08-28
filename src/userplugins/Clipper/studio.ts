@@ -2379,17 +2379,24 @@ export async function renderProject(project: Project, sources: StudioSource[], o
      * to the preview, and when the file has no separate tracks to rebuild from
      * it answers null and the duck below carries on as it did.
      */
-    for (const source of sources) {
-        if (!loaded.has(source.id)) continue;
+    const built = await Promise.all(
+        sources
+            .filter(source => loaded.has(source.id))
+            .map(async source => [
+                source.id,
+                await voiceMixFor(
+                    { id: source.id, url: source.url, voices: source.voices ?? [], tracks: source.tracks },
+                    project.voiceLevels,
+                    audioCtx
+                )
+            ] as const)
+    );
 
-        const mix = await voiceMixFor(
-            { id: source.id, url: source.url, voices: source.voices ?? [], tracks: source.tracks },
-            project.voiceLevels,
-            audioCtx
-        );
-
-        if (mix) mixes.set(source.id, mix);
-    }
+    // Built together rather than one after another: a montage cut from several
+    // POVs would otherwise wait for each file's tracks to be decoded in turn
+    // before the first frame is drawn, and decoding is what the wait is made
+    // of. With one source, which is the usual case, this is the same call.
+    for (const [id, mix] of built) if (mix) mixes.set(id, mix);
 
     /*
      * Avatars are decoded before the recorder is armed.

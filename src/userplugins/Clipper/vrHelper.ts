@@ -35,6 +35,15 @@
  * SteamVR too old to have it - which is the correct answer, and much better than
  * silently getting a table laid out differently than expected.
  *
+ * Three of the four interfaces are what the binds are made of and the bridge is
+ * worth nothing without them. The fourth is the overlay, which is only the panel
+ * drawn in front of the player, so a SteamVR without it warns and carries on
+ * with the buttons working. That table gets a check of its own before anything
+ * is created on it, for the same reason as the version call: asking it to name
+ * error zero and getting "VROverlayError_None" back says the entries are where
+ * the header says, without calling anything that could turn out to be a
+ * different function taking different arguments.
+ *
  * Written to C# 4: PowerShell 5.1 compiles with the .NET Framework compiler, and
  * anything newer than that will not build on a stock Windows install.
  *
@@ -57,6 +66,7 @@ const CSHARP = `
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -103,6 +113,28 @@ namespace Clipper
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
         private delegate int BindingUI([MarshalAs(UnmanagedType.LPStr)] string appKey, ulong actionSet, ulong device, [MarshalAs(UnmanagedType.I1)] bool onDesktop);
 
+        // IVROverlay
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int MakeOverlay([MarshalAs(UnmanagedType.LPStr)] string key, [MarshalAs(UnmanagedType.LPStr)] string name, ref ulong handle);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int DropOverlay(ulong overlay);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate IntPtr OverlayErrorName(int error);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int OverlayWidth(ulong overlay, float metres);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int OverlayFollow(ulong overlay, uint device, ref Matrix34 place);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int OverlayPixels(ulong overlay, IntPtr buffer, uint width, uint height, uint bytesPerPixel);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int OverlayShow(ulong overlay);
+
         // IVRApplications
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
         private delegate int AddManifest([MarshalAs(UnmanagedType.LPStr)] string path, [MarshalAs(UnmanagedType.I1)] bool temporary);
@@ -140,6 +172,23 @@ namespace Clipper
             [MarshalAs(UnmanagedType.I1)] public bool DeviceIsConnected;
         }
 
+        /*
+         * HmdMatrix34_t: three rows of four, laid out one after another.
+         *
+         * Written as twelve fields rather than as an array, because a struct
+         * holding a managed array has to be told how to marshal it and gets it
+         * wrong quietly if the attribute is missed. Twelve plain floats can
+         * only be laid out one way, and its size is checked at startup with
+         * the three below it.
+         */
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Matrix34
+        {
+            public float M00, M01, M02, M03;
+            public float M10, M11, M12, M13;
+            public float M20, M21, M22, M23;
+        }
+
         private const int ApplicationBackground = 3;
         private const int UniverseStanding = 1;
         private const int MaxDevices = 64;
@@ -157,6 +206,28 @@ namespace Clipper
          */
         private const int RetrySeconds = 5;
         private const int LostLimit = 50;
+
+        /*
+         * Where the panel hangs, relative to the headset.
+         *
+         * A metre out and thirty centimetres down, which in a headset is below
+         * whatever the player is actually looking at and well inside the field
+         * of view - the same place a car puts its instruments, and for the same
+         * reason. Tilted back fifteen degrees so it faces the eyes rather than
+         * the floor.
+         *
+         * Attached to the headset rather than left in the room, because this is
+         * a notice that somebody has a second or two to read: a panel left
+         * hanging where the player was looking a minute ago is a panel nobody
+         * ever sees.
+         */
+        private const float PanelForward = -1.0f;
+        private const float PanelDown = -0.30f;
+        private const float PanelTilt = 0.26f;
+        private const float PanelMetres = 0.55f;
+
+        /** The largest picture the plugin may hand over, in pixels either way. */
+        private const int PanelLimit = 2048;
 
         private static readonly object Gate = new object();
         private static readonly Queue<string> _commands = new Queue<string>();
@@ -399,7 +470,8 @@ namespace Clipper
                  */
                 if (Marshal.SizeOf(typeof(ActiveActionSet)) != 32
                     || Marshal.SizeOf(typeof(DigitalActionData)) != 24
-                    || Marshal.SizeOf(typeof(DevicePose)) != 80)
+                    || Marshal.SizeOf(typeof(DevicePose)) != 80
+                    || Marshal.SizeOf(typeof(Matrix34)) != 48)
                 {
                     Fail("The OpenVR structures are not the size they are supposed to be, refusing to call into them");
                     return;
@@ -489,6 +561,22 @@ namespace Clipper
 
             IntPtr apps = get("FnTable:IVRApplications_008", ref error);
             if (apps == IntPtr.Zero) { Fail("This SteamVR is too old: it has no IVRApplications_008"); return false; }
+
+            /*
+             * The overlay is the one interface allowed to be absent.
+             *
+             * Everything above this is what the binds are made of, and a
+             * SteamVR without it is a SteamVR the plugin cannot work on at all.
+             * The panel is a nicety on top: a runtime too old to draw it should
+             * cost the player the picture and nothing else, so a missing
+             * interface here warns and carries on with a zero handle, which
+             * every panel command below checks for.
+             */
+            IntPtr overlay = get("FnTable:IVROverlay_028", ref error);
+            ulong panel = 0;
+
+            if (overlay == IntPtr.Zero) Warn("This SteamVR has no IVROverlay_028, so the binds will work but nothing will be drawn in the headset");
+            else if (!MakePanel(overlay, appKey, ref panel)) overlay = IntPtr.Zero;
 
             // IVRSystem index 49, GetRuntimeVersion, the last entry but one.
             // Reached correctly only if every index before it was counted
@@ -582,6 +670,7 @@ namespace Clipper
             {
                 int tick = 0;
                 int lost = 0;
+                DateTime until = DateTime.MinValue;
 
                 while (!Stopping())
                 {
@@ -592,6 +681,28 @@ namespace Clipper
                     // well as in the headset, because the person who just
                     // clicked the button in Discord is looking at a monitor.
                     if (command == "bindings") openBindings(appKey, setHandle, 0, true);
+
+                    // A picture to put in front of the player's eyes, painted
+                    // in the browser and left in a file because a few hundred
+                    // kilobytes of pixels do not belong on a line-by-line pipe.
+                    else if (command.StartsWith("panel ")) until = ShowPanel(overlay, panel, command);
+                    else if (command == "panelhide") { HidePanel(overlay, panel); until = DateTime.MinValue; }
+
+                    /*
+                     * The countdown is kept here rather than in the plugin.
+                     *
+                     * Whatever asked for the panel is a renderer that can be
+                     * busy, reloaded or closed in the seconds between showing
+                     * it and taking it away, and none of those should be able
+                     * to leave a picture nailed across somebody's view of the
+                     * game. The side that draws it is the side that can always
+                     * be counted on to hide it.
+                     */
+                    if (until != DateTime.MinValue && DateTime.UtcNow >= until)
+                    {
+                        HidePanel(overlay, panel);
+                        until = DateTime.MinValue;
+                    }
 
                     /*
                      * The return value is the only warning that SteamVR has
@@ -654,9 +765,144 @@ namespace Clipper
             finally
             {
                 Marshal.FreeHGlobal(buffer);
+
+                // IVROverlay index 3, DestroyOverlay. SteamVR would drop it
+                // when the process goes, but this process is meant to outlive
+                // several SteamVR sessions: leaving them behind would put one
+                // more dead overlay in the compositor on every re-attach.
+                if (overlay != IntPtr.Zero && panel != 0) Entry<DropOverlay>(overlay, 3)(panel);
             }
 
             return false;
+        }
+
+        /**
+         * Makes the panel, and puts it where the player can read it.
+         *
+         * The canary first: index 8 turns an error number back into its own
+         * name, so calling it with zero and getting "VROverlayError_None" says
+         * that this table is laid out where the header says it is - before
+         * anything is created, and without a single call that could be a
+         * different function taking different arguments.
+         */
+        private static bool MakePanel(IntPtr overlay, string appKey, ref ulong panel)
+        {
+            IntPtr namePtr;
+
+            try { namePtr = Entry<OverlayErrorName>(overlay, 8)(0); }
+            catch { namePtr = IntPtr.Zero; }
+
+            string none = namePtr == IntPtr.Zero ? "" : Marshal.PtrToStringAnsi(namePtr);
+
+            if (none != "VROverlayError_None")
+            {
+                Warn("The IVROverlay function table is not laid out as expected, so nothing will be drawn in the headset");
+                return false;
+            }
+
+            // IVROverlay index 1, CreateOverlay. The key is what SteamVR
+            // identifies it by and has to be unique across everything running;
+            // the name is what a person sees in the compositor's own lists.
+            int failed = Entry<MakeOverlay>(overlay, 1)(appKey + ".panel", "Clipper", ref panel);
+
+            if (failed != 0 || panel == 0)
+            {
+                Warn("SteamVR refused to make the overlay (error " + failed + "), so nothing will be drawn in the headset");
+                return false;
+            }
+
+            // IVROverlay index 22, SetOverlayWidthInMeters. Height follows from
+            // the picture's own shape, so only the width is ever set.
+            Entry<OverlayWidth>(overlay, 22)(panel, PanelMetres);
+
+            /*
+             * A rotation about x, then the offset, in the headset's own frame.
+             *
+             * Row-major three by four: the left three columns turn, the last
+             * one moves. Negative z is forward in OpenVR, so the panel sits a
+             * metre in front and a little below, pitched up towards the eyes by
+             * the same angle it was put down by.
+             */
+            double c = Math.Cos(PanelTilt);
+            double s = Math.Sin(PanelTilt);
+
+            Matrix34 place = new Matrix34();
+            place.M00 = 1f; place.M03 = 0f;
+            place.M11 = (float) c; place.M12 = (float) -s; place.M13 = PanelDown;
+            place.M21 = (float) s; place.M22 = (float) c; place.M23 = PanelForward;
+
+            // IVROverlay index 35, SetOverlayTransformTrackedDeviceRelative,
+            // on device 0 - the headset, which OpenVR reserves that index for.
+            Entry<OverlayFollow>(overlay, 35)(panel, 0, ref place);
+
+            return true;
+        }
+
+        /**
+         * Draws one picture and shows it, returning when it should go away.
+         *
+         * The command is: panel, then width, height, milliseconds and the path,
+         * in that order. The numbers come first so that the path can be the
+         * whole of the rest of the line: it is a Windows path out of a folder
+         * under the user's profile, and those have spaces in them often
+         * enough to be worth never thinking about.
+         */
+        private static DateTime ShowPanel(IntPtr overlay, ulong panel, string command)
+        {
+            if (overlay == IntPtr.Zero || panel == 0) return DateTime.MinValue;
+
+            string[] parts = command.Split(new char[] { ' ' }, 5);
+            if (parts.Length < 5) return DateTime.MinValue;
+
+            int width, height, ms;
+
+            if (!int.TryParse(parts[1], out width) || !int.TryParse(parts[2], out height) || !int.TryParse(parts[3], out ms)) return DateTime.MinValue;
+            if (width <= 0 || height <= 0 || width > PanelLimit || height > PanelLimit || ms <= 0) return DateTime.MinValue;
+
+            byte[] pixels;
+
+            /*
+             * Read once, then delete, whatever happened next.
+             *
+             * The file is this side's to dispose of: the plugin writes it into
+             * the temporary directory and forgets it, because the moment it has
+             * handed the path over it has no way of knowing when the picture
+             * has been read and the file is safe to remove.
+             */
+            try { pixels = File.ReadAllBytes(parts[4]); }
+            catch { return DateTime.MinValue; }
+            finally { try { File.Delete(parts[4]); } catch { } }
+
+            // Four bytes to the pixel, and exactly as many as were promised: a
+            // buffer shorter than its stated size is read past the end of by
+            // the compositor rather than refused.
+            if (pixels.Length != width * height * 4) return DateTime.MinValue;
+
+            GCHandle pinned = GCHandle.Alloc(pixels, GCHandleType.Pinned);
+
+            try
+            {
+                // IVROverlay index 62, SetOverlayRaw. Plain RGBA out of main
+                // memory, which is why none of this needs a graphics device.
+                if (Entry<OverlayPixels>(overlay, 62)(panel, pinned.AddrOfPinnedObject(), (uint) width, (uint) height, 4) != 0) return DateTime.MinValue;
+            }
+            finally
+            {
+                pinned.Free();
+            }
+
+            // IVROverlay index 43, ShowOverlay.
+            Entry<OverlayShow>(overlay, 43)(panel);
+
+            return DateTime.UtcNow.AddMilliseconds(ms);
+        }
+
+        /** IVROverlay index 44, HideOverlay. Harmless on one already hidden. */
+        private static void HidePanel(IntPtr overlay, ulong panel)
+        {
+            if (overlay == IntPtr.Zero || panel == 0) return;
+
+            Entry<OverlayShow>(overlay, 44)(panel);
         }
 
         private static double HandSpeed(IntPtr buffer, int stride, uint index)

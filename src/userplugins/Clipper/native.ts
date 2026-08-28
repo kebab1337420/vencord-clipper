@@ -24,7 +24,7 @@ import { answerStudio, dropStudioWaiters, hideStudio, showStudio, type StudioAct
 // cannot import this module, which pulls in fs and electron. Not re-exported
 // either - every value export of a native module must be an IPC handler.
 import { thumbNameFor } from "./utils";
-import { closeBridge, openBindings, startBridge, status as bridgeStatus, type VrEvent, type VrStatus, waitForVrEvent as nextVrEvent } from "./vrBridge";
+import { closeBridge, hidePanel, openBindings, showPanel, startBridge, status as bridgeStatus, type VrEvent, type VrStatus, waitForVrEvent as nextVrEvent } from "./vrBridge";
 
 /*
  * Windows Graphics Capture is the only backend that reports "not capturable"
@@ -921,6 +921,27 @@ export function vrBridgeStatus(_?: IpcMainInvokeEvent): VrStatus {
 /** Opens SteamVR's own binding panel on the plugin's actions. */
 export function openVrBindings(_?: IpcMainInvokeEvent): boolean {
     return openBindings();
+}
+
+/**
+ * Puts a picture in front of the player for a few seconds.
+ *
+ * The pixels are plain RGBA, painted by the page that called this, because the
+ * page is the half of the plugin that knows what a Clipper notice looks like
+ * and the only half with anything to draw one with. Everything past here is
+ * carrying bytes to a compositor.
+ *
+ * Arriving over IPC as an `ArrayBuffer`, which Electron copies rather than
+ * serialises: a panel is a few hundred kilobytes, and going through JSON would
+ * cost more than painting it did.
+ */
+export function showVrPanel(_: IpcMainInvokeEvent, pixels: ArrayBuffer, width: number, height: number, dwellMs: number): boolean {
+    return showPanel(new Uint8Array(pixels), width, height, dwellMs);
+}
+
+/** Takes the panel away early. Harmless when there is none up. */
+export function hideVrPanel(_?: IpcMainInvokeEvent): boolean {
+    return hidePanel();
 }
 
 /** Resolves with the next press or hand reading, or null once the timeout passes. */

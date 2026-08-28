@@ -186,7 +186,11 @@ obviously can't really make every single feature possible because it isn't a ded
   Starting the buffer and asking the call for their angle are offered too but
   start unbound; add a button for either in that panel. It attaches when a
   headset goes on and lets go when it comes off; Discord never starts SteamVR by
-  itself. While it is attached, how fast the
+  itself. Whatever the plugin has to say is said in the headset too: a card a
+  metre in front of you, for a few seconds, when a button is pressed and again
+  when the clip it saved has a name — because every other way the plugin has of
+  telling you is a toast on a monitor nobody in a headset can see. While it is
+  attached, how fast the
   hands and head are actually moving is fed to the marker as corroboration — on
   its own it never marks anything, however hard you swing, because somebody
   playing a rhythm game swings for the whole song
@@ -398,7 +402,7 @@ firing it only while Discord is focused.
 
 ## Files
 
-Seventy-two modules, so the full list lives in [`docs/modules.md`](docs/modules.md)
+Seventy-three modules, so the full list lives in [`docs/modules.md`](docs/modules.md)
 with a line about each and a short guide to which one a given problem starts
 from. The shape of it:
 
@@ -479,9 +483,11 @@ anything. Run them with `.\scripts\test.ps1`.
   recorded. The picker still captures a window, which for a VR game is the
   desktop mirror — one eye, barrel-distorted and letterboxed, and some games do
   not draw it at all. Nothing is stabilised either, so raw headset footage is
-  rough to watch back. There is no panel drawn inside the headset: that needs a
-  Direct3D or Vulkan texture, which neither the plugin nor its bridge can
-  produce, and the binding panel it opens is SteamVR's own. The game
+  rough to watch back. What is drawn in the headset is a notice and nothing
+  more: a few seconds of text saying what just happened, not an interface — you
+  cannot point at it, and the binding panel the settings open is SteamVR's own.
+  It needs a SteamVR new enough to have `IVROverlay`, and an older one simply
+  goes without the card. The game
   integrations are dead weight in VR as well — no VR game reports its kills the
   way Counter-Strike does. It needs Windows, since the bridge is a PowerShell
   script compiling C# against the .NET Framework, and a SteamVR recent enough to

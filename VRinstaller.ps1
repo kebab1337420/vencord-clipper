@@ -421,4 +421,6 @@ Write-Host "    a clip, hold A to drop a marker. Nothing at all on the left hand
 Write-Host "  - starting the buffer and asking the call for their angle are there too, unbound."
 Write-Host "    Add a button for either in SteamVR, under Settings, Controller Bindings,"
 Write-Host "    Clipper, or from the button in the plugin's VR section"
+Write-Host "  - what the plugin has to say is drawn in the headset for a few seconds,"
+Write-Host "    a metre in front of you. Switch it off in the VR section if it is in the way"
 exit 0

@@ -49,7 +49,7 @@
 import { type ChildProcess, spawn } from "child_process";
 import { app } from "electron";
 import { writeFileSync } from "fs";
-import { join } from "path";
+import { dirname, join } from "path";
 
 import { SCRIPT } from "./vrHelper";
 import { ACTION_SET, apiLibrary, APP_KEY, scriptPath, VR_ACTIONS, type VrAction, writeActionManifest, writeAppManifest } from "./vrManifest";
@@ -489,16 +489,69 @@ export function status(): VrStatus {
 /**
  * Opens SteamVR's own binding panel on this plugin's actions.
  *
- * There is no in-headset interface of the plugin's own anywhere in here, and
- * that is the design rather than a gap in it: SteamVR already owns the screen
- * every VR game is rebound from, people know how to work it, and a binding it
- * writes survives this plugin being uninstalled and reinstalled.
+ * Rebinding is left to SteamVR rather than drawn here, and that is the design
+ * rather than a gap in it: SteamVR already owns the screen every VR game is
+ * rebound from, people know how to work it, and a binding it writes survives
+ * this plugin being uninstalled and reinstalled. The panel below is the other
+ * half of that split - what the plugin has to say, said where the player is
+ * looking, with everything they might want to change still living in SteamVR.
  */
 export function openBindings(): boolean {
     if (!child?.stdin?.writable) return false;
 
     try {
         child.stdin.write("bindings\n");
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * How many panels have been sent, so two in flight never share a file.
+ *
+ * The bridge deletes each one after reading it, but a second panel asked for
+ * before the first has been picked up would otherwise be written over the
+ * picture the bridge is about to read.
+ */
+let panels = 0;
+
+/**
+ * Puts a picture in front of the player, for a few seconds.
+ *
+ * Handed over as a file rather than down the pipe the commands travel on: that
+ * pipe is a line of text at a time and is read by a loop that also has poses to
+ * fetch, and half a megabyte of pixels through it would stall the binds for as
+ * long as it took to arrive. The bridge deletes the file once it has read it,
+ * which is the only moment either side knows it is finished with.
+ *
+ * The dwell is enforced on the far side, so a renderer that goes away between
+ * showing a panel and hiding it cannot leave one nailed across the game.
+ */
+export function showPanel(pixels: Uint8Array, width: number, height: number, dwellMs: number): boolean {
+    if (!child?.stdin?.writable) return false;
+    if (width <= 0 || height <= 0 || pixels.length !== width * height * 4) return false;
+
+    const path = join(dirname(scriptPath()), `panel-${panels++ % 8}.rgba`);
+
+    try {
+        writeFileSync(path, pixels);
+        child.stdin.write(`panel ${width} ${height} ${Math.round(dwellMs)} ${path}\n`);
+
+        return true;
+    } catch {
+        // Nothing to say about it: a picture that did not arrive is a picture
+        // nobody saw, and the binds this bridge exists for are unaffected.
+        return false;
+    }
+}
+
+/** Takes the panel away early. Harmless when there is none up. */
+export function hidePanel(): boolean {
+    if (!child?.stdin?.writable) return false;
+
+    try {
+        child.stdin.write("panelhide\n");
         return true;
     } catch {
         return false;

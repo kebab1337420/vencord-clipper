@@ -373,6 +373,12 @@ export const settings = definePluginSettings({
         hidden: () => !settings.store.vrInstalled,
         component: VrBindings
     },
+    vrPanel: {
+        hidden: () => !settings.store.vrInstalled,
+        type: OptionType.BOOLEAN,
+        description: "And draw the plugin's notices inside the headset. A small card a metre in front of you saying what a button just did and how a clip ended up, for a few seconds - because every other way the plugin has of telling you is a toast on a monitor you cannot see. It needs nothing installed and no graphics card time: the picture is drawn in Discord and handed to SteamVR's compositor as it is",
+        default: true
+    },
     vrMotionWatch: {
         hidden: () => !settings.store.vrInstalled,
         type: OptionType.BOOLEAN,

@@ -33,8 +33,8 @@ window that shows the same controls over a full-screen game.
 | File | Lines | What it is |
 | --- | --- | --- |
 | `index.tsx` | 296 | The plugin definition: what starts, what stops, and where the overlay root is mounted. |
-| `native.ts` | 1431 | The main process half. Path safety, size caps and every file, `ffmpeg` and keybind operation the renderer asks for. |
-| `settings.tsx` | 453 | The settings the user sees, and their defaults. |
+| `native.ts` | 1452 | The main process half. Path safety, size caps and every file, `ffmpeg` and keybind operation the renderer asks for. |
+| `settings.tsx` | 459 | The settings the user sees, and their defaults. |
 
 ## Capture
 
@@ -162,9 +162,10 @@ settings are hidden, `syncVr` returns immediately, and no bridge is spawned.
 
 | File | Lines | What it is |
 | --- | --- | --- |
-| `vr.ts` | 251 | The renderer half: a controller press becomes the same action a keybind fires, and the player's own body becomes a signal. |
-| `vrBridge.ts` | 541 | Main process. Starts the one bridge, restarts it if it dies for a reason another one would not hit, and long-polls the same way the game feeds do. |
-| `vrHelper.ts` | 711 | The bridge itself: C# compiled at first run by PowerShell, calling OpenVR through its function tables. |
+| `vr.ts` | 278 | The renderer half: a controller press becomes the same action a keybind fires, and the player's own body becomes a signal. |
+| `vrBridge.ts` | 594 | Main process. Starts the one bridge, restarts it if it dies for a reason another one would not hit, and long-polls the same way the game feeds do. |
+| `vrHelper.ts` | 957 | The bridge itself: C# compiled at first run by PowerShell, calling OpenVR through its function tables. |
+| `vrPanel.ts` | 179 | The notice, drawn again as pixels and hung in front of the player: the one thing in the plugin somebody wearing a headset can actually see. |
 | `vrManifest.ts` | 268 | The action manifest, the default bindings and the application manifest, which is what puts Clipper in SteamVR's own binding panel. |
 | `components/VrBindings.tsx` | 91 | The settings row: whether SteamVR is attached, and the button that opens that panel. |
 
@@ -175,7 +176,7 @@ The always-on-top window, and the two files that decide what it draws.
 | File | Lines | What it is |
 | --- | --- | --- |
 | `overlayWindow.ts` | 389 | The window itself and what the plugin draws in it. |
-| `gameOverlay.ts` | 291 | The renderer's side: what to show, and what came back. |
+| `gameOverlay.ts` | 297 | The renderer's side: what to show, and what came back. |
 | `studioOverlay.ts` | 608 | The cutting room, over the game. |
 | `overlayEdit.ts` | 149 | Carrying out what the overlay editor asked for. |
 | `globalKeybinds.ts` | 164 | System-wide keybinds, which only work from the main process. |
@@ -219,6 +220,10 @@ The always-on-top window, and the two files that decide what it draws.
   attached, and the settings row says why not if it did not. The binding itself
   belongs to SteamVR, and `vrManifest.ts` is only what it was offered to start
   from — two of the four actions start unbound on purpose.
+- **Nothing is drawn in the headset.** `vrPanel.ts` paints it and refuses
+  quietly when the VR panel setting is off; `vrHelper.ts` warns on the bridge
+  when SteamVR has no `IVROverlay_028` to draw on, which is the one interface
+  the bridge is allowed to do without.
 - **It cannot read or write a file.** `native.ts`. Nothing else can.
 
 ## Tests

@@ -39,6 +39,8 @@ import { runShortcut } from "./globalKeybinds";
 import { settings } from "./settings";
 import { signals } from "./signals";
 import type { VrEvent, VrStatus } from "./vrBridge";
+import type { VrAction } from "./vrManifest";
+import { clearVrNotice, vrNotice } from "./vrPanel";
 
 const Native = VencordNative.pluginHelpers.Clipper as PluginNative<typeof import("./native")>;
 
@@ -62,6 +64,22 @@ const HAND_FULL = 5;
 /** The same for the head turning, in radians per second. */
 const HEAD_FLOOR = 1.5;
 const HEAD_FULL = 5.5;
+
+/*
+ * What each button says it has done, the instant it is pressed.
+ *
+ * Not what happened - that arrives later, from the same notice everybody else
+ * gets, and says whether the clip was actually written. This is the click: the
+ * confirmation that the press was seen at all, which on a controller with no
+ * travel and no sound is otherwise indistinguishable from a button that is not
+ * bound to anything.
+ */
+const PRESSED: Record<VrAction, string> = {
+    save: "Saving a clip…",
+    mark: "Marker dropped",
+    toggle: "Clip buffer switched",
+    pov: "Asking the call for their angle…"
+};
 
 /** Bumped on every stop, so a pump left over from a previous run exits. */
 let generation = 0;
@@ -125,6 +143,12 @@ export async function syncVr(): Promise<void> {
 export function stopVr(): void {
     generation++;
     running = false;
+
+    // Before the bridge is asked to stop, while there is still something to
+    // send it to. Killing the process takes the overlay with it either way;
+    // this is so switching the controls off looks immediate rather than
+    // leaving a card up for as long as the shutdown takes.
+    clearVrNotice();
     signals.release("vr");
     signals.report("hands", 0, "");
     signals.report("turn", 0, "");
@@ -230,7 +254,10 @@ async function pump(mine: number): Promise<void> {
         if (!event) continue;
 
         if (event.kind === "action") {
-            runShortcut(event.action);
+            // Only when the press was acted on: the dispatcher swallows one
+            // that arrives within a quarter of a second of the same action,
+            // and saying it happened twice would be a lie about the second.
+            if (runShortcut(event.action)) vrNotice(PRESSED[event.action], "");
             continue;
         }
 

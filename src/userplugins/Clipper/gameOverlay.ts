@@ -35,6 +35,7 @@ import { settings } from "./settings";
 import type { StudioAction } from "./studioOverlay";
 import { toast } from "./toasts";
 import { formatKeybind } from "./utils";
+import { vrNotice } from "./vrPanel";
 
 const Native = VencordNative.pluginHelpers.Clipper as PluginNative<typeof import("./native")>;
 
@@ -279,6 +280,11 @@ export function notifyOverlay(title: string, note: string): void {
 
     Native.notifyClipSaved(title, note, settings.store.overlayCorner)
         .catch(e => logger.warn("Could not put a notice over the game", e));
+
+    // The same sentence, drawn again for anybody wearing a headset: the notice
+    // above is a window on a desktop, and a desktop is the one thing they
+    // cannot see. Quiet and free when there is no headset.
+    vrNotice(title, note);
 }
 
 /** Says that a clip was written. */

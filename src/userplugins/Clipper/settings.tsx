@@ -337,7 +337,7 @@ export const settings = definePluginSettings({
         default: true
     },
     /*
-     * Written by VRinstaller.ps1, never shown, and the only thing that decides
+     * Written by VRinstaller.bat, never shown, and the only thing that decides
      * whether any of the VR settings below appear at all.
      *
      * Most people have no headset, and a section about SteamVR in the middle of

@@ -155,7 +155,7 @@ a warning is something wrong with a session that is attached and working, such
 as actions SteamVR does not recognise. It is shown like a problem, and the
 bridge after it is still started.
 
-All of it is switched off until `VRinstaller.ps1` at the repository root sets
+All of it is switched off until `VRinstaller.bat` at the repository root sets
 `vrInstalled` in the client's `settings.json`. Everything below is compiled into
 the bundle regardless — there is one build — but with that setting clear the VR
 settings are hidden, `syncVr` returns immediately, and no bridge is spawned.

@@ -35,13 +35,17 @@ obviously can't really make every single feature possible because it isn't a ded
   added as its own channel. Moving a slider is heard in the clip being buffered
   right now, not only in the next one
 - **One channel per person in the call**, under the same mixer, with a live
-  meter each. Everybody is recorded on a track of their own beside the clip, so
-  a level here is the level that person's own recording is added back at when
-  the clip is put together, and a mute leaves their track out of the sum rather
-  than filtering them out of a mix. It is saved with the clip and applied the
-  moment it is opened in the studio, where it can still be changed. Unlike
-  Discord's own per-user volume, none of it touches what you hear while you
-  play
+  meter each. Where a track of their own exists - Discord's clip engine writes
+  one per person, and on a client that does voice over WebRTC each of them is
+  recorded beside the clip - a level here is the level that person's own
+  recording is added back at when the clip is put together, and a mute leaves
+  their track out of the sum rather than filtering them out of a mix. Where the
+  call only ever arrived mixed, a mute cannot be exact and does not pretend to
+  be: it takes 15dB out of the band a voice lives in while that person is
+  audible, so they go under the game instead of taking the game with them. It is
+  saved with the clip and applied the moment it is opened in the studio, where it
+  can still be changed. Unlike Discord's own per-user volume, none of it touches
+  what you hear while you play
 - Sound played when a clip is saved, built-in or any audio file of your own,
   with its own volume. The system channel is ducked for the length of it, so the
   sound confirms the clip without ending up inside it, and it never fires while
@@ -174,7 +178,7 @@ obviously can't really make every single feature possible because it isn't a ded
 - **Clipping from inside a headset**, if you ask for it. Most people have no
   headset, so this part is opt-in and starts switched off: nothing about it
   appears in the settings and nothing ever attaches to SteamVR until
-  `VRinstaller.ps1` is run (`VRinstaller.ps1 -Uninstall` puts it back). Once it
+  `VRinstaller.bat` is run (`VRinstaller.bat --uninstall` puts it back). Once it
   is on, four actions are offered to SteamVR, which puts Clipper in the same
   Controller Bindings panel every VR game is rebound from — the plugin draws no
   binding screen of its own because SteamVR already owns one, and a bind made
@@ -259,14 +263,14 @@ Start Discord, then enable **Clipper** in Vencord → Plugins.
 If you play in VR, run
 
 ```
-powershell -ExecutionPolicy Bypass -File VRinstaller.ps1
+VRinstaller.bat
 ```
 
 and restart Discord. That is the only thing that makes the SteamVR side exist:
 without it there is no VR section in the settings, nothing looks for a headset,
 and no bridge is ever started. It checks that SteamVR is installed and refuses
-to change anything if it is not. `-Uninstall` takes it back out, `-Status` says
-what is set up without touching anything.
+to change anything if it is not. `--uninstall` takes it back out, `--status`
+says what is set up without touching anything.
 
 Undo with `install.bat --uninstall`: Discord is unpatched, Vesktop's *Vencord
 Location* is cleared, the copied bundle is deleted. Vencord settings and themes
@@ -475,7 +479,7 @@ anything. Run them with `.\scripts\test.ps1`.
   them and the bind only works while Discord is focused. Rebind to something
   free. Keys with no Electron accelerator name stay Discord-only as well.
 - **The VR side is opt-in, but it is not a separate download.** It ships in the
-  same bundle as everything else and `VRinstaller.ps1` only decides whether it
+  same bundle as everything else and `VRinstaller.bat` only decides whether it
   runs — so the settings stay clean and nothing starts, but the bundle is the
   same few dozen kilobytes larger either way.
 - **VR is controls and motion, not capture.** The SteamVR side gets a press off

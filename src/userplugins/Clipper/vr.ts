@@ -107,7 +107,7 @@ export async function syncVr(): Promise<void> {
     if (!supported()) return;
 
     // The whole VR side is opt-in from outside Discord, through
-    // VRinstaller.ps1. Somebody who has never run it has no VR settings to see
+    // VRinstaller.bat. Somebody who has never run it has no VR settings to see
     // and nothing here ever runs, whatever the stored values happen to say.
     if (!settings.store.vrInstalled || !settings.store.vrControls) {
         stopVr();

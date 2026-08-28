@@ -1,9 +1,78 @@
-# Turns Clipper's SteamVR side on, or off again.
-#
-# Most people have no headset, so the VR side is opt-in and starts switched off:
-# nothing about it appears in the plugin settings, nothing attaches to SteamVR,
-# and no PowerShell bridge is ever started. Running this script is what makes it
-# appear; running it again with -Uninstall makes it go away.
+@echo off
+setlocal
+
+REM ============================================================
+REM  Clipper - turns the SteamVR side on, or off again.
+REM
+REM  Usage:
+REM    VRinstaller.bat                install the VR side
+REM    VRinstaller.bat --uninstall    remove it and delete what it generated
+REM    VRinstaller.bat --status       say what is set up, change nothing
+REM    VRinstaller.bat --force        write anyway, with Discord still running
+REM
+REM  This file is both the batch front and the script it runs. Everything from
+REM  the marker below is PowerShell, read back out of this file and run from
+REM  memory: one file to hand somebody, double-clickable, and no execution
+REM  policy to talk them through.
+REM
+REM  The work itself stays in PowerShell because settings.json has to be walked
+REM  as text, character by character, to touch two keys without disturbing
+REM  anybody else's - see the comments in the body. Batch has no honest way to
+REM  do that.
+REM
+REM  Exit codes: 0 = done, 1 = nothing was changed.
+REM ============================================================
+
+set "PSARGS="
+
+REM One option per pass, spelled whichever way the person reached for: the old
+REM PowerShell -Uninstall, the --uninstall an installer script usually takes, or
+REM the /uninstall somebody used to Windows tools will try.
+:args
+if "%~1"=="" goto run
+
+set "OPT="
+if /i "%~1"=="--uninstall" set "OPT=-Uninstall"
+if /i "%~1"=="-uninstall"  set "OPT=-Uninstall"
+if /i "%~1"=="/uninstall"  set "OPT=-Uninstall"
+if /i "%~1"=="--status"    set "OPT=-Status"
+if /i "%~1"=="-status"     set "OPT=-Status"
+if /i "%~1"=="/status"     set "OPT=-Status"
+if /i "%~1"=="--force"     set "OPT=-Force"
+if /i "%~1"=="-force"      set "OPT=-Force"
+if /i "%~1"=="/force"      set "OPT=-Force"
+if not defined OPT goto badopt
+
+REM /1, because a bare shift moves %0 along with the rest and the path to this
+REM file is what the PowerShell half is about to read itself out of.
+set "PSARGS=%PSARGS% %OPT%"
+shift /1
+goto args
+
+:badopt
+echo [ERROR] Unknown option: %~1
+echo         Use --uninstall, --status or --force, or no option at all to install.
+echo.
+pause
+exit /b 1
+
+:run
+echo.
+echo === Clipper VR installer ===
+echo.
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$s = [IO.File]::ReadAllText('%~f0'); & ([scriptblock]::Create($s.Substring($s.IndexOf('#' + ':PSBODY:')))) %PSARGS%"
+set "RC=%errorlevel%"
+
+echo.
+pause
+exit /b %RC%
+
+#:PSBODY:
+# The VR side is opt-in and starts switched off, because most people have no
+# headset: nothing about it appears in the plugin settings, nothing attaches to
+# SteamVR, and no PowerShell bridge is ever started. Running this is what makes
+# it appear; running it again with --uninstall makes it go away.
 #
 # It only writes settings. The plugin itself is already installed by install.bat
 # and is not touched here - there is one bundle, and this decides what of it runs.
@@ -17,14 +86,6 @@
 # Discord has to be closed while this runs. It keeps its whole settings file in
 # memory and writes all of it back when anything changes, so a running client
 # would overwrite these two keys within minutes and leave no sign of it.
-#
-# Usage:
-#   VRinstaller.ps1              install the VR side
-#   VRinstaller.ps1 -Uninstall   remove it and delete what it generated
-#   VRinstaller.ps1 -Status      say what is set up, change nothing
-#   VRinstaller.ps1 -Force       write anyway, with Discord still running
-#
-# Exit codes: 0 = done, 1 = nothing was changed.
 
 param(
     # takes the VR side back out, and removes the files it generated
@@ -305,7 +366,7 @@ if ($files.Count -eq 0) {
 
 $steamVR = Find-SteamVR
 
-# Asked before anything is written, and not before -Status, which only reads.
+# Asked before anything is written, and not before --status, which only reads.
 if (-not $Status) {
     $open = @(Get-RunningClients $files)
 
@@ -313,7 +374,7 @@ if (-not $Status) {
         Write-Host "[ERROR] Close $($open -join ', ') first."
         Write-Host "        A running client writes its whole settings file back whenever anything"
         Write-Host "        changes, which would undo this without saying so. Nothing was changed."
-        Write-Host "        Run with -Force to write anyway."
+        Write-Host "        Run with --force to write anyway."
         exit 1
     }
 

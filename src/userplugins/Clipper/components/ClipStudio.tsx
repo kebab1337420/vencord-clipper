@@ -2963,6 +2963,61 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         setPickedSound(current => current === id ? "" : current);
     };
 
+    /*
+     * Copying a sound, and pasting it as many times as it takes.
+     *
+     * A sting that punctuates a montage is placed a dozen times, and every one
+     * of those placements is the same block with the same trim, the same gain
+     * and the same fades - re-importing the file and re-dialling all of that is
+     * the tedium this removes. What is held is the block, not the file: the
+     * decoded source stays where it is and the copies all point at it, so a
+     * hundred placements cost a hundred small objects rather than a hundred
+     * decodes.
+     */
+    // State rather than a ref, because the Paste button is disabled until there
+    // is something to paste and a ref would not re-render it into life.
+    const [soundClipboard, setSoundClipboard] = useState<AudioClip | null>(null);
+
+    /**
+     * Where the last paste of the current run landed, so the next one follows it.
+     *
+     * Pasting repeatedly at one playhead would otherwise stack every copy on the
+     * same frame and sound like a single louder hit. Each paste in a run butts
+     * against the end of the one before instead, which is what laying a sound
+     * down several times in a row is for. Moving the playhead starts a new run,
+     * so a paste always lands where it was asked for.
+     */
+    const pasteRun = useRef<{ head: number; end: number; } | null>(null);
+
+    const copySound = (id: string): boolean => {
+        const clip = (project.audioClips ?? []).find(c => c.id === id);
+        if (!clip) return false;
+
+        setSoundClipboard(clip);
+        pasteRun.current = null;
+        return true;
+    };
+
+    const pasteSound = (): boolean => {
+        const copied = soundClipboard;
+
+        // The source is dropped when the modal closes, and a copy that outlived
+        // it would be a clip pointing at nothing: silent, undeletable from the
+        // lane's own controls, and rendered as a gap.
+        if (!copied || !soundsById.has(copied.sourceId)) return false;
+
+        const head = projectTime();
+        const run = pasteRun.current;
+        const at = run && Math.abs(run.head - head) < 0.001 ? run.end : head;
+
+        const clip: AudioClip = { ...copied, id: newId(), at };
+        pasteRun.current = { head, end: at + clipLengthOf(clip) };
+
+        commit(p => ({ ...p, audioClips: [...(p.audioClips ?? []), clip] }));
+        setPickedSound(clip.id);
+        return true;
+    };
+
     const move = (id: string, delta: number) => {
         commit(p => {
             const index = p.segments.findIndex(s => s.id === id);
@@ -3696,6 +3751,11 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         if (e.ctrlKey || e.metaKey) {
             if (key === "z" && !e.shiftKey) undo();
             else if ((key === "z" && e.shiftKey) || key === "y") redo();
+            // Only with a sound picked, and only when there is something to
+            // paste: an unhandled Ctrl+C has to stay the client's, or selecting
+            // a caption in the studio and copying it would come back empty.
+            else if (key === "c" && pickedSound) { if (!copySound(pickedSound)) return; }
+            else if (key === "v") { if (!pasteSound()) return; }
             else return;
 
             e.preventDefault();
@@ -5038,6 +5098,16 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                                 <button disabled={busy} title="Move it to the playhead" onClick={() => patchSound(clip.id, { at: projectTime() })}>
                                                     Move here
                                                 </button>
+                                                <button disabled={busy} title="Copy this block, trim and fades included (Ctrl+C)" onClick={() => copySound(clip.id)}>
+                                                    Copy
+                                                </button>
+                                                <button
+                                                    disabled={busy || !soundClipboard}
+                                                    title="Lay the copied block down at the playhead, again after itself each time (Ctrl+V)"
+                                                    onClick={() => pasteSound()}
+                                                >
+                                                    Paste
+                                                </button>
                                                 <button disabled={busy} onClick={() => patchSound(clip.id, { muted: !clip.muted })}>
                                                     {clip.muted ? "Unmute" : "Mute"}
                                                 </button>
@@ -5301,8 +5371,10 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                 <Hint summary="Shortcuts">
                                     Space plays the segment, S splits it, D duplicates it, Delete removes it, I and O
                                     mark a range and X cuts it, arrows step the playhead, Ctrl+Z and Ctrl+Shift+Z
-                                    walk the edits, Esc closes the studio. The timeline is kept when you close it and
-                                    comes back on the next opening.
+                                    walk the edits, Esc closes the studio. With a sound picked, Ctrl+C copies the
+                                    block and Ctrl+V lays it down at the playhead - press it again and the next copy
+                                    follows the last one, so a sting can be spammed across the clip. The timeline is
+                                    kept when you close it and comes back on the next opening.
                                 </Hint>
                             </>
                         )}

@@ -298,7 +298,12 @@ export const settings = definePluginSettings({
     },
     povRequests: {
         type: OptionType.BOOLEAN,
-        description: "Save your own clip when somebody else in your call asks for everyone's angle. Only from people in the call you are currently in, only while your buffer is already running, and at most one every ten seconds - so it can never write a clip you could not have saved yourself a second earlier",
+        description: "Save your own clip when somebody else in your call asks for everyone's angle. Only from people in the call you are currently in, only while your buffer is already running, and at most one every ten seconds - so it can never write a clip you could not have saved yourself a second earlier. You are told over the game when it happens, or in Discord when you are looking at it",
+        default: true
+    },
+    povCleanup: {
+        type: OptionType.BOOLEAN,
+        description: "Delete your own request message a few seconds after sending it. The message is only how the request reaches the other clients - everyone running Clipper is told over their game instead - so this keeps the channel from filling up with them. Turn it off to leave them in the chat",
         default: true
     },
     updatesSection: {

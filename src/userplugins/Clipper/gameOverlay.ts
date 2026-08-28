@@ -272,21 +272,27 @@ async function pump(mine: number): Promise<void> {
 }
 
 /**
- * Says that a clip was written, over the game, for a couple of seconds.
+ * Puts one line of text over the game, for a couple of seconds.
  *
- * Deliberately not the clip itself: this is somebody in the middle of a game
- * who wants to know the save worked, not somebody wanting to watch anything.
- * The main process drops it when the client is the window in front.
+ * Deliberately never a video: this is somebody in the middle of a game who
+ * wants to know something happened, not somebody wanting to watch anything.
+ * The main process drops it while the client is the window in front, so it is
+ * only ever seen by somebody who cannot see Discord - which is the whole of
+ * the reason it exists.
  */
-export function notifySaved(name: string): void {
+export function notifyOverlay(title: string, note: string): void {
     if (!settings.store.overlayNotice) return;
     if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return;
 
+    Native.notifyClipSaved(title, note, settings.store.overlayCorner)
+        .catch(e => logger.warn("Could not put a notice over the game", e));
+}
+
+/** Says that a clip was written. */
+export function notifySaved(name: string): void {
     // The clip name when there is no bind to name: "Unbound to edit it" is what
     // formatting an empty bind would otherwise put on screen.
     const bind = settings.store.replayKeybind;
-    const note = bind ? `${formatKeybind(bind)} to edit it` : name;
 
-    Native.notifyClipSaved("Clip saved", note, settings.store.overlayCorner)
-        .catch(e => logger.warn("Could not say that the clip was saved", e));
+    notifyOverlay("Clip saved", bind ? `${formatKeybind(bind)} to edit it` : name);
 }

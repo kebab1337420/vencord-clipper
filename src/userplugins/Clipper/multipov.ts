@@ -16,10 +16,19 @@
  * There is no side channel here. Discord gives a plugin nothing to talk to
  * another plugin on, and the tempting workaround - hiding a payload in zero
  * width characters inside an ordinary looking message - is the plugin talking
- * behind the user's back in their own name. So the request is simply a message,
- * in plain words, in the call's own chat: everyone in the channel sees exactly
- * what was sent, whether they run this plugin or not, and the part the plugin
- * reads back out is visible in it.
+ * behind the user's back in their own name. So the request travels as a
+ * message, in plain words, in the call's own chat: everyone in the channel sees
+ * exactly what was sent, whether they run this plugin or not, and the part the
+ * plugin reads back out is visible in it.
+ *
+ * The chat is how it travels, not how it is read. Everybody this is aimed at is
+ * looking at a game rather than at Discord, so the request also goes over the
+ * game as a line of text, at both ends: the person who asked sees that the call
+ * was asked, and the people in it see who asked and that their own angle is
+ * being saved. Whoever can see the client gets the usual toast instead. And
+ * because the message has done its work within a second of being sent, it is
+ * taken back down a few seconds later rather than left to pile up in the
+ * channel, which the settings can turn off for anybody who would rather keep it.
  *
  * The one piece of cleverness is the clock. A request lands a few hundred
  * milliseconds after it was sent, so a receiver that just saves "the last
@@ -30,8 +39,9 @@
  */
 
 import { sendMessage } from "@utils/discord";
-import { FluxDispatcher, SelectedChannelStore, Toasts, UserStore } from "@webpack/common";
+import { FluxDispatcher, MessageActions, SelectedChannelStore, Toasts, UserStore } from "@webpack/common";
 
+import { notifyOverlay } from "./gameOverlay";
 import { logger, recorder } from "./recorder";
 import { settings } from "./settings";
 import { nameOf, voiceParticipants } from "./voice";
@@ -58,8 +68,26 @@ const COOLDOWN = 10_000;
  */
 const MAX_LAG = 2000;
 
+/**
+ * How long the request is left in the chat before it is taken back down.
+ *
+ * A client that is connected has acted on it inside a second; this is slack for
+ * one that was reconnecting when it was sent, and short enough that a session
+ * does not leave a wall of them behind.
+ */
+const CLEANUP_DELAY = 8000;
+
+/** How long a message of our own is still recognised as the one we just sent. */
+const CLEANUP_WINDOW = 30_000;
+
 let lastHonoured = 0;
 let installed = false;
+
+/** When we last asked, so the copy that comes back can be recognised. */
+let askedAt = 0;
+
+/** The pending take-down, cleared if the plugin stops before it fires. */
+let cleanup: ReturnType<typeof setTimeout> | null = null;
 
 function toast(message: string, type: string, duration = 5000) {
     Toasts.show({
@@ -68,6 +96,11 @@ function toast(message: string, type: string, duration = 5000) {
         type,
         options: { duration, position: Toasts.Position.BOTTOM }
     });
+}
+
+/** A name cut to fit a line over the game, which holds 90 characters in all. */
+function short(name: string): string {
+    return name.length > 24 ? `${name.slice(0, 23)}…` : name;
 }
 
 /*
@@ -137,9 +170,16 @@ export async function requestPov(): Promise<void> {
     }
 
     try {
+        // Set before the send rather than after it: the message can come back
+        // through the dispatcher before this promise resolves.
+        askedAt = Date.now();
+
         await sendMessage(channelId, { content: requestText(seconds) });
+
         toast(`Asked ${others.length === 1 ? "the other person" : `the ${others.length} others`} in the call for their angle`, Toasts.Type.SUCCESS);
+        notifyOverlay("Asked for everyone's angle", mine ? "Your own clip is saved" : "Your clip buffer is off");
     } catch (e) {
+        askedAt = 0;
         logger.error("Could not ask the call for a clip", e);
         toast(mine
             ? "Saved your clip, but the call could not be asked"
@@ -148,10 +188,34 @@ export async function requestPov(): Promise<void> {
 }
 
 interface IncomingMessage {
+    id?: string;
     channel_id?: string;
     content?: string;
     timestamp?: string;
     author?: { id?: string; bot?: boolean; };
+}
+
+/**
+ * Takes our own request back out of the chat, a few seconds on.
+ *
+ * The message is the transport and nothing else, so it has no reason to stay:
+ * everybody running the plugin has been told over their game by now, and
+ * everybody not running it saw it go past. One at a time - a second request
+ * while this one is pending takes its place, and the first message stays.
+ */
+function takeDown(channelId: string, id: string): void {
+    if (cleanup) clearTimeout(cleanup);
+
+    cleanup = setTimeout(() => {
+        cleanup = null;
+
+        try {
+            void Promise.resolve(MessageActions.deleteMessage(channelId, id))
+                .catch(e => logger.warn("Could not take the multi-POV request back down", e));
+        } catch (e) {
+            logger.warn("Could not take the multi-POV request back down", e);
+        }
+    }, CLEANUP_DELAY);
 }
 
 /**
@@ -165,14 +229,25 @@ interface IncomingMessage {
 function onMessage({ message, optimistic }: { message?: IncomingMessage; optimistic?: boolean; }) {
     try {
         if (optimistic || !message?.content) return;
-        if (!settings.store.povRequests) return;
 
         const match = REQUEST.exec(message.content);
         if (!match) return;
 
         const author = message.author?.id ?? "";
         if (!author || message.author?.bot) return;
-        if (author === myId()) return;
+
+        // Our own request, come back with the id the chat gave it. The only
+        // thing left to do with it is to take it down again.
+        if (author === myId()) {
+            const ours = Date.now() - askedAt < CLEANUP_WINDOW;
+            if (!ours || !settings.store.povCleanup || !message.id || !message.channel_id) return;
+
+            askedAt = 0;
+            takeDown(message.channel_id, message.id);
+            return;
+        }
+
+        if (!settings.store.povRequests) return;
 
         // From the call we are in, and from somebody who is in it: the chat of a
         // voice channel is readable by people who never joined the call.
@@ -185,6 +260,7 @@ function onMessage({ message, optimistic }: { message?: IncomingMessage; optimis
         if (!recorder.isRecording) {
             lastHonoured = now;
             toast(`${nameOf(author)} asked for everyone's angle, but your clip buffer is off`, Toasts.Type.MESSAGE, 7000);
+            notifyOverlay("Clip that", `${short(nameOf(author))} asked, but your clip buffer is off`);
             return;
         }
 
@@ -204,6 +280,8 @@ function onMessage({ message, optimistic }: { message?: IncomingMessage; optimis
         const to = now - lag;
 
         toast(`${nameOf(author)} asked for everyone's angle - saving yours`, Toasts.Type.SUCCESS);
+        notifyOverlay("Clip that", `${short(nameOf(author))} asked - saving your last ${seconds}s`);
+
         void recorder.save(undefined, { from: to - seconds * 1000, to });
     } catch (e) {
         logger.warn("Could not act on a multi-POV request", e);
@@ -223,6 +301,11 @@ export function installPovRequests(): void {
 }
 
 export function uninstallPovRequests(): void {
+    if (cleanup) {
+        clearTimeout(cleanup);
+        cleanup = null;
+    }
+
     if (!installed) return;
 
     try {

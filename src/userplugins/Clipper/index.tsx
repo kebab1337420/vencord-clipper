@@ -11,6 +11,7 @@
  */
 
 import { SettingsStore } from "@api/Settings";
+import ErrorBoundary from "@components/ErrorBoundary";
 import definePlugin from "@utils/types";
 import { createRoot, Toasts } from "@webpack/common";
 
@@ -143,7 +144,17 @@ function mountOverlay() {
         document.body.appendChild(overlayElement);
 
         overlayRoot = createRoot(overlayElement);
-        overlayRoot.render(<ClipperOverlay />);
+
+        // A throw inside this root unmounts all of it, and nothing remounts it:
+        // the panel button, the replay card and the studio would be gone for
+        // the rest of the session while the recorder went on buffering behind
+        // them. The boundary keeps the root alive and puts the reason on screen
+        // instead of leaving an empty corner.
+        overlayRoot.render(
+            <ErrorBoundary message="Clipper's overlay could not be rendered. Reload the client to bring it back.">
+                <ClipperOverlay />
+            </ErrorBoundary>
+        );
     } catch (e) {
         logger.error("Could not mount the overlay", e);
     }

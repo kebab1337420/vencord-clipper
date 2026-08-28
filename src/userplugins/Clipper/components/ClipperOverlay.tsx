@@ -16,7 +16,8 @@
  * hover, focus and transitions behave like the rest of the client.
  */
 
-import { React, useEffect, useMemo, useRef, useState } from "@webpack/common";
+import ErrorBoundary from "@components/ErrorBoundary";
+import { React, Toasts, useEffect, useMemo, useRef, useState } from "@webpack/common";
 
 import { CLIPS_AVAILABLE } from "../clips";
 import { hideClipPlayback, notifySaved } from "../gameOverlay";
@@ -1107,7 +1108,38 @@ export function ClipperOverlay() {
 
             {picker && <Picker onClose={() => setPicker(false)} />}
             {preview && <BufferPreview onClose={() => setPreview(false)} />}
-            {studio && <ClipStudio initial={studio.initial} onClose={() => setStudio(null)} />}
+            {/*
+              * Fenced off from the rest of the overlay.
+              *
+              * The studio is by far the largest thing here and the only one
+              * holding a canvas, a sound graph and video elements at once, so
+              * it is also the likeliest to throw. Without this, one throw takes
+              * the whole root down and the panel button, the replay card and
+              * the picker go with it until the client is reloaded - while the
+              * recorder keeps buffering, invisibly. The timeline itself is
+              * safe: it is written to storage as it is edited, so closing this
+              * and opening it again comes back to the same montage.
+              *
+              * It closes rather than showing the boundary's own card, because
+              * that card would sit where the studio was with no way to dismiss
+              * it - the close button went down with the studio. A toast says
+              * what happened and leaves the screen usable.
+              */}
+            {studio && (
+                <ErrorBoundary
+                    noop
+                    onError={() => {
+                        setStudio(null);
+                        Toasts.show({
+                            id: Toasts.genId(),
+                            message: "The studio hit an error and closed. Your timeline was kept - open it again to carry on.",
+                            type: Toasts.Type.FAILURE
+                        });
+                    }}
+                >
+                    <ClipStudio initial={studio.initial} onClose={() => setStudio(null)} />
+                </ErrorBoundary>
+            )}
         </>
     );
 }

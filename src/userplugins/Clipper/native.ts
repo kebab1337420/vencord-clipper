@@ -17,12 +17,14 @@ import { accessSync, constants as fsConstants, existsSync, mkdirSync, readdirSyn
 import { get as httpsGet } from "https";
 import { basename, extname, isAbsolute, join } from "path";
 
+import { closeFeeds, type FeedStatus, type GameEvent, startFeeds, status as feedStatus, waitForFeedEvent } from "./gameFeeds";
 import { canOverlay, hideOverlay, type OverlayCorner, type OverlayLook, showOverlay, showToast } from "./overlayWindow";
 import { answerStudio, dropStudioWaiters, hideStudio, showStudio, type StudioAction, type StudioLook, studioUp, waitForStudioAction } from "./studioOverlay";
 // From utils rather than defined here: the renderer needs the same names and
 // cannot import this module, which pulls in fs and electron. Not re-exported
 // either - every value export of a native module must be an IPC handler.
 import { thumbNameFor } from "./utils";
+import { closeBridge, openBindings, startBridge, status as bridgeStatus, type VrEvent, type VrStatus, waitForVrEvent as nextVrEvent } from "./vrBridge";
 
 /*
  * Windows Graphics Capture is the only backend that reports "not capturable"
@@ -866,6 +868,70 @@ export function waitForShortcut(_: IpcMainInvokeEvent, timeoutMs = 30_000): Prom
 
 // Electron keeps OS-level binds alive past the window, so drop them on exit.
 app.on("will-quit", () => unregisterShortcuts());
+
+/*
+ * ------------------------------------------------- what the games say ------
+ *
+ * ./gameFeeds does the work: a loopback HTTP listener for Counter-Strike 2's
+ * Game State Integration and a poller for League of Legends' live client API.
+ * What is here is the part that has to be an IPC handler, and the same
+ * long-poll the keybinds use, for the same reason - nothing pushes from the
+ * main process into a plugin's renderer code.
+ */
+
+/** Starts or re-syncs the game feeds, and says what came up. */
+export function startGameFeeds(_: IpcMainInvokeEvent, want: { cs2: boolean; league: boolean; }): Promise<FeedStatus> {
+    return startFeeds(want);
+}
+
+export function stopGameFeeds(_?: IpcMainInvokeEvent): Promise<void> {
+    return closeFeeds();
+}
+
+export function gameFeedStatus(_?: IpcMainInvokeEvent): FeedStatus {
+    return feedStatus();
+}
+
+/** Resolves with the next thing a game reported, or null once the timeout passes. */
+export function waitForGameEvent(_: IpcMainInvokeEvent, timeoutMs = 30_000): Promise<GameEvent | null> {
+    return waitForFeedEvent(timeoutMs);
+}
+
+/*
+ * ---------------------------------------------------- what a headset says ---
+ *
+ * ./vrBridge does the work: a PowerShell process holding an OpenVR session open,
+ * because reaching a DLL is not a thing a page can do either. Same long-poll as
+ * everything above, for the same reason.
+ */
+
+/** Attaches to SteamVR, or stops trying to, and says where that got to. */
+export function startVrBridge(_: IpcMainInvokeEvent, want: boolean): Promise<VrStatus> {
+    return startBridge(want);
+}
+
+export function stopVrBridge(_?: IpcMainInvokeEvent): Promise<void> {
+    return closeBridge();
+}
+
+export function vrBridgeStatus(_?: IpcMainInvokeEvent): VrStatus {
+    return bridgeStatus();
+}
+
+/** Opens SteamVR's own binding panel on the plugin's actions. */
+export function openVrBindings(_?: IpcMainInvokeEvent): boolean {
+    return openBindings();
+}
+
+/** Resolves with the next press or hand reading, or null once the timeout passes. */
+export function waitForVrEvent(_: IpcMainInvokeEvent, timeoutMs = 30_000): Promise<VrEvent | null> {
+    return nextVrEvent(timeoutMs);
+}
+
+// A listening socket outlives the window it was opened for otherwise. Not
+// waited on, because nothing here can hold the quit open - and the process
+// going away closes the port either way. This is for the tidy case.
+app.on("will-quit", () => void closeFeeds());
 
 /*
  * ------------------------------------------------------- the game overlay ---

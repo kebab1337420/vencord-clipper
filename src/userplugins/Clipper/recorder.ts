@@ -41,7 +41,7 @@ export const logger = new Logger("Clipper", "#f0b132");
 export type RecorderState = "idle" | "starting" | "recording" | "saving";
 
 /** A slice of the buffer picked by hand, as epoch milliseconds. */
-export interface ClipWindow {
+interface ClipWindow {
     from: number;
     to: number;
 }
@@ -238,7 +238,7 @@ class ClipRecorder {
     private extraStreams: MediaStream[] = [];
 
     /** Live gain stage and meter of every channel in the mix, by channel id. */
-    private channels = new Map<string, { gain: GainNode; meter: AnalyserNode; factor: number; data: Uint8Array<ArrayBuffer>; }>();
+    private channels = new Map<string, { gain: GainNode; meter: AnalyserNode; factor: number; data: Uint8Array<ArrayBuffer>; freq: Uint8Array<ArrayBuffer>; }>();
 
     /** Set while the clip sound is playing, so it is not recorded. See duckSystem(). */
     private duckTimer: ReturnType<typeof setTimeout> | null = null;
@@ -432,6 +432,15 @@ class ClipRecorder {
      * is only ever armed on `start` leaves somebody who turns the setting on
      * mid-game waiting for the next stop and start before anything is marked.
      */
+    restartHighlights(): void {
+        if (!highlights.active) return;
+
+        // Which detectors run is decided when the watcher starts, so a setting
+        // that turns one on or off has to take it down and put it back up.
+        highlights.stop();
+        this.syncHighlights();
+    }
+
     syncHighlights(): void {
         // Not `isRecording`, which is false for the few seconds a save takes:
         // stopping the watcher there would leave it stopped, since the state
@@ -448,6 +457,8 @@ class ClipRecorder {
 
         highlights.start({
             channelLevel: id => this.channelLevel(id),
+            channelSpectrum: id => this.channelSpectrum(id),
+            videoTrack: () => this.videoTrack,
             onHighlight: reason => this.markAuto(reason)
         });
     }
@@ -686,15 +697,26 @@ class ClipRecorder {
         const gain = ctx.createGain();
         gain.gain.value = level * factor;
 
-        // Small window: the meter is a bar in a settings panel, not an analyser.
         const meter = ctx.createAnalyser();
-        meter.fftSize = 256;
+
+        // A small window is all a bar in a settings panel needs. The captured
+        // source is the exception: ./gameAudio reads its spectrum to tell a
+        // gunshot from somebody talking, and at 256 the bands it compares are
+        // three bins wide. 1024 puts a step at roughly 47 Hz, which separates
+        // them properly and costs nothing next to the encoder.
+        meter.fftSize = id === SYSTEM_CHANNEL ? 1024 : 256;
 
         source.connect(gain);
         gain.connect(destination);
         gain.connect(meter);
 
-        this.channels.set(id, { gain, meter, factor, data: new Uint8Array(meter.fftSize) });
+        this.channels.set(id, {
+            gain,
+            meter,
+            factor,
+            data: new Uint8Array(meter.fftSize),
+            freq: new Uint8Array(meter.frequencyBinCount)
+        });
     }
 
     /** Channels currently wired up, in the order they were added. */
@@ -779,6 +801,27 @@ class ClipRecorder {
         // A quiet voice sits near 0.05 RMS, so the bar is scaled to make the
         // useful range visible rather than a sliver at the far left.
         return Math.min(1, Math.sqrt(sum / channel.data.length) * 3);
+    }
+
+    /**
+     * A channel's spectrum, and how many hertz one step of it covers.
+     *
+     * For ./gameAudio, which tells the game apart from the room by the shape of
+     * the sound rather than by its level. The buffer is reused between calls,
+     * so it is read on the spot and not kept.
+     */
+    channelSpectrum(id: string): { bins: Uint8Array; hz: number; } | null {
+        const channel = this.channels.get(id);
+        if (!channel || !this.audioCtx) return null;
+
+        channel.meter.getByteFrequencyData(channel.freq);
+
+        return { bins: channel.freq, hz: this.audioCtx.sampleRate / channel.meter.fftSize };
+    }
+
+    /** The picture being recorded, for ./gameVideo. Null when nothing is. */
+    get videoTrack(): MediaStreamTrack | null {
+        return this.recordStream?.getVideoTracks()[0] ?? null;
     }
 
     private onChunk(blob: Blob) {

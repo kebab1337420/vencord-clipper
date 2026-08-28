@@ -19,6 +19,7 @@
 import { localStorage } from "@utils/localStorage";
 import { Toasts, useEffect, useMemo, useRef, useState } from "@webpack/common";
 
+import { ANGLE_PACES, type AngleTrack, cutBetweenAngles } from "../angleCut";
 import { fetchAngle, type PostedAngle, postedAngles } from "../angles";
 import { addAssets, type Asset, type AssetKind, removeAsset, sortedAssets, touchAsset } from "../assets";
 import {
@@ -29,6 +30,8 @@ import {
     clipEnd,
     clipLengthOf,
     decodeSource,
+    ENVELOPE_HZ,
+    envelopeOf,
     scheduleClips,
     stretchToRate
 } from "../audio";
@@ -1596,6 +1599,9 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
     /** The video files posted in the channel, once somebody has asked for them. */
     const [posted, setPosted] = useState<PostedAngle[] | null>(null);
 
+    /** How fast a multi-angle edit cuts, when one is made. */
+    const [anglePace, setAnglePace] = useState("normal");
+
     /** The countdown on the delete confirmation, so a second click resets it. */
     const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -2497,6 +2503,112 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
 
         const angles = (segment.angles ?? []).filter((unused, i) => i !== index);
         patchSegment(segment.id, { angles });
+    };
+
+    /**
+     * Turns this shot and its angles into an edit that cuts between them.
+     *
+     * The angles were pulled in to be played alongside this one, which shows
+     * that four people were there rather than showing what happened. This
+     * replaces the shot with a run of shots that cut: whoever the moment is
+     * happening to while it lands, then somebody watching it, then back.
+     *
+     * The decision is made on the sound, so every angle has to be decoded -
+     * which the alignment has usually done already, and which is held either
+     * way. What comes out is ordinary segments, so it can be trimmed by hand
+     * afterwards or undone in one step.
+     */
+    const cutAngles = async () => {
+        if (!segment || !source) return;
+
+        const angles = segment.angles ?? [];
+        if (!angles.length) return;
+
+        setError("");
+        setNote("Listening to the angles…");
+
+        try {
+            const base = segment;
+            const tracks: AngleTrack[] = [{
+                sourceId: source.id,
+                offset: 0,
+                envelope: envelopeOf(await audioOf(source)),
+                hz: ENVELOPE_HZ
+            }];
+
+            for (const angle of angles) {
+                const item = sources.find(s => s.id === angle.sourceId);
+                if (!item) continue;
+
+                tracks.push({
+                    sourceId: item.id,
+                    offset: angle.offset,
+                    envelope: envelopeOf(await audioOf(item)),
+                    hz: ENVELOPE_HZ
+                });
+            }
+
+            const made = cutBetweenAngles(base, tracks, ANGLE_PACES[anglePace]);
+
+            if (made.length < 2) {
+                toast("One angle carried the whole shot - there was nothing to cut to", Toasts.Type.MESSAGE);
+                return;
+            }
+
+            commit(p => {
+                const index = p.segments.findIndex(s => s.id === base.id);
+                if (index < 0) return p;
+
+                /*
+                 * The soundtrack stays on the angle the shot was cut from
+                 * rather than following whoever is on screen.
+                 *
+                 * Every one of these captures has the same call in it, at its
+                 * own level and its own few hundred milliseconds of latency, so
+                 * an edit that took the sound of each angle in turn would jump
+                 * mix and echo on every cut. One sound clip over the whole run
+                 * instead, and the pictures cut under it.
+                 *
+                 * A sound clip has no rate of its own, so it only lines up at
+                 * speed 1: a stretched shot keeps the sound of each angle, and
+                 * a silent one has nothing to keep.
+                 */
+                const together = base.speed === 1 && base.volume > 0 && p.audio;
+
+                const segments = [
+                    ...p.segments.slice(0, index),
+                    ...(together ? made.map(one => ({ ...one, volume: 0 })) : made),
+                    ...p.segments.slice(index + 1)
+                ];
+
+                if (!together) return { ...p, segments };
+
+                const at = p.segments.slice(0, index).reduce((sum, s) => sum + segmentLength(s), 0);
+
+                const clip: AudioClip = {
+                    id: newId(),
+                    sourceId: source.id,
+                    at,
+                    from: base.from,
+                    to: base.to,
+                    gain: base.volume,
+                    fadeIn: base.effects?.fadeIn ?? 0,
+                    fadeOut: base.effects?.fadeOut ?? 0,
+                    muted: false
+                };
+
+                return { ...p, segments, audioClips: [...(p.audioClips ?? []), clip] };
+            });
+
+            setSelected(made[0].id);
+
+            toast(`Cut into ${made.length} shots across ${tracks.length} angles`, Toasts.Type.SUCCESS);
+        } catch (e) {
+            logger.warn("Could not cut between the angles", e);
+            setError(e instanceof Error ? e.message : String(e));
+        } finally {
+            setNote("");
+        }
     };
 
     /** Turns the whole montage into a 9:16 crop, or back to the wide one. */
@@ -5133,6 +5245,38 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                             the render, not in the preview, which plays one file at a time.
                                         </small>
                                     </div>
+
+                                    {!!segment.angles?.length && (
+                                        <div className="vc-clipper-field">
+                                            <label>
+                                                <span>Cut between them instead</span>
+                                                <span>{segment.angles.length + 1} angles</span>
+                                            </label>
+                                            <div className="vc-clipper-row">
+                                                <button
+                                                    className="vc-clipper-primary"
+                                                    disabled={busy}
+                                                    title="Replace this shot with an edit that cuts from angle to angle"
+                                                    onClick={() => void cutAngles()}
+                                                >
+                                                    Make the edit
+                                                </button>
+                                                <select value={anglePace} disabled={busy} onChange={e => setAnglePace(e.currentTarget.value)}>
+                                                    <option value="fast">Fast - about a second a shot</option>
+                                                    <option value="normal">Normal</option>
+                                                    <option value="slow">Slow - let a shot play</option>
+                                                </select>
+                                            </div>
+                                            <small>
+                                                Whoever the moment is happening to is the loudest angle of it, so that is
+                                                who the edit stays on - and after their peak it cuts to somebody watching
+                                                rather than back to them. This shot becomes several, each one an ordinary
+                                                segment: trim them, drop one, or undo the whole thing in one step. The
+                                                sound stays on this angle throughout, and the list of angles goes with the
+                                                shot that held it.
+                                            </small>
+                                        </div>
+                                    )}
 
                                     {posted !== null && !posted.length && (
                                         <div className="vc-clipper-note">

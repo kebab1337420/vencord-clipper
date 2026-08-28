@@ -39,7 +39,8 @@
  */
 
 import { sendMessage } from "@utils/discord";
-import { FluxDispatcher, MessageActions, SelectedChannelStore, Toasts, UserStore } from "@webpack/common";
+import { findByPropsLazy } from "@webpack";
+import { FluxDispatcher, SelectedChannelStore, Toasts, UserStore } from "@webpack/common";
 
 import { notifyOverlay } from "./gameOverlay";
 import { logger, recorder } from "./recorder";
@@ -55,6 +56,16 @@ import { nameOf, voiceParticipants } from "./voice";
  */
 const REQUEST = /`multi-pov (\d+)s`/;
 
+/**
+ * The module that deletes messages.
+ *
+ * Not the common `MessageActions`, which is found by `sendMessage` and
+ * `editMessage` and only happens to carry a delete: if a build ever splits
+ * them, the take-down would quietly do nothing and every request would stay in
+ * the channel. This asks for the pair Vencord's own message actions ask for.
+ */
+const MessageDelete = findByPropsLazy("deleteMessage", "startEditMessage");
+
 /** How long to ignore further requests after honouring one, in ms. */
 const COOLDOWN = 10_000;
 
@@ -67,6 +78,15 @@ const COOLDOWN = 10_000;
  * no lag: the clip then ends a fraction of a second late, which nobody notices.
  */
 const MAX_LAG = 2000;
+
+/**
+ * How long between two requests of our own.
+ *
+ * Long enough to cover the take-down: two presses inside it used to leave the
+ * first message in the channel for good, and asking the call twice in five
+ * seconds was never the intention anyway.
+ */
+const ASK_COOLDOWN = 10_000;
 
 /**
  * How long the request is left in the chat before it is taken back down.
@@ -86,8 +106,11 @@ let installed = false;
 /** When we last asked, so the copy that comes back can be recognised. */
 let askedAt = 0;
 
-/** The pending take-down, cleared if the plugin stops before it fires. */
-let cleanup: ReturnType<typeof setTimeout> | null = null;
+/** When we last asked, so a second press does not ask again. */
+let lastAsked = 0;
+
+/** The pending take-downs, cleared if the plugin stops before they fire. */
+let cleanups = new Set<ReturnType<typeof setTimeout>>();
 
 function toast(message: string, type: string, duration = 5000) {
     Toasts.show({
@@ -150,6 +173,16 @@ export async function requestPov(): Promise<void> {
     const mine = recorder.isRecording;
     if (mine) void recorder.save();
 
+    // A second press this soon still saves the clip - that is what the key is
+    // for - but the call has already been asked, and asking again would post a
+    // message the take-down cannot keep up with.
+    if (Date.now() - lastAsked < ASK_COOLDOWN) {
+        toast(mine
+            ? "Saved another clip - the call was already asked"
+            : "The call was already asked", Toasts.Type.MESSAGE);
+        return;
+    }
+
     const others = voiceParticipants().filter(p => !p.self);
     if (!others.length) {
         toast(mine
@@ -173,13 +206,20 @@ export async function requestPov(): Promise<void> {
         // Set before the send rather than after it: the message can come back
         // through the dispatcher before this promise resolves.
         askedAt = Date.now();
+        lastAsked = askedAt;
 
         await sendMessage(channelId, { content: requestText(seconds) });
 
         toast(`Asked ${others.length === 1 ? "the other person" : `the ${others.length} others`} in the call for their angle`, Toasts.Type.SUCCESS);
         notifyOverlay("Asked for everyone's angle", mine ? "Your own clip is saved" : "Your clip buffer is off");
     } catch (e) {
+        // Both of them: nothing was posted, so there is no message to take back
+        // down and nothing to hold the next press off for. Leaving the cooldown
+        // set would answer a second press with "the call was already asked",
+        // which would not be true.
         askedAt = 0;
+        lastAsked = 0;
+
         logger.error("Could not ask the call for a clip", e);
         toast(mine
             ? "Saved your clip, but the call could not be asked"
@@ -200,22 +240,23 @@ interface IncomingMessage {
  *
  * The message is the transport and nothing else, so it has no reason to stay:
  * everybody running the plugin has been told over their game by now, and
- * everybody not running it saw it go past. One at a time - a second request
- * while this one is pending takes its place, and the first message stays.
+ * everybody not running it saw it go past. Each message gets its own take-down,
+ * so a request sent while an earlier one is still pending does not take its
+ * slot and leave that first message in the channel for good.
  */
 function takeDown(channelId: string, id: string): void {
-    if (cleanup) clearTimeout(cleanup);
-
-    cleanup = setTimeout(() => {
-        cleanup = null;
+    const timer = setTimeout(() => {
+        cleanups.delete(timer);
 
         try {
-            void Promise.resolve(MessageActions.deleteMessage(channelId, id))
+            void Promise.resolve(MessageDelete.deleteMessage(channelId, id))
                 .catch(e => logger.warn("Could not take the multi-POV request back down", e));
         } catch (e) {
             logger.warn("Could not take the multi-POV request back down", e);
         }
     }, CLEANUP_DELAY);
+
+    cleanups.add(timer);
 }
 
 /**
@@ -301,10 +342,8 @@ export function installPovRequests(): void {
 }
 
 export function uninstallPovRequests(): void {
-    if (cleanup) {
-        clearTimeout(cleanup);
-        cleanup = null;
-    }
+    for (const timer of cleanups) clearTimeout(timer);
+    cleanups = new Set();
 
     if (!installed) return;
 

@@ -73,7 +73,7 @@ let toastWin: BrowserWindow | null = null;
 let toastTimer: NodeJS.Timeout | null = null;
 
 /** True while a clip is up. */
-export function overlayUp(): boolean {
+function overlayUp(): boolean {
     return !!clipWin && !clipWin.isDestroyed();
 }
 

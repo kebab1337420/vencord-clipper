@@ -18,15 +18,20 @@ import { createRoot, Toasts } from "@webpack/common";
 import { ClipperChatButton, ClipperIcon } from "./components/ClipperChatButton";
 import { ClipperOverlay } from "./components/ClipperOverlay";
 import { encoderSummary, probeEncoders } from "./encoders";
+import { gameAudioReport } from "./gameAudio";
+import { gameEventReport, stopGameEvents, syncGameEvents } from "./gameEvents";
 import { hideGameOverlay, toggleGameOverlay, watchLastClip } from "./gameOverlay";
+import { gameVideo } from "./gameVideo";
 import { runShortcut, startGlobalKeybinds, stopGlobalKeybinds, syncGlobalKeybinds } from "./globalKeybinds";
 import { micReport } from "./micInput";
+import { SYSTEM_CHANNEL } from "./mixer";
 import { installPovRequests, requestPov, uninstallPovRequests } from "./multipov";
 import { logger, recorder } from "./recorder";
 import { settings } from "./settings";
 import { checkAtLaunch, checkNow } from "./updater";
 import { isTypingTarget, keybindMatches, keybindsSuspended, parseKeybind } from "./utils";
 import { installVoiceTaps, probeVoiceTaps, uninstallVoiceTaps } from "./voiceTaps";
+import { stopVr, syncVr, vrReport } from "./vr";
 
 /*
  * In-client fallback. The same binds are registered with the OS (see
@@ -79,7 +84,11 @@ const WATCHED: Array<readonly [string, () => void]> = [
     ["povKeybind", () => void syncGlobalKeybinds()],
     ["replayKeybind", () => void syncGlobalKeybinds()],
     ["globalKeybinds", () => void syncGlobalKeybinds()],
-    ["autoHighlight", () => recorder.syncHighlights()]
+    ["autoHighlight", () => recorder.syncHighlights()],
+    ["gameAudioWatch", () => recorder.restartHighlights()],
+    ["gameVideoWatch", () => recorder.restartHighlights()],
+    ["gameIntegrations", () => void syncGameEvents()],
+    ["vrControls", () => void syncVr()]
 ];
 
 /**
@@ -211,6 +220,32 @@ export default definePlugin({
             })();
         },
         "Check for a new Clipper version": () => void checkNow(),
+        "Check what is watching the game": () => {
+            void (async () => {
+                const report = [
+                    settings.store.gameAudioWatch
+                        ? gameAudioReport(recorder.channelSpectrum(SYSTEM_CHANNEL))
+                        : "The game's sound is not being listened to: the call is in the same stream, so it stays off unless turned on.",
+                    gameVideo.active ? "The picture is being watched." : "The picture is not being watched - start the clip buffer, or turn it on in the settings.",
+                    await gameEventReport(),
+                    // Empty unless the VR side is installed, and dropped
+                    // below rather than printed as a blank line.
+                    await vrReport(),
+                    settings.store.voiceHighlights
+                        ? "The call can mark a moment on its own."
+                        : "How loud the call is counts for nothing."
+                ].filter(Boolean).join("\n");
+
+                logger.info(`Game watchers\n${report}`);
+
+                Toasts.show({
+                    id: Toasts.genId(),
+                    message: report,
+                    type: Toasts.Type.MESSAGE,
+                    options: { duration: 12000, position: Toasts.Position.BOTTOM }
+                });
+            })();
+        },
         "Check per-person voice audio": () => {
             const report = probeVoiceTaps();
             logger.info(report);
@@ -251,6 +286,11 @@ export default definePlugin({
 
         window.addEventListener("keydown", onKeyDown, true);
         void startGlobalKeybinds();
+
+        // Not tied to the buffer, unlike the other watchers: the point of the
+        // controller binds is being able to start the buffer while wearing a
+        // headset, which cannot work if they only exist once it is running.
+        void syncVr();
         watchSettings();
         mountOverlay();
 
@@ -264,6 +304,8 @@ export default definePlugin({
         window.removeEventListener("keydown", onKeyDown, true);
         unwatchSettings();
         stopGlobalKeybinds();
+        stopGameEvents();
+        stopVr();
         hideGameOverlay();
         unmountOverlay();
         recorder.stop();

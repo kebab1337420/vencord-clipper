@@ -15,7 +15,7 @@
 
 import { useEffect } from "@webpack/common";
 
-export interface DragHandlers {
+interface DragHandlers {
     move(e: MouseEvent): void;
     up(e: MouseEvent): void;
 }

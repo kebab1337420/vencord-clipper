@@ -322,7 +322,7 @@ class Nearest {
     }
 }
 
-export interface GifOptions {
+interface GifOptions {
     /** Milliseconds each frame is held. */
     delay: number;
     /** Palette size, capped at 255 so transparency keeps an index. */

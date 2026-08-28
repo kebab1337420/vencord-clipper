@@ -16,6 +16,7 @@ import { KeybindInput } from "./components/KeybindInput";
 import { SaveDirectoryInput } from "./components/SaveDirectoryInput";
 import { SettingsSection } from "./components/SettingsSection";
 import { UpdateStatus } from "./components/UpdateStatus";
+import { VrBindings } from "./components/VrBindings";
 
 export const enum Container {
     WebmVp9 = "webm-vp9",
@@ -41,8 +42,13 @@ export const settings = definePluginSettings({
     },
     autoHighlight: {
         type: OptionType.BOOLEAN,
-        description: "Drop a marker by itself when the call gets loud - several people talking over each other, or you shouting at your own screen. Measured against how loud the last minute was, and held for two seconds, so a lively call does not mark itself constantly and one person swearing at a bad play is not a moment",
+        description: "Drop a marker by itself when something happens: gunfire out of the game, the screen going red or dark, a kill the game reported, the call going off alongside any of it. The call's own noise no longer marks anything by itself - see the setting below - because the loudest second of an evening is usually somebody swearing at a bad play",
         default: true
+    },
+    voiceHighlights: {
+        type: OptionType.BOOLEAN,
+        description: "Let how loud the call is count towards a marker at all. Off, and it counts for nothing while it is: the loudest second of most evenings is somebody swearing at their own bad play, and marking every one of those buried the moments worth keeping. Turn it on for a call worth clipping for its own sake, or where nothing below can read what is being played",
+        default: false
     },
     highlightSensitivity: {
         type: OptionType.SELECT,
@@ -50,8 +56,23 @@ export const settings = definePluginSettings({
         options: [
             { label: "Strict - only the call properly going off", value: "strict" },
             { label: "Normal", value: "normal", default: true },
-            { label: "Loose - one raised voice is enough", value: "loose" }
+            { label: "Loose - a hint of it is enough", value: "loose" }
         ]
+    },
+    gameAudioWatch: {
+        type: OptionType.BOOLEAN,
+        description: "Listen to the game itself: gunfire, explosions and hits arrive across the whole spectrum at once, which a voice cannot do. Off, because the separation is not good enough in practice - there is one loopback stream and the call is inside it, so a room of people laughing puts enough through as gunfire to mark all evening. Worth turning on for a quiet call, or for playing alone",
+        default: false
+    },
+    gameVideoWatch: {
+        type: OptionType.BOOLEAN,
+        description: "And watch the picture: how much it is moving, a red wash for damage, the colour draining for a death screen, a cut to black. Measured on a 64x36 copy of the frame six times a second, so the cost is negligible",
+        default: true
+    },
+    gameIntegrations: {
+        type: OptionType.BOOLEAN,
+        description: "Let games report what happened outright, where they offer a supported way to. Counter-Strike 2 needs a config file written into its own cfg folder and a listener on 127.0.0.1 for it to post to; League of Legends is read from the server it already runs on 127.0.0.1:2999. Nothing leaves the machine, and a kill the game reported is worth more than every guess put together",
+        default: false
     },
     autoHighlightSave: {
         type: OptionType.BOOLEAN,
@@ -186,7 +207,7 @@ export const settings = definePluginSettings({
     },
     overlayNotice: {
         type: OptionType.BOOLEAN,
-        description: "Say that a clip was saved over the game, for a couple of seconds - a line of text, no video, and clicks go through it. Only while Discord is not the window in front. Watching the clip itself is the keybind below, and never happens on its own",
+        description: "Say what the plugin just did over the game, for a couple of seconds - a clip saved, or somebody in the call asking for everyone's angle. A line of text, no video, and clicks go through it. Only while Discord is not the window in front. Watching the clip itself is the keybind below, and never happens on its own",
         default: true
     },
     overlayCorner: {
@@ -313,6 +334,49 @@ export const settings = definePluginSettings({
     povCleanup: {
         type: OptionType.BOOLEAN,
         description: "Delete your own request message a few seconds after sending it. The message is only how the request reaches the other clients - everyone running Clipper is told over their game instead - so this keeps the channel from filling up with them. Turn it off to leave them in the chat",
+        default: true
+    },
+    /*
+     * Written by VRinstaller.ps1, never shown, and the only thing that decides
+     * whether any of the VR settings below appear at all.
+     *
+     * Most people have no headset, and a section about SteamVR in the middle of
+     * their settings is noise they have to read past every time they come here
+     * to change the buffer length. So the VR side is opt-in from outside
+     * Discord: run the installer and it appears, run it again with -Uninstall
+     * and it goes away. Nothing about the capture changes either way.
+     */
+    vrInstalled: {
+        type: OptionType.BOOLEAN,
+        description: "Whether the SteamVR side of the plugin has been installed",
+        default: false,
+        hidden: true
+    },
+    vrSection: {
+        type: OptionType.COMPONENT,
+        hidden: () => !settings.store.vrInstalled,
+        component: () => (
+            <SettingsSection
+                title="VR"
+                note="Somebody in a headset cannot see Discord, cannot see the overlay and cannot reach the keyboard."
+            />
+        )
+    },
+    vrControls: {
+        hidden: () => !settings.store.vrInstalled,
+        type: OptionType.BOOLEAN,
+        description: "Let the clip controls be worked from a VR controller. Attaches to SteamVR whenever it is running and lets go when it stops, so it costs nothing on the days you are not in VR - and it never starts SteamVR itself. The actions are the same ones the keybinds fire, and they are bound in SteamVR's own binding panel, next to the bindings for every game",
+        default: false
+    },
+    vrBindings: {
+        type: OptionType.COMPONENT,
+        hidden: () => !settings.store.vrInstalled,
+        component: VrBindings
+    },
+    vrMotionWatch: {
+        hidden: () => !settings.store.vrInstalled,
+        type: OptionType.BOOLEAN,
+        description: "And let where your hands are count towards a marker. No VR game reports its kills, and what the picture watcher sees in VR is a distorted one-eye mirror window, so both of the usual detectors are nearly blind here - but a hand moving at five metres a second is not something that happens while you sit still. It is corroboration only: on its own it never marks anything, however hard you swing",
         default: true
     },
     updatesSection: {

@@ -48,14 +48,14 @@ const BITS_PER_PIXEL = .07;
 /** Attempts to make: the first is calculated, the second is the same with less. */
 const TRIES = 2;
 
-export interface ShrinkRequest {
+interface ShrinkRequest {
     /** Size to come in under, in bytes. */
     limit: number;
     fps?: number;
     onProgress?(step: string): void;
 }
 
-export interface ShrinkResult {
+interface ShrinkResult {
     blob: Blob;
     mimeType: string;
     width: number;

@@ -35,7 +35,7 @@ import { formatBytes } from "./utils";
  * the store is fragile and being wrong the safe way costs nothing: the check
  * only decides whether to warn, the upload is attempted either way.
  */
-export const FREE_LIMIT = 10 * 1024 * 1024;
+const FREE_LIMIT = 10 * 1024 * 1024;
 
 function attach(file: File): boolean {
     const channel = getCurrentChannel();
@@ -53,7 +53,7 @@ function attach(file: File): boolean {
 }
 
 /** A step of a long job, for a caller that has somewhere to show it. */
-export type Progress = (step: string) => void;
+type Progress = (step: string) => void;
 
 function toast(message: string, type: string) {
     Toasts.show({ id: Toasts.genId(), message, type });

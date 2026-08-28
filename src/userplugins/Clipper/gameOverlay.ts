@@ -91,7 +91,7 @@ function nothingSaved(): void {
 }
 
 /** Plays a clip over whatever is on screen. Asked for, never offered. */
-export async function showGameOverlay(name: string): Promise<void> {
+async function showGameOverlay(name: string): Promise<void> {
     if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return;
     if (!name) return;
 
@@ -121,7 +121,7 @@ export async function watchLastClip(): Promise<void> {
  * recorder when it was saved a moment ago and nothing has read the file back
  * yet; they are the ticks under the scrub bar.
  */
-export async function openClipEditor(name: string): Promise<void> {
+async function openClipEditor(name: string): Promise<void> {
     if (!IS_DISCORD_DESKTOP && !IS_VESKTOP) return;
     if (!name) return;
 

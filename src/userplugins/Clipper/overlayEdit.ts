@@ -30,7 +30,7 @@ import type { StudioAction } from "./studioOverlay";
 const Native = VencordNative.pluginHelpers.Clipper as PluginNative<typeof import("./native")>;
 
 /** What the editor is told once the button it sent has been dealt with. */
-export interface Outcome {
+interface Outcome {
     ok: boolean;
     /** One line for the status bar under the buttons. */
     message: string;

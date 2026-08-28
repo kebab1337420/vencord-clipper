@@ -50,7 +50,7 @@ export interface GifRequest {
     onProgress?(step: string): void;
 }
 
-export interface GifResult {
+interface GifResult {
     blob: Blob;
     width: number;
     fps: number;
@@ -85,7 +85,7 @@ export async function clipToGif(name: string, request: GifRequest = {}): Promise
 }
 
 /** The same, on a blob URL the caller owns. */
-export async function urlToGif(url: string, request: GifRequest = {}): Promise<GifResult> {
+async function urlToGif(url: string, request: GifRequest = {}): Promise<GifResult> {
     const { limit = 0, onProgress } = request;
 
     onProgress?.("Reading the clip");

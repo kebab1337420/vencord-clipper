@@ -35,7 +35,7 @@ import { pathToFileURL } from "url";
 import { canOverlay, embed, hideOverlay, hideToast, writePage } from "./overlayWindow";
 
 /** What the page is opened on. */
-export interface StudioClip {
+interface StudioClip {
     /** File name, shown in the corner and named back in every action. */
     name: string;
     /** Absolute path of the clip on disk. */
@@ -68,7 +68,7 @@ export interface StudioAction {
 }
 
 /** What the renderer says once it has done it, shown in the status line. */
-export interface StudioReply {
+interface StudioReply {
     ok: boolean;
     message: string;
     /** Whether the editor should go away - the clip is gone, or moved on. */

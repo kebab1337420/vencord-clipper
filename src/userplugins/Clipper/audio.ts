@@ -474,7 +474,7 @@ export function stretchToRate(ctx: BaseAudioContext, buffer: AudioBuffer, rate: 
 }
 
 /** How often the envelope used for lining two angles up is sampled. */
-const ENVELOPE_HZ = 25;
+export const ENVELOPE_HZ = 25;
 
 /** Furthest two angles of the same moment are assumed to be apart. */
 const MAX_LAG_S = 30;

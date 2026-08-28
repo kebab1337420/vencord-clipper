@@ -1,6 +1,6 @@
 # The module map
 
-Sixty-one files, about thirty thousand lines. The root `README.md` says what
+Seventy-one files, about thirty-four thousand lines. The root `README.md` says what
 the plugin does for the person using it; this says where each part of it lives,
 so that a change can start from the right file instead of from a search.
 
@@ -32,9 +32,9 @@ window that shows the same controls over a full-screen game.
 
 | File | Lines | What it is |
 | --- | --- | --- |
-| `index.tsx` | 273 | The plugin definition: what starts, what stops, and where the overlay root is mounted. |
-| `native.ts` | 1297 | The main process half. Path safety, size caps and every file, `ffmpeg` and keybind operation the renderer asks for. |
-| `settings.tsx` | 375 | The settings the user sees, and their defaults. |
+| `index.tsx` | 313 | The plugin definition: what starts, what stops, and where the overlay root is mounted. |
+| `native.ts` | 1363 | The main process half. Path safety, size caps and every file, `ffmpeg` and keybind operation the renderer asks for. |
+| `settings.tsx` | 433 | The settings the user sees, and their defaults. |
 
 ## Capture
 
@@ -42,15 +42,30 @@ Everything that produces bytes while nothing is being edited.
 
 | File | Lines | What it is |
 | --- | --- | --- |
-| `recorder.ts` | 2559 | The rolling buffer: the capture stream, the timeslices, the ring, and saving a clip out of it. |
+| `recorder.ts` | 2602 | The rolling buffer: the capture stream, the timeslices, the ring, and saving a clip out of it. |
 | `voiceRecord.ts` | 361 | One rolling buffer per person in the call, so a clip can be remixed after the fact. |
 | `voiceTaps.ts` | 428 | Taking each speaker's audio before Discord mixes it down. |
 | `micInput.ts` | 946 | The microphone, taken the way Discord itself takes it, including its processing settings. |
 | `clipSound.ts` | 238 | The sound the plugin makes when a clip is saved. |
 | `encoders.ts` | 205 | Asking the browser which codecs it will actually accept, rather than assuming. |
-| `highlights.ts` | 170 | Moments worth marking on their own — a kill, a shout — so the buffer is not searched blind. |
 | `game.ts` | 90 | What is being played and when that changes, which is what names a clip. |
 | `nativeClips.ts` | 1162 | Discord's own clip recorder: reading its clips, its metadata and its folder. |
+
+## What is a moment
+
+The automatic marker. Several detectors vote, one board totals them, one watcher
+decides. Nothing that listens votes by default: the room and the game's own
+sound both marked a good evening every ninety seconds, so both are off unless
+asked for, and a marker comes from the picture or from the game saying so.
+
+| File | Lines | What it is |
+| --- | --- | --- |
+| `highlights.ts` | 358 | The judge: the bar, the hold, the cooldown, and what the room is worth against the rest. |
+| `signals.ts` | 265 | The board every detector pins to. Levels fade, events decay, testimony jumps the queue. |
+| `gameAudio.ts` | 215 | Telling a gunshot from a shout by the shape of the sound. Off: the call is in the same stream. |
+| `gameVideo.ts` | 326 | Motion, red washes, colour draining and cuts to black, on a 64x36 copy of the frame. |
+| `gameEvents.ts` | 147 | The renderer half of the game integrations: a long poll, straight onto the board. |
+| `gameFeeds.ts` | 674 | Main process. Counter-Strike 2's state posts, League of Legends' live client API. |
 
 ## Reading and repairing files
 
@@ -104,6 +119,25 @@ message, only a file that will not open — and it is the part the tests cover.
 | `components/ClipperChatButton.tsx` | 62 | The button in the chat bar. |
 | `components/dragWindow.ts` | 45 | A drag that keeps following the pointer once it leaves the element. |
 
+## In a headset
+
+SteamVR, for the person who cannot see any of the above because they are wearing
+a headset. The controller binds are the point; the motion is a side effect of
+having to open an OpenVR session for them anyway.
+
+All of it is switched off until `VRinstaller.ps1` at the repository root sets
+`vrInstalled` in the client's `settings.json`. Everything below is compiled into
+the bundle regardless — there is one build — but with that setting clear the VR
+settings are hidden, `syncVr` returns immediately, and no bridge is spawned.
+
+| File | Lines | What it is |
+| --- | --- | --- |
+| `vr.ts` | 210 | The renderer half: a controller press becomes the same action a keybind fires, and the player's own body becomes a signal. |
+| `vrBridge.ts` | 395 | Main process. Starts the bridge, restarts it when a headset goes on, and long-polls the same way the game feeds do. |
+| `vrHelper.ts` | 421 | The bridge itself: C# compiled at first run by PowerShell, calling OpenVR through its function tables. |
+| `vrManifest.ts` | 231 | The action manifest, the default bindings and the application manifest, which is what puts Clipper in SteamVR's own binding panel. |
+| `components/VrBindings.tsx` | 88 | The settings row: whether SteamVR is attached, and the button that opens that panel. |
+
 ## Over the game
 
 The always-on-top window, and the two files that decide what it draws.
@@ -121,8 +155,9 @@ The always-on-top window, and the two files that decide what it draws.
 | File | Lines | What it is |
 | --- | --- | --- |
 | `voice.ts` | 730 | Who is in the voice channel, and what Discord says they are doing. |
-| `multipov.ts` | 235 | One key press, everybody's angle. |
+| `multipov.ts` | 357 | One key press, everybody's angle. |
 | `angles.ts` | 114 | The angles other people posted for the same moment. |
+| `angleCut.ts` | 384 | Cutting between those angles: who is on screen, second by second, and one soundtrack under it. |
 | `chat.ts` | 208 | What the chat said while it was happening. |
 | `clips.ts` | 329 | Access to the clip folder. |
 | `library.ts` | 408 | Clip metadata and categories. |
@@ -141,6 +176,17 @@ The always-on-top window, and the two files that decide what it draws.
   on screen and what a key does, `studio.ts` for what ends up in the file.
 - **Nothing is being captured.** `recorder.ts` first, then `encoders.ts` to see
   whether the codec was refused.
+- **A marker dropped where nothing happened, or did not drop where something
+  did.** `highlights.ts` holds the bar, and decides whether anything that
+  listens is allowed to count at all; `signals.ts` says what each detector is
+  worth. The detector itself is `gameVideo.ts` or `gameFeeds.ts`, and
+  `gameAudio.ts` if it was turned on.
+- **A multi-angle edit cut in the wrong place.** `angleCut.ts` decides who is on
+  screen; `angles.ts` is what it had to choose between, and `audio.ts` lined
+  them up.
+- **A controller bind does nothing.** `vrBridge.ts` says whether it ever
+  attached; the binding itself belongs to SteamVR, and `vrManifest.ts` is only
+  what it was offered to start from.
 - **It cannot read or write a file.** `native.ts`. Nothing else can.
 
 ## Tests

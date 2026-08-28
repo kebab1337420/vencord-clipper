@@ -89,6 +89,14 @@ obviously can't really make every single feature possible because it isn't a ded
   picture in picture. They are lined up automatically by cross-correlating how
   loud each recording is over time, so the same instant lands on the same
   frame, and a slider is there for when nothing in common can be found.
+- **Or cut between them, which is what an edit is.** One button turns a shot
+  and its angles into a run of shots that cut from one to the next: whoever the
+  moment is happening to is the loudest angle of it, so the edit stays on them
+  while it lands, and after their peak it cuts to somebody watching rather than
+  back to the same screen. Every angle is judged against its own normal, so the
+  person with their volume up does not simply hold the screen. Shots have a
+  floor and a ceiling — fast, normal or slow — and what comes out is ordinary
+  segments: trim them, drop one, or undo the whole edit in a single step.
 - **Best of the evening.** One button builds a montage out of the markers of
   every clip in the current view, taking moments in turn from each clip until
   it reaches the length asked for, back in the order they happened, with
@@ -108,13 +116,31 @@ obviously can't really make every single feature possible because it isn't a ded
   `O` mark a range on the ruler, `X` cuts that range out, `Shift + X` keeps only
   it, `D` duplicates the segment, `Delete` removes it, `←` / `→` step the
   playhead, `Ctrl + Z` and `Ctrl + Shift + Z` walk the edits, `Esc` closes
-- **Automatic highlight markers.** The plugin listens to how loud the call and
-  your own microphone are and drops a marker by itself when a moment stands out
-  — several people talking over each other, or you shouting at your own screen.
-  It measures against how loud the last minute was rather than a fixed
-  threshold, so a lively call does not mark itself constantly, and it can be
-  told to save a clip of those moments without being asked (at most one every
-  two minutes).
+- **Automatic highlight markers.** The plugin drops a marker by itself when a
+  moment stands out, and nothing it reads is sound. The picture is watched for
+  how much it is moving, a red wash for damage, the colour draining for a death
+  screen and a cut to black; and the games that publish one are asked for their
+  own account of what happened, which is worth more than every guess put
+  together. Both of them are wrong about a room enjoying itself, which is the
+  entire reason they are the two left.
+
+  Loudness was the first detector and the worst one, in both of its forms. The
+  call shouting is somebody swearing at their own bad play far more often than
+  it is a moment. Listening to the game instead does not get around that,
+  because there is one loopback stream and the call is inside it, so a room
+  laughing puts enough through as gunfire to mark the evening every ninety
+  seconds. Neither counts for anything now. `voiceHighlights` puts the room
+  back and `gameAudioWatch` puts the game's sound back, for a quiet call or for
+  playing alone. What is still measured is measured against the last minute
+  rather than against a fixed threshold, so a busy evening does not slowly mark
+  everything.
+- **What the games say outright.** Counter-Strike 2 and League of Legends both
+  ship a supported way to report their own events, and a kill the game reported
+  beats every guess about one, so those mark immediately. Off by default: it
+  writes a config file into Counter-Strike's `cfg` folder and opens a listener
+  on `127.0.0.1` for the game to post to. Nothing leaves the machine. *Check
+  what is watching the game* in the actions menu says what is actually hooked
+  up. Every other game gets the sound and the picture, which need no setup.
 - **Watch the buffer before you save it.** The actions menu plays a copy of
   what is in memory right now, with the markers drawn on the scrub bar and two
   handles to pick the piece worth keeping. The window you pick is what gets
@@ -145,6 +171,22 @@ obviously can't really make every single feature possible because it isn't a ded
   apart by the round trip. It is only accepted from somebody in the call you are
   currently in, only while your own buffer is already running, and at most once
   every ten seconds.
+- **Clipping from inside a headset**, if you ask for it. Most people have no
+  headset, so this part is opt-in and starts switched off: nothing about it
+  appears in the settings and nothing ever attaches to SteamVR until
+  `VRinstaller.ps1` is run (`VRinstaller.ps1 -Uninstall` puts it back). Once it
+  is on, the four binds are offered to SteamVR as actions, which puts Clipper in the same
+  Controller Bindings panel every VR game is rebound from — the plugin draws no
+  binding screen of its own because SteamVR already owns one, and a bind made
+  there survives the plugin being reinstalled. Out of the box: double-tap B on
+  the right controller to save, hold A to drop a marker, double-tap the left one
+  to start or stop the buffer, hold it to ask the call for their angle. A double
+  tap and a hold rather than a plain press, so a default never fires in the
+  middle of a game. It attaches when a headset goes on and lets go when it comes
+  off; Discord never starts SteamVR by itself. While it is attached, how fast the
+  hands and head are actually moving is fed to the marker as corroboration — on
+  its own it never marks anything, however hard you swing, because somebody
+  playing a rhythm game swings for the whole song
 - Chat bar button — left click saves, right click starts/stops
 - Floating button above the account panel — left click opens the source picker,
   right click opens the actions menu (start/stop, save, clip studio, buffer
@@ -206,6 +248,18 @@ to `%APPDATA%\Vencord\clipper\dist`, patches Discord to load it (the real
 does), and points Vesktop / Equibop at the same folder.
 
 Start Discord, then enable **Clipper** in Vencord → Plugins.
+
+If you play in VR, run
+
+```
+powershell -ExecutionPolicy Bypass -File VRinstaller.ps1
+```
+
+and restart Discord. That is the only thing that makes the SteamVR side exist:
+without it there is no VR section in the settings, nothing looks for a headset,
+and no bridge is ever started. It checks that SteamVR is installed and refuses
+to change anything if it is not. `-Uninstall` takes it back out, `-Status` says
+what is set up without touching anything.
 
 Undo with `install.bat --uninstall`: Discord is unpatched, Vesktop's *Vencord
 Location* is cleared, the copied bundle is deleted. Vencord settings and themes
@@ -317,6 +371,7 @@ quietly — run `install.bat` again in that case.
 | Add an audio source | Same section, *Add an audio source*, then pick the input device |
 | Undo a montage edit | `Ctrl + Z`, `Ctrl + Shift + Z` to redo |
 | Trim the selected segment | *From the playhead* under Start / End, or `←` / `→` then the same button |
+| Clip from a VR controller | Plugin settings → *VR* → *SteamVR controls*, then *Open SteamVR bindings* to change them |
 
 Pick what to record from the plugin's own picker (overlay button, chat bar
 button, or toolbox): the game window, or the whole screen if you alt-tab a lot.
@@ -340,7 +395,7 @@ firing it only while Discord is focused.
 
 ## Files
 
-Sixty-one modules, so the full list lives in [`docs/modules.md`](docs/modules.md)
+Seventy-one modules, so the full list lives in [`docs/modules.md`](docs/modules.md)
 with a line about each and a short guide to which one a given problem starts
 from. The shape of it:
 
@@ -353,6 +408,7 @@ from. The shape of it:
 | `components/ClipStudio.tsx`, `studio.ts` | The editor, and the engine that renders what it describes |
 | `components/ClipperOverlay.tsx` | The plugin's own React root, mounted outside Discord's tree |
 | `overlayWindow.ts`, `gameOverlay.ts`, `studioOverlay.ts` | The always-on-top window that puts all of it over a full-screen game |
+| `vr.ts`, `vrBridge.ts`, `vrHelper.ts`, `vrManifest.ts` | The SteamVR side: a controller press, and where the player's hands are |
 
 Unit tests cover the byte-level readers, the part that fails without saying
 anything. Run them with `.\scripts\test.ps1`.
@@ -411,6 +467,23 @@ anything. Run them with `.\scripts\test.ps1`.
   or another overlay already registered the accelerator, Windows hands it to
   them and the bind only works while Discord is focused. Rebind to something
   free. Keys with no Electron accelerator name stay Discord-only as well.
+- **The VR side is opt-in, but it is not a separate download.** It ships in the
+  same bundle as everything else and `VRinstaller.ps1` only decides whether it
+  runs — so the settings stay clean and nothing starts, but the bundle is the
+  same few dozen kilobytes larger either way.
+- **VR is controls and motion, not capture.** The SteamVR side gets a press off
+  a controller and reads where the hands and head are; it does not change what is
+  recorded. The picker still captures a window, which for a VR game is the
+  desktop mirror — one eye, barrel-distorted and letterboxed, and some games do
+  not draw it at all. Nothing is stabilised either, so raw headset footage is
+  rough to watch back. There is no panel drawn inside the headset: that needs a
+  Direct3D or Vulkan texture, which neither the plugin nor its bridge can
+  produce, and the binding panel it opens is SteamVR's own. The game
+  integrations are dead weight in VR as well — no VR game reports its kills the
+  way Counter-Strike does. It needs Windows, since the bridge is a PowerShell
+  script compiling C# against the .NET Framework, and a SteamVR recent enough to
+  have `IVRInput`; an older one says so in the settings row instead of failing
+  silently.
 - **Linux system audio.** Loopback capture through `getDisplayMedia` exists only
   on Windows, so clips recorded on Linux carry no desktop audio.
 - Encoding is software-side (Chromium's MediaRecorder), so a high bitrate at

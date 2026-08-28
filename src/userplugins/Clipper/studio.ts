@@ -178,7 +178,7 @@ export interface Segment {
     layout?: AngleLayout;
 }
 
-export interface Angle {
+interface Angle {
     sourceId: string;
     /** Seconds to add to this segment's clock to reach the same instant there. */
     offset: number;
@@ -564,7 +564,7 @@ export function keepRange(project: Project, from: number, to: number): Project {
  * data is not the same answer as nobody spoke, and the second reading would
  * quietly delete a montage cut from imported footage.
  */
-export interface SilenceOptions {
+interface SilenceOptions {
     /** Shortest gap worth removing, in project seconds. */
     minimum: number;
     /** Kept at each end of a gap, so a word is not clipped off. */
@@ -573,7 +573,7 @@ export interface SilenceOptions {
     floor: number;
 }
 
-export const DEFAULT_SILENCE: SilenceOptions = {
+const DEFAULT_SILENCE: SilenceOptions = {
     minimum: 1.5,
     padding: 0.25,
     floor: 0.12
@@ -586,7 +586,7 @@ export const DEFAULT_SILENCE: SilenceOptions = {
  * per-person levels, so somebody turned down to zero is somebody who, as far as
  * the render is concerned, said nothing.
  */
-export function silentRanges(
+function silentRanges(
     project: Project,
     sources: StudioSource[],
     options: SilenceOptions = DEFAULT_SILENCE
@@ -683,7 +683,7 @@ export function cutSilence(
 }
 
 /** The segment a project time falls in, and where inside its source it lands. */
-export function sourceAt(project: Project, at: number): { segment: Segment; seconds: number; } | null {
+function sourceAt(project: Project, at: number): { segment: Segment; seconds: number; } | null {
     let elapsed = 0;
 
     for (const segment of project.segments) {
@@ -708,7 +708,7 @@ export function sourceAt(project: Project, at: number): { segment: Segment; seco
  * say when there was speech, to a fifth of a second, so the curve can be built
  * from them.
  */
-export interface DuckSettings {
+interface DuckSettings {
     /** What is left of the sound lane while somebody talks, 0..1. */
     depth: number;
     /** Seconds taken to move down, and to come back up. */
@@ -716,7 +716,7 @@ export interface DuckSettings {
     release: number;
 }
 
-export const DEFAULT_DUCK: DuckSettings = {
+const DEFAULT_DUCK: DuckSettings = {
     depth: 0.3,
     attack: 0.2,
     release: 0.5
@@ -891,7 +891,7 @@ export interface MontagePick {
     markers: number[];
 }
 
-export interface MontageOptions {
+interface MontageOptions {
     /** Seconds kept before a marker and after it. */
     lead: number;
     tail: number;
@@ -1137,7 +1137,7 @@ const TRACK_EASE = 0.3;
 const TRACK_COLUMNS = 96;
 const TRACK_ROWS = 54;
 
-export interface TrackOptions {
+interface TrackOptions {
     /** Shape of the output, width over height. */
     aspect: number;
     /** Called with 0..1 as the segment is walked, for a progress note. */

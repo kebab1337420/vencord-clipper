@@ -126,6 +126,9 @@ export const STUDIO_CSS = `
 .vc-clipper-studio {
     width: min(1280px, 96vw);
     height: min(840px, 92vh);
+    /* The drop veil is laid over this and nothing else. Without it the veil
+       would anchor to the backdrop and grey out the whole screen. */
+    position: relative;
 }
 /* The title is the whole header here: the panels underneath say what each does. */
 .vc-clipper-studio .vc-clipper-head {
@@ -135,6 +138,41 @@ export const STUDIO_CSS = `
 .vc-clipper-studio .vc-clipper-head h2 {
     font-size: 16px;
     line-height: 20px;
+}
+.vc-clipper-studio.vc-clipper-dropping {
+    outline: 2px dashed var(--brand-experiment, #5865f2);
+    outline-offset: -2px;
+}
+.vc-clipper-drop-veil {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: inherit;
+    background: color-mix(in srgb, var(--background-primary, #313338) 82%, transparent);
+    /* The veil sits over the whole modal, so it must not be what the drop
+       lands on: the count would never come back down and the handlers on the
+       modal below would never see it. */
+    pointer-events: none;
+}
+.vc-clipper-drop-veil > div {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+    padding: 18px 26px;
+    border: 2px dashed var(--brand-experiment, #5865f2);
+    border-radius: 12px;
+    text-align: center;
+}
+.vc-clipper-drop-veil b {
+    font-size: 16px;
+    color: var(--header-primary, #f2f3f5);
+}
+.vc-clipper-drop-veil small {
+    color: var(--text-muted, #949ba4);
 }
 .vc-clipper-studio-body {
     display: flex;
@@ -963,10 +1001,12 @@ export const STUDIO_CSS = `
     cursor: default;
 }
 .vc-clipper-side-actions button.vc-clipper-primary,
+.vc-clipper-row button.vc-clipper-primary,
 .vc-clipper-studio-foot button.vc-clipper-primary {
     background: var(--brand-experiment, #5865f2);
 }
 .vc-clipper-side-actions button.vc-clipper-primary:hover:not(:disabled),
+.vc-clipper-row button.vc-clipper-primary:hover:not(:disabled),
 .vc-clipper-studio-foot button.vc-clipper-primary:hover:not(:disabled) {
     background: var(--brand-experiment-560, #4752c4);
 }
@@ -1180,6 +1220,15 @@ function followPlayback(video: HTMLVideoElement, start: () => void, stop: () => 
 /** How many thumbnail sidecars are read at once when a folder is listed. */
 const THUMB_READS = 4;
 
+/** What a dropped file is taken for, by its name. */
+const DROP_VIDEO = /\.(mp4|webm|mkv|mov|m4v)$/i;
+const DROP_SOUND = /\.(mp3|wav|ogg|opus|m4a|aac|flac)$/i;
+const DROP_IMAGE = /\.(png|jpe?g|webp|gif|avif|bmp)$/i;
+
+/** The native reader's own caps, which a drop does not pass through. */
+const DROP_VIDEO_BYTES = 512 * 1024 * 1024;
+const DROP_SOUND_BYTES = 64 * 1024 * 1024;
+
 function toast(message: string, type: string) {
     Toasts.show({ id: Toasts.genId(), message, type });
 }
@@ -1306,12 +1355,32 @@ function readSaved(): SavedProject | null {
     }
 }
 
+/**
+ * Whether the user has already been told the timeline is not being kept.
+ *
+ * Module scope rather than component state: the write is debounced and runs
+ * every few seconds while editing, so a per-render flag would still let the
+ * same warning stack up a dozen times over one session.
+ */
+let saveWarned = false;
+
 function writeSaved(value: SavedProject | null) {
     try {
         if (!value) store.removeItem(STORAGE_KEY);
         else store.setItem(STORAGE_KEY, JSON.stringify(value));
+
+        saveWarned = false;
     } catch (e) {
         logger.warn("Could not save the studio project", e);
+
+        // The studio promises the timeline outlives the modal, so a storage
+        // that refuses the write - a full quota, most often - has to be said
+        // out loud. Silently, the user closes the studio on a finished montage
+        // and opens it again on nothing.
+        if (!saveWarned) {
+            saveWarned = true;
+            toast("This timeline is not being kept: the client's storage refused it. Render before you close.", Toasts.Type.FAILURE);
+        }
     }
 }
 
@@ -1436,6 +1505,16 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
     const [images, setImages] = useState<ImageSource[]>([]);
     const [pickedOverlay, setPickedOverlay] = useState("");
 
+    /**
+     * The caption the keyboard acts on.
+     *
+     * Captions are the only thing on the timeline with no handle in the
+     * preview, so without this they could be copied and nudged only by the
+     * buttons on their own row, while sounds and pictures answered the
+     * keyboard.
+     */
+    const [pickedCaption, setPickedCaption] = useState("");
+
     /*
      * The shelf of reusable sounds and pictures.
      *
@@ -1456,6 +1535,23 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
      */
     const [mark, setMark] = useState<CutMark | null>(null);
     const [tab, setTab] = useState<"segment" | "captions" | "audio" | "images" | "output">("segment");
+
+    /**
+     * Whether the preview goes back to the in point instead of stopping.
+     *
+     * Judging a cut of two seconds means watching it a dozen times, and hitting
+     * play between each one loses the rhythm that is being judged.
+     */
+    const [loop, setLoop] = useState(false);
+
+    /**
+     * How many drags are currently over the studio.
+     *
+     * A count rather than a flag, because dragging across a child fires a leave
+     * for the old element after the enter for the new one, and a flag would
+     * blink the whole overlay off and on as the cursor crossed every button.
+     */
+    const [dragging, setDragging] = useState(0);
     const [progress, setProgress] = useState(-1);
     const [note, setNote] = useState("");
     const [error, setError] = useState("");
@@ -2675,8 +2771,19 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
      * from, and two copies of this would drift the moment one of them gained a
      * default.
      */
-    const placeSound = async (path: string, at: number) => {
-        const { name, url, data } = track(await loadAudioFile(path));
+    /**
+     * Lays a decoded sound on the timeline at a point.
+     *
+     * Takes the loaded file rather than a path, because a sound can arrive two
+     * ways: read off disk by the picker, which knows where it lives, or
+     * dropped onto the studio, which hands over bytes and a name and no path
+     * at all. Everything past the read is the same for both.
+     */
+    const placeLoadedSound = async (
+        file: { name: string; url: string; data: ArrayBuffer; path?: string; },
+        at: number
+    ) => {
+        const { name, url, data, path } = file;
 
         const source = await decodeSource(audioContext(), newId(), name, data, url, path);
         if (!aliveRef.current) return;
@@ -2698,6 +2805,9 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         setPickedSound(clip.id);
     };
 
+    const placeSound = async (path: string, at: number) =>
+        placeLoadedSound({ ...track(await loadAudioFile(path)), path }, at);
+
     /**
      * Decodes a picture off disk and lays it over the timeline.
      *
@@ -2706,8 +2816,9 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
      * something correct and invisible: a picture placed at its own pixel size
      * would be either a speck or wider than the frame depending on the file.
      */
-    const placeImage = async (path: string, at: number) => {
-        const { name, url } = track(await loadImageFile(path));
+    /** The same two ways in as a sound, past the read. */
+    const placeLoadedImage = async (file: { name: string; url: string; path?: string; }, at: number) => {
+        const { name, url, path } = file;
 
         const source = await decodeImage(newId(), name, url, audioContext(), path);
         if (!aliveRef.current) return;
@@ -2724,6 +2835,9 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         commit(p => ({ ...p, overlays: [...(p.overlays ?? []), overlay] }));
         setPickedOverlay(overlay.id);
     };
+
+    const placeImage = async (path: string, at: number) =>
+        placeLoadedImage({ ...track(await loadImageFile(path)), path }, at);
 
     /**
      * Adds sounds to the lane, each one landing at the playhead.
@@ -2775,6 +2889,87 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         } catch (e) {
             logger.warn("Could not add a picture to the timeline", e);
             setError(e instanceof Error ? e.message : String(e));
+        } finally {
+            setNote("");
+        }
+    };
+
+    /**
+     * Files dropped onto the studio, sorted by what they are.
+     *
+     * A drop hands over bytes and a name, never a path: Electron took
+     * `File.path` away in its 32nd version and the client runs a later one, so
+     * there is nothing to give the native reader. Everything the plugin does
+     * with a sound or a picture is done from the bytes anyway, so the only
+     * thing lost is the path - which is what the shelf remembers files by, and
+     * what a saved timeline finds them again by. Hence the note: a dropped
+     * file is here for as long as the studio is open, and the picker is what
+     * keeps one.
+     *
+     * The size caps are the native reader's own, repeated here because a drop
+     * never goes through it and a dropped four-gigabyte recording would be
+     * read into the renderer before anything noticed.
+     */
+    const onDropFiles = async (files: File[]) => {
+        setError("");
+
+        const at = projectTime();
+        const refused: string[] = [];
+        let pathless = 0;
+        let placed = 0;
+
+        setNote("Reading…");
+
+        try {
+            for (const file of files) {
+                const { name } = file;
+
+                // A .webm is either a picture or a video depending on what is
+                // in it, and the name cannot say which. It goes in as a source,
+                // which is the reading that loses nothing: an overlay can be
+                // laid down from the pictures tab afterwards.
+                const kind = DROP_VIDEO.test(name) ? "video"
+                    : DROP_SOUND.test(name) ? "sound"
+                        : DROP_IMAGE.test(name) ? "image"
+                            : null;
+
+                if (!kind) {
+                    refused.push(`${name} is not a video, a sound or a picture`);
+                    continue;
+                }
+
+                const cap = kind === "sound" ? DROP_SOUND_BYTES : DROP_VIDEO_BYTES;
+                if (kind !== "image" && file.size > cap) {
+                    refused.push(`${name} is ${Math.round(file.size / (1024 * 1024))} MB, over the ${Math.round(cap / (1024 * 1024))} MB cap`);
+                    continue;
+                }
+
+                const { url } = track({ url: URL.createObjectURL(file) });
+
+                try {
+                    if (kind === "video") await addSource(name, url);
+                    else if (kind === "sound") await placeLoadedSound({ name, url, data: await file.arrayBuffer() }, at);
+                    else await placeLoadedImage({ name, url }, at);
+
+                    pathless++;
+                    placed++;
+                } catch (e) {
+                    // `addSource` revokes what it could not use; the other two
+                    // leave the URL to the ledger, which the modal empties.
+                    logger.warn("Could not take a dropped file", e);
+                    refused.push(e instanceof Error ? e.message : String(e));
+                }
+            }
+
+            if (placed) setTab(DROP_SOUND.test(files[0]?.name ?? "") ? "audio" : DROP_IMAGE.test(files[0]?.name ?? "") ? "images" : "segment");
+            if (refused.length) setError(refused.join("; "));
+
+            if (pathless) {
+                toast(
+                    `${pathless} dropped file${pathless === 1 ? "" : "s"} added for this session - use the Add buttons to keep ${pathless === 1 ? "it" : "them"} across reopenings`,
+                    Toasts.Type.MESSAGE
+                );
+            }
         } finally {
             setNote("");
         }
@@ -2974,9 +3169,15 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
      * hundred placements cost a hundred small objects rather than a hundred
      * decodes.
      */
-    // State rather than a ref, because the Paste button is disabled until there
-    // is something to paste and a ref would not re-render it into life.
-    const [soundClipboard, setSoundClipboard] = useState<AudioClip | null>(null);
+    // State rather than a ref, because the Paste buttons are disabled until
+    // there is something to paste and a ref would not re-render them into life.
+    const [clipboard, setClipboard] = useState<
+        | { kind: "sound"; clip: AudioClip; }
+        | { kind: "overlay"; overlay: Overlay; }
+        | { kind: "caption"; caption: Caption; }
+        | { kind: "segment"; segment: Segment; }
+        | null
+    >(null);
 
     /**
      * Where the last paste of the current run landed, so the next one follows it.
@@ -2993,29 +3194,146 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         const clip = (project.audioClips ?? []).find(c => c.id === id);
         if (!clip) return false;
 
-        setSoundClipboard(clip);
+        setClipboard({ kind: "sound", clip });
         pasteRun.current = null;
         return true;
     };
 
-    const pasteSound = (): boolean => {
-        const copied = soundClipboard;
+    const copyOverlay = (id: string): boolean => {
+        const overlay = (project.overlays ?? []).find(o => o.id === id);
+        if (!overlay) return false;
 
-        // The source is dropped when the modal closes, and a copy that outlived
-        // it would be a clip pointing at nothing: silent, undeletable from the
-        // lane's own controls, and rendered as a gap.
-        if (!copied || !soundsById.has(copied.sourceId)) return false;
+        setClipboard({ kind: "overlay", overlay });
+        pasteRun.current = null;
+        return true;
+    };
 
+    const copyCaption = (id: string): boolean => {
+        const caption = project.captions.find(c => c.id === id);
+        if (!caption) return false;
+
+        setClipboard({ kind: "caption", caption });
+        pasteRun.current = null;
+        return true;
+    };
+
+    const copySegment = (id: string): boolean => {
+        const segment = project.segments.find(s => s.id === id);
+        if (!segment) return false;
+
+        setClipboard({ kind: "segment", segment });
+        pasteRun.current = null;
+        return true;
+    };
+
+    /**
+     * Where the copy in hand should land, given how long it is.
+     *
+     * The playhead, unless the last paste of this run was asked for at the same
+     * playhead - then it goes after that one. Kept in one place so a sound and
+     * a picture behave the same way under a held Ctrl+V.
+     */
+    const pasteAt = (length: number): number => {
         const head = projectTime();
         const run = pasteRun.current;
         const at = run && Math.abs(run.head - head) < 0.001 ? run.end : head;
 
-        const clip: AudioClip = { ...copied, id: newId(), at };
-        pasteRun.current = { head, end: at + clipLengthOf(clip) };
+        pasteRun.current = { head, end: at + length };
+        return at;
+    };
+
+    const pasteSound = (): boolean => {
+        // The source is dropped when the modal closes, and a copy that outlived
+        // it would be a clip pointing at nothing: silent, undeletable from the
+        // lane's own controls, and rendered as a gap.
+        if (clipboard?.kind !== "sound" || !soundsById.has(clipboard.clip.sourceId)) return false;
+
+        const clip: AudioClip = { ...clipboard.clip, id: newId(), at: pasteAt(clipLengthOf(clipboard.clip)) };
 
         commit(p => ({ ...p, audioClips: [...(p.audioClips ?? []), clip] }));
         setPickedSound(clip.id);
         return true;
+    };
+
+    const pasteOverlay = (): boolean => {
+        if (clipboard?.kind !== "overlay" || !imagesById.has(clipboard.overlay.sourceId)) return false;
+
+        const copied = clipboard.overlay;
+        const span = Math.max(0.2, copied.to - copied.from);
+
+        // Held back from the end of the montage: a picture laid down with the
+        // playhead parked on the last frame would show over nothing at all,
+        // and an invisible copy is one nobody thinks to go and delete.
+        const from = Math.min(pasteAt(span), Math.max(0, total - span));
+
+        const overlay: Overlay = { ...copied, id: newId(), from, to: from + span };
+
+        commit(p => ({ ...p, overlays: [...(p.overlays ?? []), overlay] }));
+        setPickedOverlay(overlay.id);
+        return true;
+    };
+
+    const pasteCaption = (): boolean => {
+        if (clipboard?.kind !== "caption") return false;
+
+        const copied = clipboard.caption;
+        const span = Math.max(0.2, copied.to - copied.from);
+        const from = Math.min(pasteAt(span), Math.max(0, total - span));
+
+        const caption: Caption = { ...copied, id: newId(), from, to: from + span };
+
+        commit(p => ({ ...p, captions: [...p.captions, caption] }));
+        setPickedCaption(caption.id);
+        return true;
+    };
+
+    /**
+     * Puts a copy of a shot after the one that is selected.
+     *
+     * A segment has no placement of its own - the montage is the order of the
+     * list - so this is the one paste the playhead has nothing to say about,
+     * and a run of them stacks up after the selection rather than after each
+     * other's end.
+     */
+    const pasteSegment = (): boolean => {
+        if (clipboard?.kind !== "segment") return false;
+
+        const copy: Segment = { ...clipboard.segment, id: newId(), effects: { ...clipboard.segment.effects } };
+
+        commit(p => {
+            const index = p.segments.findIndex(s => s.id === selected);
+            const segments = [...p.segments];
+
+            segments.splice(index < 0 ? segments.length : index + 1, 0, copy);
+            return { ...p, segments };
+        });
+
+        setSelected(copy.id);
+        return true;
+    };
+
+    /**
+     * Puts a sound down on the nearest seam of the montage.
+     *
+     * A sting is placed against a cut far more often than against a moment in
+     * the middle of a shot, and the lane is a few hundred pixels wide for the
+     * whole montage, so hitting a seam by dragging is aim rather than editing.
+     * The end of the montage counts as a seam: a sound that plays out over the
+     * last frame is a normal way to finish.
+     */
+    const snapSoundToCut = (clip: AudioClip) => {
+        const seams = project.segments.map((_, i) => segmentStart(project, i));
+        seams.push(total);
+
+        const nearest = seams.reduce((best, at) => Math.abs(at - clip.at) < Math.abs(best - clip.at) ? at : best, seams[0] ?? 0);
+
+        if (Math.abs(nearest - clip.at) < 0.001) {
+            toast("It already starts on a cut", Toasts.Type.FAILURE);
+            return;
+        }
+
+        patchSound(clip.id, { at: nearest });
+        toast(`Moved it to ${formatTime(nearest)}`, Toasts.Type.SUCCESS);
     };
 
     const move = (id: string, delta: number) => {
@@ -3693,6 +4011,20 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         commit(p => ({ ...p, captions: p.captions.map(c => c.id === id ? { ...c, ...patch } : c) }), tag);
     };
 
+    /**
+     * Repeats a caption after itself, with its wording and its length kept.
+     *
+     * Two lines of the same joke on either side of a cut is typed once here
+     * rather than twice, and the copy lands after the original so it is not
+     * hidden underneath it.
+     */
+    const duplicateCaption = (caption: Caption) => {
+        const span = Math.max(0.2, caption.to - caption.from);
+        const from = Math.min(Math.max(0, total - span), caption.to);
+
+        commit(p => ({ ...p, captions: [...p.captions, { ...caption, id: newId(), from, to: from + span }] }));
+    };
+
     /** Plays the selected segment from its start and stops on its out point. */
     const playSegment = () => {
         const video = videoRef.current;
@@ -3710,12 +4042,15 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         if (!video || !segment) return;
 
         const stop = () => {
-            if (video.currentTime >= segment.to) video.pause();
+            if (video.currentTime < segment.to) return;
+
+            if (loop) video.currentTime = segment.from;
+            else video.pause();
         };
 
         video.addEventListener("timeupdate", stop);
         return () => video.removeEventListener("timeupdate", stop);
-    }, [selected, segment?.to]);
+    }, [selected, segment?.from, segment?.to, loop]);
 
     /*
      * Studio shortcuts.
@@ -3731,6 +4066,88 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
      * itself in place.
      */
     const keyRef = useRef<(e: KeyboardEvent) => void>(() => void 0);
+
+    /**
+     * Copies whatever the open tab is about.
+     *
+     * The tab is the question the user is answering, so it decides: a sound
+     * picked in the sound tab stays picked while the picture tab is open, and
+     * a Ctrl+C there has to mean the picture. Answers false when that tab has
+     * nothing picked, which leaves the keystroke to the client.
+     */
+    const copyPicked = (): boolean => {
+        if (tab === "segment") return !!selected && copySegment(selected);
+        if (tab === "captions") return !!pickedCaption && copyCaption(pickedCaption);
+        if (tab === "audio") return !!pickedSound && copySound(pickedSound);
+        if (tab === "images") return !!pickedOverlay && copyOverlay(pickedOverlay);
+        return false;
+    };
+
+    /** Lays down what is in hand, whatever tab it was taken from. */
+    const pastePicked = (): boolean => {
+        switch (clipboard?.kind) {
+            case "segment": return pasteSegment();
+            case "caption": return pasteCaption();
+            case "overlay": return pasteOverlay();
+            case "sound": return pasteSound();
+            default: return false;
+        }
+    };
+
+    /**
+     * Moves whatever is picked in the caption, sound or picture tab along the
+     * montage.
+     *
+     * Answers whether it took the key. When those tabs have nothing picked, and
+     * on every other tab, the arrows stay what they have always been: a scrub
+     * of the preview, which is what the hands reach for while trimming. The
+     * segment tab is deliberately not among them: a shot has no placement to
+     * nudge, only an order, and that is what the move buttons are for.
+     *
+     * Every step is tagged, so a held arrow folds into one undo entry the way a
+     * dragged slider does. Untagged, the key repeat would push about thirty
+     * entries a second and a second of holding would push every earlier edit
+     * out of the forty the history keeps.
+     */
+    const nudgePicked = (by: number): boolean => {
+        if (tab === "captions" && pickedCaption) {
+            const caption = project.captions.find(c => c.id === pickedCaption);
+            if (!caption) return false;
+
+            const span = caption.to - caption.from;
+            const from = Math.max(0, Math.min(Math.max(0, total - span), caption.from + by));
+
+            commit(
+                p => ({ ...p, captions: p.captions.map(c => c.id === caption.id ? { ...c, from, to: from + span } : c) }),
+                `nudge-${caption.id}`
+            );
+            return true;
+        }
+
+        if (tab === "audio" && pickedSound) {
+            const clip = (project.audioClips ?? []).find(c => c.id === pickedSound);
+            if (!clip) return false;
+
+            patchSound(clip.id, { at: Math.max(0, Math.min(total, clip.at + by)) }, `nudge-${clip.id}`);
+            return true;
+        }
+
+        if (tab === "images" && pickedOverlay) {
+            const overlay = (project.overlays ?? []).find(o => o.id === pickedOverlay);
+            if (!overlay) return false;
+
+            // Both ends move together, so a nudge slides the picture rather
+            // than stretching it, and it stops at the ends of the montage
+            // instead of sliding off into a stretch that never shows.
+            const span = overlay.to - overlay.from;
+            const from = Math.max(0, Math.min(Math.max(0, total - span), overlay.from + by));
+
+            patchOverlay(overlay.id, { from, to: from + span }, `nudge-${overlay.id}`);
+            return true;
+        }
+
+        return false;
+    };
 
     keyRef.current = (e: KeyboardEvent) => {
         const target = e.target as HTMLElement | null;
@@ -3751,11 +4168,12 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         if (e.ctrlKey || e.metaKey) {
             if (key === "z" && !e.shiftKey) undo();
             else if ((key === "z" && e.shiftKey) || key === "y") redo();
-            // Only with a sound picked, and only when there is something to
-            // paste: an unhandled Ctrl+C has to stay the client's, or selecting
-            // a caption in the studio and copying it would come back empty.
-            else if (key === "c" && pickedSound) { if (!copySound(pickedSound)) return; }
-            else if (key === "v") { if (!pasteSound()) return; }
+            // Only with something picked in the tab that is open, and only when
+            // there is something to paste: an unhandled Ctrl+C has to stay the
+            // client's, or selecting text in the studio and copying it would
+            // come back empty.
+            else if (key === "c") { if (!copyPicked()) return; }
+            else if (key === "v") { if (!pastePicked()) return; }
             else return;
 
             e.preventDefault();
@@ -3780,13 +4198,16 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
             case "delete":
             case "backspace": if (selected) remove(selected); break;
             case "arrowleft":
+                if (nudgePicked(-(e.shiftKey ? 1 : 0.1))) break;
                 if (!video) return;
                 video.currentTime = Math.max(0, video.currentTime - (e.shiftKey ? 1 : 0.1));
                 break;
             case "arrowright":
+                if (nudgePicked(e.shiftKey ? 1 : 0.1)) break;
                 if (!video) return;
                 video.currentTime += e.shiftKey ? 1 : 0.1;
                 break;
+            case "l": setLoop(on => !on); break;
             default: return;
         }
 
@@ -4024,9 +4445,38 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
         </div>
     );
 
+    /** True while the drag carries files rather than, say, a Discord message. */
+    const dragHasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
+
     return (
         <div className="vc-clipper-backdrop" onClick={e => { if (e.target === e.currentTarget && !busy) onClose(); }}>
-            <div className="vc-clipper-modal vc-clipper-studio">
+            <div
+                className={`vc-clipper-modal vc-clipper-studio${dragging ? " vc-clipper-dropping" : ""}`}
+                onDragEnter={e => { if (!busy && dragHasFiles(e)) { e.preventDefault(); setDragging(n => n + 1); } }}
+                onDragLeave={e => { if (dragHasFiles(e)) setDragging(n => Math.max(0, n - 1)); }}
+                // Both the over and the drop have to be taken, or the client
+                // handles the drop itself and the file is uploaded to whatever
+                // channel is open behind the studio.
+                onDragOver={e => { if (!busy && dragHasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
+                onDrop={e => {
+                    if (!dragHasFiles(e)) return;
+
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setDragging(0);
+
+                    const files = Array.from(e.dataTransfer.files);
+                    if (!busy && files.length) void onDropFiles(files);
+                }}
+            >
+                {!!dragging && (
+                    <div className="vc-clipper-drop-veil">
+                        <div>
+                            <b>Drop it here</b>
+                            <small>Videos join the timeline, sounds and pictures land at the playhead</small>
+                        </div>
+                    </div>
+                )}
                 <div className="vc-clipper-head">
                     <div>
                         <h2>Clip studio</h2>
@@ -4703,11 +5153,29 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                     <div className="vc-clipper-row">
                                         <button disabled={busy} title="Play this segment from its start (space)" onClick={playSegment}>Play</button>
                                         <button
+                                            className={loop ? "vc-clipper-primary" : undefined}
+                                            disabled={busy}
+                                            title="Play this segment over and over instead of stopping at its end (L)"
+                                            onClick={() => setLoop(on => !on)}
+                                        >
+                                            {loop ? "Looping" : "Loop"}
+                                        </button>
+                                        <button
                                             disabled={busy}
                                             title="Trim back to the whole file"
                                             onClick={() => patchSegment(segment.id, { from: 0, to: Math.max(0.2, videoRef.current?.duration || segment.to) })}
                                         >
                                             Full clip
+                                        </button>
+                                        <button disabled={busy} title="Copy this shot, trim, speed and effects included (Ctrl+C)" onClick={() => copySegment(segment.id)}>
+                                            Copy
+                                        </button>
+                                        <button
+                                            disabled={busy || clipboard?.kind !== "segment"}
+                                            title="Put the copied shot after this one (Ctrl+V)"
+                                            onClick={() => pasteSegment()}
+                                        >
+                                            Paste
                                         </button>
                                         <button disabled={busy} title="Split at the playhead (S)" onClick={split}>Split</button>
                                     </div>
@@ -4749,7 +5217,11 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                 {!project.captions.length && <div className="vc-clipper-note">No caption yet.</div>}
 
                                 {project.captions.map(caption => (
-                                    <div key={caption.id} className="vc-clipper-caption-item">
+                                    <div
+                                        key={caption.id}
+                                        className={`vc-clipper-caption-item${caption.id === pickedCaption ? " vc-clipper-active" : ""}`}
+                                        onMouseDown={() => setPickedCaption(caption.id)}
+                                    >
                                         <div className="vc-clipper-field">
                                             <textarea
                                                 value={caption.text}
@@ -4786,13 +5258,39 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                             </div>
                                         </div>
 
-                                        <button
-                                            className="vc-clipper-danger"
-                                            disabled={busy}
-                                            onClick={() => commit(p => ({ ...p, captions: p.captions.filter(c => c.id !== caption.id) }))}
-                                        >
-                                            Remove
-                                        </button>
+                                        <div className="vc-clipper-caption-row">
+                                            <button
+                                                disabled={busy}
+                                                title="Say it again right after this one"
+                                                onClick={() => duplicateCaption(caption)}
+                                            >
+                                                Duplicate
+                                            </button>
+                                            <button
+                                                disabled={busy}
+                                                title="Copy it, wording and styling included (Ctrl+C)"
+                                                onClick={() => copyCaption(caption.id)}
+                                            >
+                                                Copy
+                                            </button>
+                                            <button
+                                                disabled={busy || clipboard?.kind !== "caption"}
+                                                title="Show the copied caption again from the playhead (Ctrl+V)"
+                                                onClick={() => pasteCaption()}
+                                            >
+                                                Paste
+                                            </button>
+                                            <button
+                                                className="vc-clipper-danger"
+                                                disabled={busy}
+                                                onClick={() => {
+                                                    setPickedCaption(current => current === caption.id ? "" : current);
+                                                    commit(p => ({ ...p, captions: p.captions.filter(c => c.id !== caption.id) }));
+                                                }}
+                                            >
+                                                Remove
+                                            </button>
+                                        </div>
                                     </div>
                                 ))}
 
@@ -5092,6 +5590,13 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                                 >
                                                     Snap cuts to the beat
                                                 </button>
+                                                <button
+                                                    disabled={busy}
+                                                    title="Move it onto the nearest cut of the montage"
+                                                    onClick={() => snapSoundToCut(clip)}
+                                                >
+                                                    Snap to a cut
+                                                </button>
                                             </div>
 
                                             <div className="vc-clipper-caption-row">
@@ -5102,7 +5607,7 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                                     Copy
                                                 </button>
                                                 <button
-                                                    disabled={busy || !soundClipboard}
+                                                    disabled={busy || clipboard?.kind !== "sound"}
                                                     title="Lay the copied block down at the playhead, again after itself each time (Ctrl+V)"
                                                     onClick={() => pasteSound()}
                                                 >
@@ -5290,6 +5795,23 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                                 >
                                                     Ends here
                                                 </button>
+                                            </div>
+
+                                            <div className="vc-clipper-caption-row">
+                                                <button
+                                                    disabled={busy}
+                                                    title="Copy it, placing and fades included (Ctrl+C)"
+                                                    onClick={() => copyOverlay(overlay.id)}
+                                                >
+                                                    Copy
+                                                </button>
+                                                <button
+                                                    disabled={busy || clipboard?.kind !== "overlay"}
+                                                    title="Show the copied picture again from the playhead, then after itself each time (Ctrl+V)"
+                                                    onClick={() => pasteOverlay()}
+                                                >
+                                                    Paste
+                                                </button>
                                                 <button className="vc-clipper-danger" disabled={busy} onClick={() => removeOverlay(overlay.id)}>
                                                     Remove
                                                 </button>
@@ -5369,12 +5891,17 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                 </Hint>
 
                                 <Hint summary="Shortcuts">
-                                    Space plays the segment, S splits it, D duplicates it, Delete removes it, I and O
-                                    mark a range and X cuts it, arrows step the playhead, Ctrl+Z and Ctrl+Shift+Z
-                                    walk the edits, Esc closes the studio. With a sound picked, Ctrl+C copies the
-                                    block and Ctrl+V lays it down at the playhead - press it again and the next copy
-                                    follows the last one, so a sting can be spammed across the clip. The timeline is
-                                    kept when you close it and comes back on the next opening.
+                                    Space plays the segment, L keeps it playing over and over, S splits it, D
+                                    duplicates it, Delete removes it, I and O mark a range and X cuts it, arrows
+                                    step the playhead, Ctrl+Z and Ctrl+Shift+Z walk the edits, Esc closes the
+                                    studio. Ctrl+C copies whatever the open tab is about - the selected shot, or
+                                    the caption, sound or picture picked in its list - and Ctrl+V lays it down:
+                                    a shot after the selected one, everything else at the playhead. Press it
+                                    again and the next copy follows the last one, so a sting can be spammed
+                                    across the clip. With a caption, a sound or a picture picked, the arrows move
+                                    that one along the montage rather than the playhead, a tenth of a second at a
+                                    time and a whole second with Shift. The timeline is kept when you close it
+                                    and comes back on the next opening.
                                 </Hint>
                             </>
                         )}

@@ -2,38 +2,56 @@
 // Standalone: false
 // Platform: win32
 // Updater Disabled: false
-"use strict";var vt=Object.defineProperty;var Jn=Object.getOwnPropertyDescriptor;var Xn=Object.getOwnPropertyNames;var Qn=Object.prototype.hasOwnProperty;var He=(t,e,r)=>()=>{if(r)throw r[0];try{return t&&(e=t(t=0)),e}catch(n){throw r=[n],n}};var te=(t,e)=>{for(var r in e)vt(t,r,{get:e[r],enumerable:!0})},ei=(t,e,r,n)=>{if(e&&typeof e=="object"||typeof e=="function")for(let i of Xn(e))!Qn.call(t,i)&&i!==r&&vt(t,i,{get:()=>e[i],enumerable:!(n=Jn(e,i))||n.enumerable});return t};var ti=t=>ei(vt({},"__esModule",{value:!0}),t);var l=He(()=>{"use strict"});var ve=He(()=>{"use strict";l()});function Me(t){return async function(){try{return{ok:!0,value:await t(...arguments)}}catch(e){return{ok:!1,error:e instanceof Error?{...e,message:e.message,name:e.name,stack:e.stack}:e}}}}var mr=He(()=>{"use strict";l()});var si={};function ge(...t){let e={cwd:wr};return yt?gt("flatpak-spawn",["--host","git",...t],e):gt("git",t,e)}async function ri(){return(await ge("remote","get-url","origin")).stdout.trim().replace(/git@(.+):/,"https://$1/").replace(/\.git$/,"")}async function ni(){await ge("fetch");let t=(await ge("branch","--show-current")).stdout.trim();if(!((await ge("ls-remote","origin",t)).stdout.length>0))return[];let n=(await ge("log",`HEAD...origin/${t}`,"--pretty=format:%an/%h/%s")).stdout.trim();return n?n.split(`
-`).map(i=>{let[o,s,...a]=i.split("/");return{hash:s,author:o,message:a.join("/").split(`
-`)[0]}}):[]}async function ii(){return(await ge("pull")).stdout.includes("Fast-forward")}async function oi(){return!(await gt(yt?"flatpak-spawn":"node",yt?["--host","node","scripts/build/build.mjs"]:["scripts/build/build.mjs"],{cwd:wr})).stderr.includes("Build failed")}var vr,_e,gr,yr,wr,gt,yt,br=He(()=>{"use strict";l();ve();vr=require("child_process"),_e=require("electron"),gr=require("path"),yr=require("util");mr();wr=(0,gr.join)(__dirname,".."),gt=(0,yr.promisify)(vr.execFile),yt=!1;_e.ipcMain.handle("VencordGetRepo",Me(ri));_e.ipcMain.handle("VencordGetUpdates",Me(ni));_e.ipcMain.handle("VencordUpdate",Me(ii));_e.ipcMain.handle("VencordBuild",Me(oi))});l();l();l();br();l();ve();var jt=require("electron");l();var xt={};te(xt,{fetchTrackData:()=>ci});l();l();l();var xr="ef29bbe";l();var wt="Vendicated/Vencord";var Sr=`Vencord/${xr}${wt?` (https://github.com/${wt})`:""}`;var Er=require("child_process"),kr=require("util"),Tr=(0,kr.promisify)(Er.execFile);async function bt(t){let{stdout:e}=await Tr("osascript",t.map(r=>["-e",r]).flat());return e}var L=null;async function ai({id:t,name:e,artist:r,album:n}){if(t===L?.id){if("data"in L)return L.data;if("failures"in L&&L.failures>=5)return null}try{let i=new URL("https://itunes.apple.com/search");i.searchParams.set("term",`${e} ${r} ${n}`),i.searchParams.set("media","music"),i.searchParams.set("entity","song");let o=await fetch(i,{headers:{"user-agent":Sr}}).then(a=>a.json()).then(a=>a.results.find(c=>c.collectionName===n)||a.results[0]),s=await fetch(o.artistViewUrl).then(a=>a.text()).then(a=>{let c=a.match(/<meta property="og:image" content="(.+?)">/);return c?c[1].replace(/[0-9]+x.+/,"220x220bb-60.png"):void 0}).catch(()=>{});return L={id:t,data:{appleMusicLink:o.trackViewUrl,appleMusicArtistLink:o.artistViewUrl,songLink:`https://song.link/i/${new URL(o.trackViewUrl).searchParams.get("i")}`,albumArtwork:o.artworkUrl100.replace("100x100","512x512"),artistArtwork:s}},L.data}catch(i){return console.error("[AppleMusicRichPresence] Failed to fetch remote data:",i),L={id:t,failures:(t===L?.id&&"failures"in L?L.failures:0)+1},null}}async function ci(){try{await Tr("pgrep",["^Music$"])}catch{return null}if(await bt(['tell application "Music"',"get player state","end tell"]).then(h=>h.trim())!=="playing")return null;let e=await bt(['tell application "Music"',"get player position","end tell"]).then(h=>Number.parseFloat(h.trim())),r=await bt(['set output to ""','tell application "Music"',"set t_id to database id of current track","set t_name to name of current track","set t_album to album of current track","set t_artist to artist of current track","set t_duration to duration of current track",'set output to "" & t_id & "\\n" & t_name & "\\n" & t_album & "\\n" & t_artist & "\\n" & t_duration',"end tell","return output"]),[n,i,o,s,a]=r.split(`
-`).filter(h=>!!h),c=Number.parseFloat(a),p=await ai({id:n,name:i,artist:s,album:o});return{name:i,album:o,artist:s,playerPosition:e,duration:c,...p}}var St={};te(St,{initDevtoolsOpenEagerLoad:()=>li});l();function li(t){let e=()=>t.sender.executeJavaScript("Vencord.Plugins.plugins.ConsoleShortcuts.eagerLoad(true)");t.sender.isDevToolsOpened()?e():t.sender.once("devtools-opened",()=>e())}var Mr={};l();l();ve();l();var Et=Symbol("SettingsStore.isProxy"),Ir=Symbol("SettingsStore.getRawTarget"),Oe=class{pathListeners=new Map;prefixListeners=new Map;globalListeners=new Set;proxyContexts=new WeakMap;proxyHandler=(()=>{let e=this;return{get(r,n,i){if(n===Et)return!0;if(n===Ir)return r;let o=Reflect.get(r,n,i),s=e.proxyContexts.get(r);if(s==null)return o;let{root:a,path:c}=s;if(!(n in r)&&e.getDefaultValue!=null&&(o=e.getDefaultValue({target:r,key:n,root:a,path:c})),typeof o=="object"&&o!==null&&!o[Et]){let p=`${c}${c&&"."}${n}`;return e.makeProxy(o,a,p)}return o},set(r,n,i){if(i?.[Et]&&(i=i[Ir]),r[n]===i)return!0;if(!Reflect.set(r,n,i))return!1;let o=e.proxyContexts.get(r);if(o==null)return!0;let{root:s,path:a}=o,c=`${a}${a&&"."}${n}`;return e.notifyListeners(c,i,s),!0},deleteProperty(r,n){if(!Reflect.deleteProperty(r,n))return!1;let i=e.proxyContexts.get(r);if(i==null)return!0;let{root:o,path:s}=i,a=`${s}${s&&"."}${n}`;return e.notifyListeners(a,void 0,o),!0}}})();constructor(e,r={}){this.plain=e,this.store=this.makeProxy(e),Object.assign(this,r)}makeProxy(e,r=e,n=""){return this.proxyContexts.set(e,{root:r,path:n}),new Proxy(e,this.proxyHandler)}notifyPrefixListeners(e,r,n){for(let i=1;i<=r.length;i++){let o=r.slice(0,i).join(".");this.prefixListeners.get(o)?.forEach(s=>s(n,e))}}notifyListeners(e,r,n){let i=e.split(".");if(i.length>3&&i[0]==="plugins"){let o=i.slice(0,3),s=o.join("."),a=o.reduce((c,p)=>c[p],n);this.globalListeners.forEach(c=>c(n,s)),this.pathListeners.get(s)?.forEach(c=>c(a))}else this.globalListeners.forEach(o=>o(n,e));this.pathListeners.get(e)?.forEach(o=>o(r)),this.notifyPrefixListeners(e,i,r)}setData(e,r){if(this.readOnly)throw new Error("SettingsStore is read-only");if(this.plain=e,this.store=this.makeProxy(e),r){let n=e,i=r.split(".");for(let o of i){if(!n){console.warn(`Settings#setData: Path ${r} does not exist in new data. Not dispatching update`);return}n=n[o]}this.pathListeners.get(r)?.forEach(o=>o(n)),this.notifyPrefixListeners(r,i,n)}this.markAsChanged()}addGlobalChangeListener(e){this.globalListeners.add(e)}addChangeListener(e,r){let n=this.pathListeners.get(e)??new Set;n.add(r),this.pathListeners.set(e,n)}addPrefixChangeListener(e,r){let n=this.prefixListeners.get(e)??new Set;n.add(r),this.prefixListeners.set(e,n)}removeGlobalChangeListener(e){this.globalListeners.delete(e)}removeChangeListener(e,r){let n=this.pathListeners.get(e);n&&(n.delete(r),n.size||this.pathListeners.delete(e))}removePrefixChangeListener(e,r){let n=this.prefixListeners.get(e);n&&(n.delete(r),n.size||this.prefixListeners.delete(e))}markAsChanged(){this.globalListeners.forEach(e=>e(this.plain,""))}};l();function kt(t,e){for(let r in e){let n=e[r];typeof n=="object"&&!Array.isArray(n)?(t[r]??={},kt(t[r],n)):t[r]??=n}return t}var At=require("electron"),ne=require("fs");l();var Ar=require("electron"),K=require("path"),Ye=process.env.VENCORD_USER_DATA_DIR??(process.env.DISCORD_USER_DATA_DIR?(0,K.join)(process.env.DISCORD_USER_DATA_DIR,"..","VencordData"):(0,K.join)(Ar.app.getPath("userData"),"..","Vencord")),re=(0,K.join)(Ye,"settings"),Y=(0,K.join)(Ye,"themes"),ye=(0,K.join)(re,"quickCss.css"),Tt=(0,K.join)(re,"settings.json"),It=(0,K.join)(re,"native-settings.json"),Rr=["https:","http:","steam:","spotify:","com.epicgames.launcher:","tidal:","itunes:"];(0,ne.mkdirSync)(re,{recursive:!0});function Cr(t,e){try{return JSON.parse((0,ne.readFileSync)(e,"utf-8"))}catch(r){return r?.code!=="ENOENT"&&console.error(`Failed to read ${t} settings`,r),{}}}var A=new Oe(Cr("renderer",Tt));A.addGlobalChangeListener(()=>{try{(0,ne.writeFileSync)(Tt,JSON.stringify(A.plain,null,4))}catch(t){console.error("Failed to write renderer settings",t)}});At.ipcMain.on("VencordGetSettings",t=>t.returnValue=A.plain);At.ipcMain.handle("VencordSetSettings",(t,e,r)=>{A.setData(e,r)});var ui={plugins:{},customCspRules:{}},Dr=Cr("native",It);kt(Dr,ui);var F=new Oe(Dr);F.addGlobalChangeListener(()=>{try{(0,ne.writeFileSync)(It,JSON.stringify(F.plain,null,4))}catch(t){console.error("Failed to write native settings",t)}});var Je=require("electron"),qe=[];function Pr(){let t=[];for(let e=qe.length-1;e>=0;e--){let{processId:r,routingId:n}=qe[e],i=Je.webFrameMain.fromId(r,n);if(!i){qe.splice(e,1);continue}t.push(i)}return t}Je.app.on("browser-window-created",(t,e)=>{e.webContents.on("frame-created",(r,{frame:n})=>{n?.once("dom-ready",()=>{if(n.url.startsWith("https://open.spotify.com/embed/")){Pr();let{routingId:i,processId:o}=n;qe.push({routingId:i,processId:o});let s=A.store.plugins?.FixSpotifyEmbeds;if(!s?.enabled)return;n.executeJavaScript(`
-                    globalThis._vcVolume = ${s.volume/100};
+"use strict";var Qt=Object.defineProperty;var vo=Object.getOwnPropertyDescriptor;var yo=Object.getOwnPropertyNames;var wo=Object.prototype.hasOwnProperty;var xt=(t,e,n)=>()=>{if(n)throw n[0];try{return t&&(e=t(t=0)),e}catch(r){throw n=[r],r}};var pe=(t,e)=>{for(var n in e)Qt(t,n,{get:e[n],enumerable:!0})},bo=(t,e,n,r)=>{if(e&&typeof e=="object"||typeof e=="function")for(let i of yo(e))!wo.call(t,i)&&i!==n&&Qt(t,i,{get:()=>e[i],enumerable:!(r=vo(e,i))||r.enumerable});return t};var So=t=>bo(Qt({},"__esModule",{value:!0}),t);var c=xt(()=>{"use strict"});var Ae=xt(()=>{"use strict";c()});function Ye(t){return async function(){try{return{ok:!0,value:await t(...arguments)}}catch(e){return{ok:!1,error:e instanceof Error?{...e,message:e.message,name:e.name,stack:e.stack}:e}}}}var sr=xt(()=>{"use strict";c()});var To={};function Ce(...t){let e={cwd:dr};return tn?en("flatpak-spawn",["--host","git",...t],e):en("git",t,e)}async function xo(){return(await Ce("remote","get-url","origin")).stdout.trim().replace(/git@(.+):/,"https://$1/").replace(/\.git$/,"")}async function ko(){await Ce("fetch");let t=(await Ce("branch","--show-current")).stdout.trim();if(!((await Ce("ls-remote","origin",t)).stdout.length>0))return[];let r=(await Ce("log",`HEAD...origin/${t}`,"--pretty=format:%an/%h/%s")).stdout.trim();return r?r.split(`
+`).map(i=>{let[o,a,...s]=i.split("/");return{hash:a,author:o,message:s.join("/").split(`
+`)[0]}}):[]}async function Eo(){return(await Ce("pull")).stdout.includes("Fast-forward")}async function Io(){return!(await en(tn?"flatpak-spawn":"node",tn?["--host","node","scripts/build/build.mjs"]:["scripts/build/build.mjs"],{cwd:dr})).stderr.includes("Build failed")}var lr,Je,cr,ur,dr,en,tn,pr=xt(()=>{"use strict";c();Ae();lr=require("child_process"),Je=require("electron"),cr=require("path"),ur=require("util");sr();dr=(0,cr.join)(__dirname,".."),en=(0,ur.promisify)(lr.execFile),tn=!1;Je.ipcMain.handle("VencordGetRepo",Ye(xo));Je.ipcMain.handle("VencordGetUpdates",Ye(ko));Je.ipcMain.handle("VencordUpdate",Ye(Eo));Je.ipcMain.handle("VencordBuild",Ye(Io))});c();c();c();pr();c();Ae();var Vn=require("electron");c();var on={};pe(on,{fetchTrackData:()=>Ao});c();c();c();var fr="ef29bbe";c();var nn="Vendicated/Vencord";var hr=`Vencord/${fr}${nn?` (https://github.com/${nn})`:""}`;var mr=require("child_process"),gr=require("util"),vr=(0,gr.promisify)(mr.execFile);async function rn(t){let{stdout:e}=await vr("osascript",t.map(n=>["-e",n]).flat());return e}var $=null;async function Po({id:t,name:e,artist:n,album:r}){if(t===$?.id){if("data"in $)return $.data;if("failures"in $&&$.failures>=5)return null}try{let i=new URL("https://itunes.apple.com/search");i.searchParams.set("term",`${e} ${n} ${r}`),i.searchParams.set("media","music"),i.searchParams.set("entity","song");let o=await fetch(i,{headers:{"user-agent":hr}}).then(s=>s.json()).then(s=>s.results.find(l=>l.collectionName===r)||s.results[0]),a=await fetch(o.artistViewUrl).then(s=>s.text()).then(s=>{let l=s.match(/<meta property="og:image" content="(.+?)">/);return l?l[1].replace(/[0-9]+x.+/,"220x220bb-60.png"):void 0}).catch(()=>{});return $={id:t,data:{appleMusicLink:o.trackViewUrl,appleMusicArtistLink:o.artistViewUrl,songLink:`https://song.link/i/${new URL(o.trackViewUrl).searchParams.get("i")}`,albumArtwork:o.artworkUrl100.replace("100x100","512x512"),artistArtwork:a}},$.data}catch(i){return console.error("[AppleMusicRichPresence] Failed to fetch remote data:",i),$={id:t,failures:(t===$?.id&&"failures"in $?$.failures:0)+1},null}}async function Ao(){try{await vr("pgrep",["^Music$"])}catch{return null}if(await rn(['tell application "Music"',"get player state","end tell"]).then(d=>d.trim())!=="playing")return null;let e=await rn(['tell application "Music"',"get player position","end tell"]).then(d=>Number.parseFloat(d.trim())),n=await rn(['set output to ""','tell application "Music"',"set t_id to database id of current track","set t_name to name of current track","set t_album to album of current track","set t_artist to artist of current track","set t_duration to duration of current track",'set output to "" & t_id & "\\n" & t_name & "\\n" & t_album & "\\n" & t_artist & "\\n" & t_duration',"end tell","return output"]),[r,i,o,a,s]=n.split(`
+`).filter(d=>!!d),l=Number.parseFloat(s),h=await Po({id:r,name:i,artist:a,album:o});return{name:i,album:o,artist:a,playerPosition:e,duration:l,...h}}var an={};pe(an,{initDevtoolsOpenEagerLoad:()=>Co});c();function Co(t){let e=()=>t.sender.executeJavaScript("Vencord.Plugins.plugins.ConsoleShortcuts.eagerLoad(true)");t.sender.isDevToolsOpened()?e():t.sender.once("devtools-opened",()=>e())}var Er={};c();c();Ae();c();var sn=Symbol("SettingsStore.isProxy"),yr=Symbol("SettingsStore.getRawTarget"),Xe=class{pathListeners=new Map;prefixListeners=new Map;globalListeners=new Set;proxyContexts=new WeakMap;proxyHandler=(()=>{let e=this;return{get(n,r,i){if(r===sn)return!0;if(r===yr)return n;let o=Reflect.get(n,r,i),a=e.proxyContexts.get(n);if(a==null)return o;let{root:s,path:l}=a;if(!(r in n)&&e.getDefaultValue!=null&&(o=e.getDefaultValue({target:n,key:r,root:s,path:l})),typeof o=="object"&&o!==null&&!o[sn]){let h=`${l}${l&&"."}${r}`;return e.makeProxy(o,s,h)}return o},set(n,r,i){if(i?.[sn]&&(i=i[yr]),n[r]===i)return!0;if(!Reflect.set(n,r,i))return!1;let o=e.proxyContexts.get(n);if(o==null)return!0;let{root:a,path:s}=o,l=`${s}${s&&"."}${r}`;return e.notifyListeners(l,i,a),!0},deleteProperty(n,r){if(!Reflect.deleteProperty(n,r))return!1;let i=e.proxyContexts.get(n);if(i==null)return!0;let{root:o,path:a}=i,s=`${a}${a&&"."}${r}`;return e.notifyListeners(s,void 0,o),!0}}})();constructor(e,n={}){this.plain=e,this.store=this.makeProxy(e),Object.assign(this,n)}makeProxy(e,n=e,r=""){return this.proxyContexts.set(e,{root:n,path:r}),new Proxy(e,this.proxyHandler)}notifyPrefixListeners(e,n,r){for(let i=1;i<=n.length;i++){let o=n.slice(0,i).join(".");this.prefixListeners.get(o)?.forEach(a=>a(r,e))}}notifyListeners(e,n,r){let i=e.split(".");if(i.length>3&&i[0]==="plugins"){let o=i.slice(0,3),a=o.join("."),s=o.reduce((l,h)=>l[h],r);this.globalListeners.forEach(l=>l(r,a)),this.pathListeners.get(a)?.forEach(l=>l(s))}else this.globalListeners.forEach(o=>o(r,e));this.pathListeners.get(e)?.forEach(o=>o(n)),this.notifyPrefixListeners(e,i,n)}setData(e,n){if(this.readOnly)throw new Error("SettingsStore is read-only");if(this.plain=e,this.store=this.makeProxy(e),n){let r=e,i=n.split(".");for(let o of i){if(!r){console.warn(`Settings#setData: Path ${n} does not exist in new data. Not dispatching update`);return}r=r[o]}this.pathListeners.get(n)?.forEach(o=>o(r)),this.notifyPrefixListeners(n,i,r)}this.markAsChanged()}addGlobalChangeListener(e){this.globalListeners.add(e)}addChangeListener(e,n){let r=this.pathListeners.get(e)??new Set;r.add(n),this.pathListeners.set(e,r)}addPrefixChangeListener(e,n){let r=this.prefixListeners.get(e)??new Set;r.add(n),this.prefixListeners.set(e,r)}removeGlobalChangeListener(e){this.globalListeners.delete(e)}removeChangeListener(e,n){let r=this.pathListeners.get(e);r&&(r.delete(n),r.size||this.pathListeners.delete(e))}removePrefixChangeListener(e,n){let r=this.prefixListeners.get(e);r&&(r.delete(n),r.size||this.prefixListeners.delete(e))}markAsChanged(){this.globalListeners.forEach(e=>e(this.plain,""))}};c();function ln(t,e){for(let n in e){let r=e[n];typeof r=="object"&&!Array.isArray(r)?(t[n]??={},ln(t[n],r)):t[n]??=r}return t}var dn=require("electron"),he=require("fs");c();var wr=require("electron"),te=require("path"),Et=process.env.VENCORD_USER_DATA_DIR??(process.env.DISCORD_USER_DATA_DIR?(0,te.join)(process.env.DISCORD_USER_DATA_DIR,"..","VencordData"):(0,te.join)(wr.app.getPath("userData"),"..","Vencord")),fe=(0,te.join)(Et,"settings"),ne=(0,te.join)(Et,"themes"),Re=(0,te.join)(fe,"quickCss.css"),cn=(0,te.join)(fe,"settings.json"),un=(0,te.join)(fe,"native-settings.json"),br=["https:","http:","steam:","spotify:","com.epicgames.launcher:","tidal:","itunes:"];(0,he.mkdirSync)(fe,{recursive:!0});function Sr(t,e){try{return JSON.parse((0,he.readFileSync)(e,"utf-8"))}catch(n){return n?.code!=="ENOENT"&&console.error(`Failed to read ${t} settings`,n),{}}}var C=new Xe(Sr("renderer",cn));C.addGlobalChangeListener(()=>{try{(0,he.writeFileSync)(cn,JSON.stringify(C.plain,null,4))}catch(t){console.error("Failed to write renderer settings",t)}});dn.ipcMain.on("VencordGetSettings",t=>t.returnValue=C.plain);dn.ipcMain.handle("VencordSetSettings",(t,e,n)=>{C.setData(e,n)});var Ro={plugins:{},customCspRules:{}},xr=Sr("native",un);ln(xr,Ro);var j=new Xe(xr);j.addGlobalChangeListener(()=>{try{(0,he.writeFileSync)(un,JSON.stringify(j.plain,null,4))}catch(t){console.error("Failed to write native settings",t)}});var Tt=require("electron"),It=[];function kr(){let t=[];for(let e=It.length-1;e>=0;e--){let{processId:n,routingId:r}=It[e],i=Tt.webFrameMain.fromId(n,r);if(!i){It.splice(e,1);continue}t.push(i)}return t}Tt.app.on("browser-window-created",(t,e)=>{e.webContents.on("frame-created",(n,{frame:r})=>{r?.once("dom-ready",()=>{if(r.url.startsWith("https://open.spotify.com/embed/")){kr();let{routingId:i,processId:o}=r;It.push({routingId:i,processId:o});let a=C.store.plugins?.FixSpotifyEmbeds;if(!a?.enabled)return;r.executeJavaScript(`
+                    globalThis._vcVolume = ${a.volume/100};
                     const original = Audio.prototype.play;
                     Audio.prototype.play = function() {
                         this.volume = _vcVolume;
                         return original.apply(this, arguments);
                     }
-                `)}})})});A.addChangeListener("plugins.FixSpotifyEmbeds.volume",t=>{try{Pr().forEach(e=>e.executeJavaScript(`globalThis._vcVolume = ${t/100}`))}catch(e){console.error("FixSpotifyEmbeds: Failed to update volume",e)}});var Or={};l();var _r=require("electron");_r.app.on("browser-window-created",(t,e)=>{e.webContents.on("frame-created",(r,{frame:n})=>{n?.once("dom-ready",()=>{if(n.url.startsWith("https://www.youtube.com/")){if(!A.store.plugins?.FixYoutubeEmbeds?.enabled)return;n.executeJavaScript(`
+                `)}})})});C.addChangeListener("plugins.FixSpotifyEmbeds.volume",t=>{try{kr().forEach(e=>e.executeJavaScript(`globalThis._vcVolume = ${t/100}`))}catch(e){console.error("FixSpotifyEmbeds: Failed to update volume",e)}});var Tr={};c();var Ir=require("electron");Ir.app.on("browser-window-created",(t,e)=>{e.webContents.on("frame-created",(n,{frame:r})=>{r?.once("dom-ready",()=>{if(r.url.startsWith("https://www.youtube.com/")){if(!C.store.plugins?.FixYoutubeEmbeds?.enabled)return;r.executeJavaScript(`
                 new MutationObserver(() => {
                     if(
                         document.querySelector('div.ytp-error-content-wrap-subreason a[href*="www.youtube.com/watch?v="]')
                     ) location.reload()
                 }).observe(document.body, { childList: true, subtree:true });
-                `)}})})});var Rt={};te(Rt,{resolveRedirect:()=>pi});l();var Lr=require("https"),fi=/^https:\/\/(spotify\.link|s\.team)\/.+$/;function Nr(t){return new Promise((e,r)=>{let n=(0,Lr.request)(new URL(t),{method:"HEAD"},i=>{e(i.headers.location?Nr(i.headers.location):t)});n.on("error",r),n.end()})}async function pi(t,e){return fi.test(e)?Nr(e):e}var Ct={};te(Ct,{makeDeeplTranslateRequest:()=>di,makeKagiTranslateRequest:()=>hi});l();async function di(t,e,r,n){let i=e?"https://api.deepl.com/v2/translate":"https://api-free.deepl.com/v2/translate";try{let o=await fetch(i,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`DeepL-Auth-Key ${r}`},body:n}),s=await o.text();return{status:o.status,data:s}}catch(o){return{status:-1,data:String(o)}}}async function hi(t,e,r,n,i){let o="https://translate.kagi.com/api/translate";try{let s=await fetch(o,{method:"POST",headers:{"Content-Type":"application/json",Cookie:`kagi_session=${e}`},body:JSON.stringify({text:r,from:n,to:i,model:"standard"})}),a=await s.json();return{status:s.status,data:a}}catch(s){return{status:-1,data:String(s)}}}var Dt={};te(Dt,{readRecording:()=>mi});l();var Ur=require("electron"),Xe=require("fs/promises"),Le=require("path");async function mi(t,e){e=(0,Le.normalize)(e);let r=(0,Le.basename)(e),n=(0,Le.normalize)(Ur.app.getPath("userData")+"/");if(!/^\d*recording\.ogg$/.test(r)||!e.startsWith(n))return null;try{let i=await(0,Xe.readFile)(e);return(0,Xe.rm)(e).catch(()=>{}),new Uint8Array(i.buffer)}catch{return null}}var Pt={};te(Pt,{closeSocket:()=>gi,sendToOverlay:()=>vi});l();var Fr=require("dgram"),Qe=null;function vi(t,e){e.messageType=e.type;let r=JSON.stringify(e);Qe??=(0,Fr.createSocket)("udp4"),Qe.send(r,42069,"127.0.0.1")}function gi(){Qe?.close(),Qe=null}var $r={};l();var Vr=require("electron");l();var Mt=`"use strict";(()=>{if(window.adguardInjected)return;window.adguardInjected=!0;const c=["#__ffYoutube1","#__ffYoutube2","#__ffYoutube3","#__ffYoutube4","#feed-pyv-container","#feedmodule-PRO","#homepage-chrome-side-promo","#merch-shelf","#offer-module",'#pla-shelf > ytd-pla-shelf-renderer[class="style-scope ytd-watch"]',"#pla-shelf","#premium-yva","#promo-info","#promo-list","#promotion-shelf","#related > ytd-watch-next-secondary-results-renderer > #items > ytd-compact-promoted-video-renderer.ytd-watch-next-secondary-results-renderer","#search-pva","#shelf-pyv-container","#video-masthead","#watch-branded-actions","#watch-buy-urls","#watch-channel-brand-div","#watch7-branded-banner","#YtKevlarVisibilityIdentifier","#YtSparklesVisibilityIdentifier",".carousel-offer-url-container",".companion-ad-container",".GoogleActiveViewElement",'.list-view[style="margin: 7px 0pt;"]',".promoted-sparkles-text-search-root-container",".promoted-videos",".searchView.list-view",".sparkles-light-cta",".watch-extra-info-column",".watch-extra-info-right",".ytd-carousel-ad-renderer",".ytd-compact-promoted-video-renderer",".ytd-companion-slot-renderer",".ytd-merch-shelf-renderer",".ytd-player-legacy-desktop-watch-ads-renderer",".ytd-promoted-sparkles-text-search-renderer",".ytd-promoted-video-renderer",".ytd-search-pyv-renderer",".ytd-video-masthead-ad-v3-renderer",".ytp-ad-action-interstitial-background-container",".ytp-ad-action-interstitial-slot",".ytp-ad-image-overlay",".ytp-ad-overlay-container",".ytp-ad-progress",".ytp-ad-progress-list",'[class*="ytd-display-ad-"]','[layout*="display-ad-"]','a[href^="http://www.youtube.com/cthru?"]','a[href^="https://www.youtube.com/cthru?"]',"ytd-action-companion-ad-renderer","ytd-banner-promo-renderer","ytd-compact-promoted-video-renderer","ytd-companion-slot-renderer","ytd-display-ad-renderer","ytd-promoted-sparkles-text-search-renderer","ytd-promoted-sparkles-web-renderer","ytd-search-pyv-renderer","ytd-single-option-survey-renderer","ytd-video-masthead-ad-advertiser-info-renderer","ytd-video-masthead-ad-v3-renderer","YTM-PROMOTED-VIDEO-RENDERER"],l=()=>{const e=c;if(!e)return;const t=e.join(", ")+" { display: none!important; }",r=document.createElement("style");r.textContent=t,document.head.appendChild(r)},p=e=>{new MutationObserver(r=>{e(r)}).observe(document.documentElement,{childList:!0,subtree:!0})},a=()=>{const e=document.querySelectorAll("#contents > ytd-rich-item-renderer ytd-display-ad-renderer");e.length!==0&&e.forEach(t=>{if(t.parentNode&&t.parentNode.parentNode){const r=t.parentNode.parentNode;r.localName==="ytd-rich-item-renderer"&&(r.style.display="none")}})},s=()=>{if(document.querySelector(".ad-showing")){const e=document.querySelector("video");e&&e.duration&&(e.currentTime=e.duration,setTimeout(()=>{const t=document.querySelector("button.ytp-ad-skip-button");t&&t.click()},100))}},d=(e,t,r)=>{if(!e)return!1;let n=!1;for(const o in e)e.hasOwnProperty(o)&&o===t?(e[o]=r,n=!0):e.hasOwnProperty(o)&&typeof e[o]=="object"&&d(e[o],t,r)&&(n=!0);return n},i=(e,t)=>{const r=JSON.parse;JSON.parse=(...n)=>{const o=r.apply(this,n);return d(o,e,t),o},Response.prototype.json=new Proxy(Response.prototype.json,{async apply(...n){const o=await Reflect.apply(...n);return d(o,e,t),o}})};i("adPlacements",[]),i("playerAds",[]),l(),a(),s(),p(()=>{a(),s()})})();
-`;Vr.app.on("browser-window-created",(t,e)=>{e.webContents.on("frame-created",(r,{frame:n})=>{n?.once("dom-ready",()=>{A.store.plugins?.YoutubeAdblock?.enabled&&(n.url.includes("youtube.com/embed/")?n.executeJavaScript(Mt):n.parent?.url.includes("youtube.com/embed/")&&n.parent.executeJavaScript(Mt))})})});var Gt={};te(Gt,{answerOverlayAction:()=>To,armDisplayMedia:()=>so,checkUpdate:()=>Po,closeStudioOverlay:()=>xo,deleteClip:()=>Fi,disarmDisplayMedia:()=>ao,downloadUpdate:()=>_o,dropOverlayWaiters:()=>ko,focusClient:()=>Io,getActiveScreen:()=>oo,getCaptureSources:()=>no,getClipDirectory:()=>Qi,getMemoryReport:()=>io,getPlatformInfo:()=>ro,hideClipOverlay:()=>vo,listClips:()=>Ni,notifyClipSaved:()=>mo,openClipDirectory:()=>to,openStudioOverlay:()=>bo,pickAudioFiles:()=>Bi,pickClipDirectory:()=>eo,pickImageFiles:()=>Ki,pickVideoFiles:()=>Wi,readAudioFile:()=>Hi,readClip:()=>Ui,readImageFile:()=>Ji,readLibrary:()=>$i,readVideoFile:()=>ji,readVoiceTrack:()=>Oi,registerShortcuts:()=>lo,relaunchClient:()=>Oo,renameClip:()=>Vi,reserveClipPath:()=>Di,revealClip:()=>Xi,saveClip:()=>Ci,saveVoiceTrack:()=>_i,showClipOverlay:()=>ho,studioOverlayUp:()=>So,unregisterShortcuts:()=>Wt,waitForOverlayAction:()=>Eo,waitForShortcut:()=>uo,writeLibrary:()=>zi});l();var Qr=require("crypto"),g=require("electron"),f=require("fs"),en=require("https"),d=require("path");l();var q=require("electron"),rt=require("fs"),Ue=require("path"),zr=require("url"),et=24,Wr=2600,tt=220,yi=300,wi=56,_t=!0;function nt(){return _t}var se=null,ie=null,Ne=null,oe=null;function bi(){return!!se&&!se.isDestroyed()}function ae(){ie&&(clearTimeout(ie),ie=null);let t=se;se=null,t&&!t.isDestroyed()&&t.destroy()}function we(){oe&&(clearTimeout(oe),oe=null);let t=Ne;Ne=null,t&&!t.isDestroyed()&&t.destroy()}function xi(t,e,r){let i=q.screen.getDisplayNearestPoint(q.screen.getCursorScreenPoint()).workArea,o=t==="top-left"||t==="bottom-left",s=t==="top-left"||t==="top-right";return{x:Math.round(o?i.x+et:i.x+i.width-e-et),y:Math.round(s?i.y+et:i.y+i.height-r-et)}}function Fe(t,e){let r=(0,Ue.join)(q.app.getPath("userData"),"clipper-overlay");(0,rt.mkdirSync)(r,{recursive:!0});let n=(0,Ue.join)(r,t);return(0,rt.writeFileSync)(n,e,"utf8"),n}function Gr(t,e,r,n){let{x:i,y:o}=xi(n,e,r),s=new q.BrowserWindow({width:e,height:r,x:i,y:o,frame:!1,transparent:!0,backgroundColor:"#00000000",resizable:!1,movable:!1,minimizable:!1,maximizable:!1,fullscreenable:!1,skipTaskbar:!0,focusable:!1,hasShadow:!1,alwaysOnTop:!0,show:!1,webPreferences:{nodeIntegration:!1,contextIsolation:!0,sandbox:!0,backgroundThrottling:!1}});return s.setAlwaysOnTop(!0,"screen-saver"),s.setVisibleOnAllWorkspaces(!0,{visibleOnFullScreen:!0}),s.setIgnoreMouseEvents(!0,{forward:!0}),s.loadFile(t).then(()=>{s.isDestroyed()||s.showInactive()}).catch(()=>{s.isDestroyed()||s.destroy()}),s}function jr(t){return`<meta charset="utf-8">
+                `)}})})});var pn={};pe(pn,{resolveRedirect:()=>_o});c();var Pr=require("https"),Mo=/^https:\/\/(spotify\.link|s\.team)\/.+$/;function Ar(t){return new Promise((e,n)=>{let r=(0,Pr.request)(new URL(t),{method:"HEAD"},i=>{e(i.headers.location?Ar(i.headers.location):t)});r.on("error",n),r.end()})}async function _o(t,e){return Mo.test(e)?Ar(e):e}var fn={};pe(fn,{makeDeeplTranslateRequest:()=>Do,makeKagiTranslateRequest:()=>Lo});c();async function Do(t,e,n,r){let i=e?"https://api.deepl.com/v2/translate":"https://api-free.deepl.com/v2/translate";try{let o=await fetch(i,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`DeepL-Auth-Key ${n}`},body:r}),a=await o.text();return{status:o.status,data:a}}catch(o){return{status:-1,data:String(o)}}}async function Lo(t,e,n,r,i){let o="https://translate.kagi.com/api/translate";try{let a=await fetch(o,{method:"POST",headers:{"Content-Type":"application/json",Cookie:`kagi_session=${e}`},body:JSON.stringify({text:n,from:r,to:i,model:"standard"})}),s=await a.json();return{status:a.status,data:s}}catch(a){return{status:-1,data:String(a)}}}var hn={};pe(hn,{readRecording:()=>Oo});c();var Cr=require("electron"),Pt=require("fs/promises"),Qe=require("path");async function Oo(t,e){e=(0,Qe.normalize)(e);let n=(0,Qe.basename)(e),r=(0,Qe.normalize)(Cr.app.getPath("userData")+"/");if(!/^\d*recording\.ogg$/.test(n)||!e.startsWith(r))return null;try{let i=await(0,Pt.readFile)(e);return(0,Pt.rm)(e).catch(()=>{}),new Uint8Array(i.buffer)}catch{return null}}var mn={};pe(mn,{closeSocket:()=>Fo,sendToOverlay:()=>Vo});c();var Rr=require("dgram"),At=null;function Vo(t,e){e.messageType=e.type;let n=JSON.stringify(e);At??=(0,Rr.createSocket)("udp4"),At.send(n,42069,"127.0.0.1")}function Fo(){At?.close(),At=null}var _r={};c();var Mr=require("electron");c();var gn=`"use strict";(()=>{if(window.adguardInjected)return;window.adguardInjected=!0;const c=["#__ffYoutube1","#__ffYoutube2","#__ffYoutube3","#__ffYoutube4","#feed-pyv-container","#feedmodule-PRO","#homepage-chrome-side-promo","#merch-shelf","#offer-module",'#pla-shelf > ytd-pla-shelf-renderer[class="style-scope ytd-watch"]',"#pla-shelf","#premium-yva","#promo-info","#promo-list","#promotion-shelf","#related > ytd-watch-next-secondary-results-renderer > #items > ytd-compact-promoted-video-renderer.ytd-watch-next-secondary-results-renderer","#search-pva","#shelf-pyv-container","#video-masthead","#watch-branded-actions","#watch-buy-urls","#watch-channel-brand-div","#watch7-branded-banner","#YtKevlarVisibilityIdentifier","#YtSparklesVisibilityIdentifier",".carousel-offer-url-container",".companion-ad-container",".GoogleActiveViewElement",'.list-view[style="margin: 7px 0pt;"]',".promoted-sparkles-text-search-root-container",".promoted-videos",".searchView.list-view",".sparkles-light-cta",".watch-extra-info-column",".watch-extra-info-right",".ytd-carousel-ad-renderer",".ytd-compact-promoted-video-renderer",".ytd-companion-slot-renderer",".ytd-merch-shelf-renderer",".ytd-player-legacy-desktop-watch-ads-renderer",".ytd-promoted-sparkles-text-search-renderer",".ytd-promoted-video-renderer",".ytd-search-pyv-renderer",".ytd-video-masthead-ad-v3-renderer",".ytp-ad-action-interstitial-background-container",".ytp-ad-action-interstitial-slot",".ytp-ad-image-overlay",".ytp-ad-overlay-container",".ytp-ad-progress",".ytp-ad-progress-list",'[class*="ytd-display-ad-"]','[layout*="display-ad-"]','a[href^="http://www.youtube.com/cthru?"]','a[href^="https://www.youtube.com/cthru?"]',"ytd-action-companion-ad-renderer","ytd-banner-promo-renderer","ytd-compact-promoted-video-renderer","ytd-companion-slot-renderer","ytd-display-ad-renderer","ytd-promoted-sparkles-text-search-renderer","ytd-promoted-sparkles-web-renderer","ytd-search-pyv-renderer","ytd-single-option-survey-renderer","ytd-video-masthead-ad-advertiser-info-renderer","ytd-video-masthead-ad-v3-renderer","YTM-PROMOTED-VIDEO-RENDERER"],l=()=>{const e=c;if(!e)return;const t=e.join(", ")+" { display: none!important; }",r=document.createElement("style");r.textContent=t,document.head.appendChild(r)},p=e=>{new MutationObserver(r=>{e(r)}).observe(document.documentElement,{childList:!0,subtree:!0})},a=()=>{const e=document.querySelectorAll("#contents > ytd-rich-item-renderer ytd-display-ad-renderer");e.length!==0&&e.forEach(t=>{if(t.parentNode&&t.parentNode.parentNode){const r=t.parentNode.parentNode;r.localName==="ytd-rich-item-renderer"&&(r.style.display="none")}})},s=()=>{if(document.querySelector(".ad-showing")){const e=document.querySelector("video");e&&e.duration&&(e.currentTime=e.duration,setTimeout(()=>{const t=document.querySelector("button.ytp-ad-skip-button");t&&t.click()},100))}},d=(e,t,r)=>{if(!e)return!1;let n=!1;for(const o in e)e.hasOwnProperty(o)&&o===t?(e[o]=r,n=!0):e.hasOwnProperty(o)&&typeof e[o]=="object"&&d(e[o],t,r)&&(n=!0);return n},i=(e,t)=>{const r=JSON.parse;JSON.parse=(...n)=>{const o=r.apply(this,n);return d(o,e,t),o},Response.prototype.json=new Proxy(Response.prototype.json,{async apply(...n){const o=await Reflect.apply(...n);return d(o,e,t),o}})};i("adPlacements",[]),i("playerAds",[]),l(),a(),s(),p(()=>{a(),s()})})();
+`;Mr.app.on("browser-window-created",(t,e)=>{e.webContents.on("frame-created",(n,{frame:r})=>{r?.once("dom-ready",()=>{C.store.plugins?.YoutubeAdblock?.enabled&&(r.url.includes("youtube.com/embed/")?r.executeJavaScript(gn):r.parent?.url.includes("youtube.com/embed/")&&r.parent.executeJavaScript(gn))})})});var On={};pe(On,{answerOverlayAction:()=>_s,armDisplayMedia:()=>rs,checkUpdate:()=>Ns,closeStudioOverlay:()=>As,deleteClip:()=>Oa,disarmDisplayMedia:()=>is,downloadUpdate:()=>Gs,dropOverlayWaiters:()=>Ms,focusClient:()=>Ds,gameFeedStatus:()=>us,getActiveScreen:()=>ns,getCaptureSources:()=>es,getClipDirectory:()=>Ya,getMemoryReport:()=>ts,getPlatformInfo:()=>Qa,hideClipOverlay:()=>ks,hideVrPanel:()=>vs,listClips:()=>Da,notifyClipSaved:()=>xs,openClipDirectory:()=>Xa,openStudioOverlay:()=>Ps,openVrBindings:()=>ms,pickAudioFiles:()=>za,pickClipDirectory:()=>Ja,pickImageFiles:()=>Ba,pickVideoFiles:()=>Ua,readAudioFile:()=>ja,readClip:()=>La,readImageFile:()=>Za,readLibrary:()=>Fa,readVideoFile:()=>$a,readVoiceTrack:()=>Ma,registerShortcuts:()=>as,relaunchClient:()=>$s,renameClip:()=>Va,reserveClipPath:()=>Pa,revealClip:()=>qa,saveClip:()=>Ta,saveVoiceTrack:()=>Ra,showClipOverlay:()=>Ss,showVrPanel:()=>gs,startGameFeeds:()=>ls,startVrBridge:()=>ps,stopGameFeeds:()=>cs,stopVrBridge:()=>fs,studioOverlayUp:()=>Cs,unregisterShortcuts:()=>Ln,vrBridgeStatus:()=>hs,waitForGameEvent:()=>ds,waitForOverlayAction:()=>Rs,waitForShortcut:()=>ss,waitForVrEvent:()=>ys,writeLibrary:()=>Na});c();var wi=require("crypto"),v=require("electron"),p=require("fs"),bi=require("https"),f=require("path");c();var z=require("fs"),Or=require("http"),Vr=require("https"),Fr=require("os"),ot=require("path"),Dr=34765,No=6,Nr=256*1024,Uo=2e3,Go=1500,$o="127.0.0.1",zo=2999,Wo="gamestate_integration_clipper.cfg",re=null,_e=0,Rt="",De=null,rt=[],jo=12,it=[],Le=[],Oe={cs2:!1,league:!1};function Mt(t){rt.length>=jo||rt.includes(t)||rt.push(t)}var _t=Promise.resolve();function et(t){let e=Le.shift();if(e){e(t);return}it.push(t),it.length>16&&it.shift()}var S={kills:-1,deaths:-1,round:-1,roundKills:0,announced:0};function Ur(){S={kills:-1,deaths:-1,round:-1,roundKills:0,announced:0}}function Bo(t){return t>=5?"an ace in Counter-Strike 2":t===4?"a 4K in Counter-Strike 2":"a 3K in Counter-Strike 2"}function Ho(t){let e=t.provider?.steamid,{player:n}=t;if(!n||!e||!n.steamid||n.steamid!==e)return;let r=n.match_stats;if(!r||typeof r.kills!="number"||typeof r.deaths!="number")return;let i=typeof t.map?.round=="number"?t.map.round:S.round;(r.kills<S.kills||r.deaths<S.deaths)&&Ur();let o=S.kills<0;i!==S.round&&(S.round=i,S.roundKills=0,S.announced=0);let a=r.kills-Math.max(0,S.kills),s=r.deaths-Math.max(0,S.deaths);if(S.kills=r.kills,S.deaths=r.deaths,o)return;a>0&&(S.roundKills+=a,S.roundKills>=3&&S.roundKills>S.announced?(S.announced=S.roundKills,et({kind:"multikill",note:Bo(S.roundKills)})):et({kind:"kill",note:a>1?"a double kill in Counter-Strike 2":"a kill in Counter-Strike 2"})),s>0&&et({kind:"death",note:"your death in Counter-Strike 2"});let l=t.round?.win_team;l&&n.team&&l===n.team&&t.round?.phase==="over"&&S.roundKills>0&&et({kind:"roundwin",note:"a round you won in Counter-Strike 2"})}function Ko(){return new Promise(t=>{let e=0,n=(0,Or.createServer)((r,i)=>{if(r.method!=="POST"){i.writeHead(405).end();return}let o="",a=!1;r.setEncoding("utf8"),r.on("data",s=>{a||(o+=s,o.length>Nr&&(a=!0,o="",r.destroy()))}),r.on("end",()=>{if(i.writeHead(200).end(),!a)try{Ho(JSON.parse(o))}catch{}}),r.on("error",()=>{})});n.on("error",r=>{if(r.code==="EADDRINUSE"&&++e<No){n.listen(Dr+e,"127.0.0.1");return}Mt(`The Counter-Strike listener could not open a port (${r.code??r.message})`);try{n.close()}catch{}re===n&&(re=null,_e=0,Oe={...Oe,cs2:!1}),t(0)}),n.on("listening",()=>{re=n,t(n.address().port)}),n.listen(Dr,"127.0.0.1")})}function Zo(){let t=[],e=(0,Fr.homedir)();{let r=[process.env["ProgramFiles(x86)"],process.env.ProgramW6432,process.env.ProgramFiles];for(let i of r)i&&t.push((0,ot.join)(i,"Steam"))}let n=[];for(let r of t)if((0,z.existsSync)(r)){n.push(r);try{let i=(0,z.readFileSync)((0,ot.join)(r,"steamapps","libraryfolders.vdf"),"utf8");for(let o of i.matchAll(/"path"\s+"([^"]+)"/g)){let a=o[1].replace(/\\\\/g,"\\");a&&!n.includes(a)&&n.push(a)}}catch{}}return n}function qo(){for(let t of Zo()){let e=(0,ot.join)(t,"steamapps","common","Counter-Strike Global Offensive","game","csgo","cfg");if((0,z.existsSync)(e))return e}return""}function Yo(t){let e=qo();if(!e)return Mt("Counter-Strike 2 is not installed where Steam usually puts it, so its config was not written"),"";let n=(0,ot.join)(e,Wo),r=`"Clipper"
+{
+    "uri"       "http://127.0.0.1:${t}/"
+    "timeout"   "5.0"
+    "buffer"    "0.1"
+    "throttle"  "0.5"
+    "heartbeat" "60.0"
+    "auth"      { }
+    "data"
+    {
+        "provider"           "1"
+        "player_id"          "1"
+        "player_state"       "1"
+        "player_match_stats" "1"
+        "map"                "1"
+        "round"              "1"
+    }
+}
+`;try{return(0,z.mkdirSync)(e,{recursive:!0}),(0,z.writeFileSync)(n,r,"utf8"),n}catch(i){return Mt(`Counter-Strike 2's config could not be written (${i.message})`),""}}function Jo(){let t=Rt;if(Rt="",!!t)try{(0,z.unlinkSync)(t)}catch{}}var tt="",Me=-1,vn=!1,Ct=!1;function nt(t){return t.split("#")[0].trim().toLowerCase()}function Lr(t){return new Promise(e=>{let n=(0,Vr.get)({host:$o,port:zo,path:t,rejectUnauthorized:!1,timeout:Go},r=>{if(r.statusCode!==200){r.resume(),e(null);return}let i="";r.setEncoding("utf8"),r.on("data",o=>{i+=o,i.length>Nr&&n.destroy()}),r.on("end",()=>{try{e(JSON.parse(i))}catch{e(null)}})});n.on("timeout",()=>n.destroy()),n.on("error",()=>e(null))})}function Xo(t,e){let n=t.EventName??"",r=nt(t.KillerName??"");switch(n){case"ChampionKill":return r===e?{kind:"kill",note:"a kill in League of Legends"}:nt(t.VictimName??"")===e?{kind:"death",note:"your death in League of Legends"}:null;case"Multikill":return r!==e?null:{kind:"multikill",note:`a ${t.KillStreak??3}-kill run in League of Legends`};case"Ace":return nt(t.Acer??"")!==e?null:{kind:"multikill",note:"an ace in League of Legends"};case"FirstBlood":return nt(t.Recipient??"")!==e?null:{kind:"kill",note:"first blood in League of Legends"};case"DragonKill":return r!==e?null:{kind:"objective",note:`${t.DragonType?`the ${t.DragonType.toLowerCase()} dragon`:"a dragon"} in League of Legends`};case"BaronKill":return r!==e?null:{kind:"objective",note:"baron in League of Legends"};case"HeraldKill":return r!==e?null:{kind:"objective",note:"the herald in League of Legends"};case"TurretKilled":case"InhibKilled":return r!==e?null:{kind:"objective",note:"a structure in League of Legends"};default:return null}}async function Qo(){if(!Ct){Ct=!0;try{if(!tt){let r=await Lr("/liveclientdata/activeplayername");if(typeof r!="string"||!r)return;tt=nt(r),Me=-1}let t=await Lr("/liveclientdata/eventdata");if(!t?.Events){tt="";return}let e=Me<0,n=Me;for(let r of t.Events){let i=typeof r.EventID=="number"?r.EventID:-1;if(i<=Me||(n=Math.max(n,i),e))continue;let o=Xo(r,tt);o&&et(o)}Me=n}finally{Ct=!1}}}function ea(){tt="",Me=-1,Ct=!1,De=setInterval(()=>{Qo().catch(t=>{vn||(vn=!0,Mt(`League of Legends could not be read (${t.message})`))})},Uo)}function ta(t){return t.cs2!==Oe.cs2||t.league!==Oe.league?!1:(!t.cs2||re!==null)&&(!t.league||De!==null)}function Gr(t){let e=_t.then(async()=>(ta(t)||($r(),rt=[],t.cs2&&(Ur(),_e=await Ko(),_e&&(Rt=Yo(_e))),t.league&&ea(),Oe={cs2:t.cs2&&re!==null,league:t.league}),Dt()));return _t=e.catch(()=>{}),e}function $r(){if(Oe={cs2:!1,league:!1},De&&clearInterval(De),De=null,vn=!1,re)try{re.close()}catch{}re=null,_e=0,Jo(),it=[];let t=Le;Le=[];for(let e of t)e(null)}function yn(){let t=_t.then(()=>$r());return _t=t.catch(()=>{}),t}function Dt(){return{port:_e,configPath:Rt,league:De!==null,problems:[...rt]}}function zr(t){let e=it.shift();return e?Promise.resolve(e):new Promise(n=>{let r=!1,i=a=>{r||(r=!0,clearTimeout(o),n(a))},o=setTimeout(()=>{Le=Le.filter(a=>a!==i),i(null)},t);Le.push(i)})}c();var ie=require("electron"),Vt=require("fs"),st=require("path"),Wr=require("url"),Lt=24,jr=2600,Ot=220,na=300,ra=56,wn=!0;function Ft(){return wn}var ve=null,me=null,at=null,ge=null;function ia(){return!!ve&&!ve.isDestroyed()}function ye(){me&&(clearTimeout(me),me=null);let t=ve;ve=null,t&&!t.isDestroyed()&&t.destroy()}function Ve(){ge&&(clearTimeout(ge),ge=null);let t=at;at=null,t&&!t.isDestroyed()&&t.destroy()}function oa(t,e,n){let i=ie.screen.getDisplayNearestPoint(ie.screen.getCursorScreenPoint()).workArea,o=t==="top-left"||t==="bottom-left",a=t==="top-left"||t==="top-right";return{x:Math.round(o?i.x+Lt:i.x+i.width-e-Lt),y:Math.round(a?i.y+Lt:i.y+i.height-n-Lt)}}function lt(t,e){let n=(0,st.join)(ie.app.getPath("userData"),"clipper-overlay");(0,Vt.mkdirSync)(n,{recursive:!0});let r=(0,st.join)(n,t);return(0,Vt.writeFileSync)(r,e,"utf8"),r}function Br(t,e,n,r){let{x:i,y:o}=oa(r,e,n),a=new ie.BrowserWindow({width:e,height:n,x:i,y:o,frame:!1,transparent:!0,backgroundColor:"#00000000",resizable:!1,movable:!1,minimizable:!1,maximizable:!1,fullscreenable:!1,skipTaskbar:!0,focusable:!1,hasShadow:!1,alwaysOnTop:!0,show:!1,webPreferences:{nodeIntegration:!1,contextIsolation:!0,sandbox:!0,backgroundThrottling:!1}});return a.setAlwaysOnTop(!0,"screen-saver"),a.setVisibleOnAllWorkspaces(!0,{visibleOnFullScreen:!0}),a.setIgnoreMouseEvents(!0,{forward:!0}),a.loadFile(t).then(()=>{a.isDestroyed()||a.showInactive()}).catch(()=>{a.isDestroyed()||a.destroy()}),a}function Hr(t){return`<meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; media-src file:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
 <style>
     html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
     .card {
         position: absolute; inset: 0; border-radius: 12px; overflow: hidden;
         border: 1px solid rgba(255, 255, 255, 0.14); box-shadow: 0 10px 34px rgba(0, 0, 0, 0.6);
-        opacity: 0; transform: scale(0.96); transition: opacity ${tt}ms ease, transform ${tt}ms ease;
+        opacity: 0; transform: scale(0.96); transition: opacity ${Ot}ms ease, transform ${Ot}ms ease;
     }
     .card.up { opacity: 1; transform: none; }
     ${t}
-</style>`}function V(t){return JSON.stringify(t).replace(/</g,"\\u003c")}function Si(t,e){return`<!doctype html>
+</style>`}function B(t){return JSON.stringify(t).replace(/</g,"\\u003c")}function aa(t,e){return`<!doctype html>
 <html>
 <head>
-${jr(`.card { background: #000; }
+${Hr(`.card { background: #000; }
     video { display: block; width: 100%; height: 100%; object-fit: cover; }
     .tag {
         position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 10px 7px;
@@ -48,17 +66,17 @@ ${jr(`.card { background: #000; }
     <div class="tag" id="tag"></div>
 </div>
 <script>
-    var look = ${V(e)};
+    var look = ${B(e)};
     var video = document.getElementById("video");
     var card = document.getElementById("card");
-    document.getElementById("tag").textContent = ${V((0,Ue.basename)(t))};
+    document.getElementById("tag").textContent = ${B((0,st.basename)(t))};
 
     var leaving = false;
     function leave() {
         if (leaving) return;
         leaving = true;
         card.classList.remove("up");
-        setTimeout(function () { window.close(); }, ${tt});
+        setTimeout(function () { window.close(); }, ${Ot});
     }
 
     // The last seconds of the clip are the ones worth seeing: a save keeps the
@@ -75,7 +93,7 @@ ${jr(`.card { background: #000; }
     video.volume = Math.max(0, Math.min(1, look.volume / 100));
     video.muted = look.volume <= 0;
 
-    video.src = ${V((0,zr.pathToFileURL)(t).href)};
+    video.src = ${B((0,Wr.pathToFileURL)(t).href)};
 
     // Autoplay with sound is only allowed after a gesture, and this window
     // never gets one. Muted playback is always allowed, so it is the fallback
@@ -86,10 +104,10 @@ ${jr(`.card { background: #000; }
     });
 </script>
 </body>
-</html>`}function Ei(t,e){return`<!doctype html>
+</html>`}function sa(t,e){return`<!doctype html>
 <html>
 <head>
-${jr(`.card {
+${Hr(`.card {
         background: rgba(20, 21, 24, 0.92); display: flex; align-items: center; gap: 10px; padding: 0 14px;
         font: 12px/1.3 "gg sans", "Segoe UI", system-ui, sans-serif; color: #fff;
     }
@@ -108,29 +126,29 @@ ${jr(`.card {
 </div>
 <script>
     var card = document.getElementById("card");
-    document.getElementById("title").textContent = ${V(t)};
-    document.getElementById("note").textContent = ${V(e)};
+    document.getElementById("title").textContent = ${B(t)};
+    document.getElementById("note").textContent = ${B(e)};
 
     requestAnimationFrame(function () { card.classList.add("up"); });
 
     setTimeout(function () {
         card.classList.remove("up");
-        setTimeout(function () { window.close(); }, ${tt});
-    }, ${Wr});
+        setTimeout(function () { window.close(); }, ${Ot});
+    }, ${jr});
 </script>
 </body>
-</html>`}function Br(t,e){if(!_t)return!1;ae(),we();let r=Math.max(200,Math.round(e.width)),n=Math.round(r*9/16),i=Gr(Fe("clip.html",Si(t,e)),r,n,e.corner);se=i,i.on("closed",()=>{se===i&&(se=null,ie&&(clearTimeout(ie),ie=null))});let o=(e.seconds>0?e.seconds:300)+10;return ie=setTimeout(()=>ae(),o*1e3),!0}function Zr(t,e,r){if(!_t||bi())return!1;we();let n=Gr(Fe("toast.html",Ei(t,e)),yi,wi,r);return Ne=n,n.on("closed",()=>{Ne===n&&(Ne=null,oe&&(clearTimeout(oe),oe=null))}),oe=setTimeout(()=>we(),Wr+4e3),!0}q.app.on("will-quit",()=>{ae(),we()});l();var $=require("electron"),Hr=require("url");var Ot="VencordClipperOverlayAction",Kr="VencordClipperOverlayReply",ki=108,R=null;function Lt(){return!!R&&!R.isDestroyed()}function $e(){let t=R;R=null,t&&!t.isDestroyed()&&t.destroy()}var be=[],Ve=[];function Ti(t){let e=be.shift();if(e){e(t);return}Ve.push(t),Ve.length>4&&Ve.shift()}function Yr(t){let e=Ve.shift();return e?Promise.resolve(e):new Promise(r=>{let n=!1,i=s=>{n||(n=!0,clearTimeout(o),r(s))},o=setTimeout(()=>{be=be.filter(s=>s!==i),i(null)},t);be.push(i)})}function qr(){Ve=[];let t=be;be=[];for(let e of t)e(null)}function Jr(t){!R||R.isDestroyed()||R.webContents.send(Kr,t)}$.ipcMain.removeAllListeners(Ot);$.ipcMain.on(Ot,(t,e,r)=>{if(!R||R.isDestroyed()||t.sender!==R.webContents)return;let n=String(e??"");if(n==="close"){$e();return}if(n!=="cut"&&n!=="send"&&n!=="delete"&&n!=="open")return;let i=r??{},o=Number(i.from),s=Number(i.to);Ti({kind:n,clip:String(i.clip??""),from:Number.isFinite(o)?Math.max(0,o):0,to:Number.isFinite(s)?Math.max(0,s):0})});function Ii(t,e){let{workArea:r}=$.screen.getDisplayNearestPoint($.screen.getCursorScreenPoint());return{x:Math.round(r.x+(r.width-t)/2),y:Math.round(r.y+(r.height-e)/2)}}var Ai=`"use strict";
+</html>`}function Kr(t,e){if(!wn)return!1;ye(),Ve();let n=Math.max(200,Math.round(e.width)),r=Math.round(n*9/16),i=Br(lt("clip.html",aa(t,e)),n,r,e.corner);ve=i,i.on("closed",()=>{ve===i&&(ve=null,me&&(clearTimeout(me),me=null))});let o=(e.seconds>0?e.seconds:300)+10;return me=setTimeout(()=>ye(),o*1e3),!0}function Zr(t,e,n){if(!wn||ia())return!1;Ve();let r=Br(lt("toast.html",sa(t,e)),na,ra,n);return at=r,r.on("closed",()=>{at===r&&(at=null,ge&&(clearTimeout(ge),ge=null))}),ge=setTimeout(()=>Ve(),jr+4e3),!0}ie.app.on("will-quit",()=>{ye(),Ve()});c();var H=require("electron"),qr=require("url");var bn="VencordClipperOverlayAction",Yr="VencordClipperOverlayReply",la=108,R=null;function Sn(){return!!R&&!R.isDestroyed()}function ut(){let t=R;R=null,t&&!t.isDestroyed()&&t.destroy()}var Fe=[],ct=[];function ca(t){let e=Fe.shift();if(e){e(t);return}ct.push(t),ct.length>4&&ct.shift()}function Jr(t){let e=ct.shift();return e?Promise.resolve(e):new Promise(n=>{let r=!1,i=a=>{r||(r=!0,clearTimeout(o),n(a))},o=setTimeout(()=>{Fe=Fe.filter(a=>a!==i),i(null)},t);Fe.push(i)})}function Xr(){ct=[];let t=Fe;Fe=[];for(let e of t)e(null)}function Qr(t){!R||R.isDestroyed()||R.webContents.send(Yr,t)}H.ipcMain.removeAllListeners(bn);H.ipcMain.on(bn,(t,e,n)=>{if(!R||R.isDestroyed()||t.sender!==R.webContents)return;let r=String(e??"");if(r==="close"){ut();return}if(r!=="cut"&&r!=="send"&&r!=="delete"&&r!=="open")return;let i=n??{},o=Number(i.from),a=Number(i.to);ca({kind:r,clip:String(i.clip??""),from:Number.isFinite(o)?Math.max(0,o):0,to:Number.isFinite(a)?Math.max(0,a):0})});function ua(t,e){let{workArea:n}=H.screen.getDisplayNearestPoint(H.screen.getCursorScreenPoint());return{x:Math.round(n.x+(n.width-t)/2),y:Math.round(n.y+(n.height-e)/2)}}var da=`"use strict";
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("clipper", {
     act(kind, payload) {
-        ipcRenderer.send(${V(Ot)}, String(kind), payload);
+        ipcRenderer.send(${B(bn)}, String(kind), payload);
     },
     onReply(handler) {
-        ipcRenderer.on(${V(Kr)}, (_event, reply) => handler(reply));
+        ipcRenderer.on(${B(Yr)}, (_event, reply) => handler(reply));
     }
 });
-`;function Ri(t,e){return`<!doctype html>
+`;function pa(t,e){return`<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -216,8 +234,8 @@ contextBridge.exposeInMainWorld("clipper", {
     </div>
 </div>
 <script>
-    var clip = ${V({name:t.name,url:(0,Hr.pathToFileURL)(t.path).href,markers:t.markers})};
-    var look = ${V(e)};
+    var clip = ${B({name:t.name,url:(0,qr.pathToFileURL)(t.path).href,markers:t.markers})};
+    var look = ${B(e)};
     var api = window.clipper;
 
     var el = {};
@@ -442,14 +460,901 @@ contextBridge.exposeInMainWorld("clipper", {
     draw();
 </script>
 </body>
-</html>`}function Xr(t,e){if(!nt())return!1;$e(),ae(),we();let r=Math.max(360,Math.round(e.width)),n=Math.round(r*9/16)+ki,{x:i,y:o}=Ii(r,n),s=Fe("studio-preload.js",Ai),a=Fe("studio.html",Ri(t,e)),c=new $.BrowserWindow({width:r,height:n,x:i,y:o,frame:!1,transparent:!0,backgroundColor:"#00000000",resizable:!1,movable:!1,minimizable:!1,maximizable:!1,fullscreenable:!1,skipTaskbar:!0,hasShadow:!1,alwaysOnTop:!0,show:!1,webPreferences:{preload:s,nodeIntegration:!1,contextIsolation:!0,sandbox:!0,backgroundThrottling:!1}});return R=c,c.setAlwaysOnTop(!0,"screen-saver"),c.setVisibleOnAllWorkspaces(!0,{visibleOnFullScreen:!0}),c.on("closed",()=>{R===c&&(R=null)}),c.loadFile(a).then(()=>{c.isDestroyed()||(c.show(),c.focus())}).catch(()=>{c.isDestroyed()||c.destroy()}),!0}$.app.on("will-quit",()=>$e());l();function ze(t){return`${t.replace(/\.(webm|mp4)$/i,"")}.thumb.jpg`}var tn=!0,$t=!1,rn=/vesktop|equibop/i.test(g.app.getName());function x(t){let e=t?.trim();return e&&(0,d.isAbsolute)(e)?e:(0,d.join)(g.app.getPath("videos"),"DiscordClips")}function Ee(t){let r=(0,d.basename)(String(t??"").replace(/[\\/]/g,"_")).trim().replace(/[<>:"|?*\x00-\x1f]/g,"_").replace(/^\.+/,""),n=/^([\w.\-+ ()[\]]{1,120})\.(webm|mp4|png|jpg|gif)$/i.exec(r);return n?`${n[1]}.${n[2].toLowerCase()}`:null}function ke(t){return Ee(t)??`clip-${Date.now()}.webm`}function zt(t,e){let r=(0,d.extname)(e),n=e.slice(0,e.length-r.length),i=(0,d.join)(t,e);for(let o=2;(0,f.existsSync)(i)&&o<1e3;o++)i=(0,d.join)(t,`${n} (${o})${r}`);return i}function Ci(t,e,r,n,i=!1){let o=x(e);(0,f.mkdirSync)(o,{recursive:!0});let s=ke(r),a=i?zt(o,s):(0,d.join)(o,s);return(0,f.writeFileSync)(a,Buffer.from(n)),a}function Di(t,e,r){let n=x(e);return(0,f.mkdirSync)(n,{recursive:!0}),zt(n,ke(r))}var it="voices";function Pi(t,e){let r=Ee(t);return!r||!/^\d{1,25}$/.test(String(e??""))?null:`${r.slice(0,r.length-(0,d.extname)(r).length)}.${e}.webm`}function Mi(t,e){let r=Ee(e);if(!r)return[];let n=(0,d.join)(x(t),it);if(!(0,f.existsSync)(n))return[];let i=`${r.slice(0,r.length-(0,d.extname)(r).length)}.`,o=[];for(let s of(0,f.readdirSync)(n,{withFileTypes:!0})){if(!s.isFile()||!s.name.startsWith(i)||!s.name.toLowerCase().endsWith(".webm"))continue;let a=s.name.slice(i.length,s.name.length-5);/^\d{1,25}$/.test(a)&&o.push({userId:a,file:s.name})}return o}function _i(t,e,r,n,i){let o=Pi(r,n);if(!o)return null;let s=(0,d.join)(x(e),it);(0,f.mkdirSync)(s,{recursive:!0});let a=(0,d.join)(s,o);return(0,f.writeFileSync)(a,Buffer.from(i)),a}function Oi(t,e,r){let n=(0,d.basename)(String(r??"").replace(/[\\/]/g,"_"));if(!n.toLowerCase().endsWith(".webm")||n.includes(".."))throw new Error("not a voice track");return new Uint8Array((0,f.readFileSync)((0,d.join)(x(e),it,n)))}function Li(t,e){let r=(0,d.join)(x(t),it);for(let{file:n}of Mi(t,e))try{(0,f.unlinkSync)((0,d.join)(r,n))}catch{}}function Ni(t,e){let r=x(e);if(!(0,f.existsSync)(r))return[];let n=[],i=new Set,o=(0,f.readdirSync)(r,{withFileTypes:!0});for(let s of o)s.isFile()&&i.add(s.name);for(let s of o){if(!s.isFile()||!/\.(webm|mp4)$/i.test(s.name))continue;let a=(0,d.join)(r,s.name);try{let c=(0,f.statSync)(a),p=ze(s.name);n.push({name:s.name,path:a,size:c.size,modified:c.mtimeMs,...i.has(p)?{thumb:p}:{}})}catch{}}return n.sort((s,a)=>a.modified-s.modified)}function Ui(t,e,r){let n=(0,d.join)(x(e),ke(r));return new Uint8Array((0,f.readFileSync)(n))}async function Fi(t,e,r){let n=x(e),i=ke(r),o=(0,d.join)(n,i);try{await g.shell.trashItem(o)}catch{(0,f.unlinkSync)(o)}Li(e,i);let s=(0,d.join)(n,ze(i));if((0,f.existsSync)(s))try{await g.shell.trashItem(s)}catch{try{(0,f.unlinkSync)(s)}catch{}}}function Vi(t,e,r,n){let i=x(e),o=ke(r),s=(0,d.join)(i,o),a=(0,d.extname)(o),c=Ee(n.toLowerCase().endsWith(a)?n:n+a);if(!c)throw new Error("That name cannot be used. Keep it under 120 characters, with letters, digits, spaces or - _ . + ( ) [ ]");if(c===o)return o;let h=c.toLowerCase()===o.toLowerCase()?(0,d.join)(i,c):zt(i,c);(0,f.renameSync)(s,h);let u=(0,d.join)(i,ze(o));if((0,f.existsSync)(u))try{(0,f.renameSync)(u,(0,d.join)(i,ze((0,d.basename)(h))))}catch{}return(0,d.basename)(h)}var nn="clipper-library.json";function $i(t,e){let r=(0,d.join)(x(e),nn);if(!(0,f.existsSync)(r))return"";try{return(0,f.readFileSync)(r,"utf8")}catch{return""}}function zi(t,e,r){let n=x(e);(0,f.mkdirSync)(n,{recursive:!0});let i=(0,d.join)(n,nn),o=`${i}.tmp`;(0,f.writeFileSync)(o,String(r??""),"utf8"),(0,f.renameSync)(o,i)}async function Wi(t){let e=await g.dialog.showOpenDialog({title:"Add videos to the timeline",properties:["openFile","multiSelections"],filters:[{name:"Video",extensions:["mp4","webm","mkv","mov","m4v"]}]});return e.canceled?[]:e.filePaths}var Gi=512*1024*1024;function ji(t,e){if(!(0,d.isAbsolute)(e)||!/\.(mp4|webm|mkv|mov|m4v)$/i.test(e))throw new Error("Not a video file");let r=(0,f.statSync)(e);if(r.size>Gi){let n=Math.round(r.size/1048576);throw new Error(`That video is ${n} MB; imports are capped at 512 MB. Trim it or lower its bitrate first.`)}return new Uint8Array((0,f.readFileSync)(e))}async function Bi(t){let e=await g.dialog.showOpenDialog({title:"Add sounds to the timeline",properties:["openFile","multiSelections"],filters:[{name:"Audio",extensions:["mp3","wav","ogg","opus","m4a","aac","flac","webm"]}]});return e.canceled?[]:e.filePaths}var Zi=64*1024*1024;function Hi(t,e){if(!(0,d.isAbsolute)(e)||!/\.(mp3|wav|ogg|opus|m4a|aac|flac|webm)$/i.test(e))throw new Error("Not an audio file");let r=(0,f.statSync)(e);if(r.size>Zi){let n=Math.round(r.size/1048576);throw new Error(`That sound is ${n} MB; the timeline caps them at 64 MB.`)}return new Uint8Array((0,f.readFileSync)(e))}async function Ki(t){let e=await g.dialog.showOpenDialog({title:"Add pictures and clips to the montage",properties:["openFile","multiSelections"],filters:[{name:"Pictures and clips",extensions:["png","jpg","jpeg","webp","gif","avif","bmp","mp4","webm"]},{name:"Pictures",extensions:["png","jpg","jpeg","webp","gif","avif","bmp"]},{name:"Clips",extensions:["mp4","webm"]}]});return e.canceled?[]:e.filePaths}var Yi=24*1024*1024,qi=64*1024*1024;function Ji(t,e){if(!(0,d.isAbsolute)(e)||!/\.(png|jpe?g|webp|gif|avif|bmp|mp4|webm)$/i.test(e))throw new Error("Not a picture or a clip");let r=/\.(mp4|webm)$/i.test(e),n=r?qi:Yi,i=(0,f.statSync)(e);if(i.size>n){let o=Math.round(i.size/1048576),s=Math.round(n/(1024*1024));throw new Error(`That ${r?"clip":"picture"} is ${o} MB; the montage caps them at ${s} MB.`)}return new Uint8Array((0,f.readFileSync)(e))}function Xi(t,e,r){g.shell.showItemInFolder((0,d.join)(x(e),ke(r)))}function Qi(t,e){return x(e)}async function eo(t,e){let r=await g.dialog.showOpenDialog({title:"Where should clips be saved?",defaultPath:x(e),properties:["openDirectory","createDirectory"]});return r.canceled?"":r.filePaths[0]??""}function to(t,e){let r=x(e);(0,f.mkdirSync)(r,{recursive:!0}),g.shell.openPath(r)}function ro(t){return{platform:"win32",wayland:$t,vesktop:rn,overlay:nt()}}var J=new Set;async function no(t,e=!0){if($t)return[];let r=await g.desktopCapturer.getSources({types:["screen","window"],thumbnailSize:e?{width:320,height:180}:{width:0,height:0},fetchWindowIcons:!1});if(J.size){let i=new Set(r.map(o=>o.id));for(let o of J)i.has(o)||J.delete(o)}let n=[];for(let i of r){let o=i.id.startsWith("screen:");if(!e){if(!o&&J.has(i.id))continue;n.push({id:i.id,name:i.name,thumbnail:""});continue}let s=i.thumbnail.isEmpty();if(tn&&!o&&s){J.add(i.id);continue}J.delete(i.id),n.push({id:i.id,name:i.name,thumbnail:s?"":i.thumbnail.toDataURL(),capturable:!0})}return n}async function io(t){try{return g.app.getAppMetrics().map(e=>({type:e.serviceName||e.type,mb:Math.round((e.memory?.workingSetSize??0)/1024)})).filter(e=>e.mb>0).sort((e,r)=>r.mb-e.mb)}catch{return[]}}async function oo(t){if($t)return"";let e=await g.desktopCapturer.getSources({types:["screen"],thumbnailSize:{width:0,height:0}});if(!e.length)return"";try{let r=g.screen.getDisplayNearestPoint(g.screen.getCursorScreenPoint()),n=e.find(i=>i.display_id===String(r.id));if(n)return n.id}catch{}return e[0].id}var Nt="",Ut=!1;function so(t,e,r=!0){return!r||rn?!1:(Nt=e??"",Ut=!0,g.session.defaultSession.setDisplayMediaRequestHandler(async(n,i)=>{let o=await g.desktopCapturer.getSources({types:["screen","window"],thumbnailSize:{width:0,height:0}}),s=o.find(p=>p.id===Nt),c=(s&&!J.has(s.id)?s:void 0)??o.find(p=>p.id.startsWith("screen:"))??o.find(p=>!J.has(p.id));if(!c){i({});return}i(tn&&c.id.startsWith("screen:")?{video:c,audio:"loopback"}:{video:c})},{useSystemPicker:!1}),!0)}function ao(t){Nt="",Ut&&(Ut=!1,g.session.defaultSession.setDisplayMediaRequestHandler(null))}var Ft=new Map,xe=[],We=[];function co(t){let e=xe.shift();if(e){e(t);return}We.push(t),We.length>8&&We.shift()}function lo(t,e){Wt();let r=[];for(let[n,i]of Object.entries(e)){if(!i)continue;let o=!1;try{o=g.globalShortcut.register(i,()=>co(n))}catch{o=!1}o?Ft.set(n,i):r.push(i)}return r}function Wt(t){for(let r of Ft.values())try{g.globalShortcut.unregister(r)}catch{}Ft.clear(),We=[];let e=xe;xe=[];for(let r of e)r(null)}function uo(t,e=3e4){let r=We.shift();return r?Promise.resolve(r):new Promise(n=>{let i=!1,o=a=>{i||(i=!0,clearTimeout(s),n(a))},s=setTimeout(()=>{xe=xe.filter(a=>a!==o),o(null)},e);xe.push(o)})}g.app.on("will-quit",()=>Wt());var fo=["top-left","top-right","bottom-left","bottom-right"];function Se(t,e,r,n){let i=Number(t);return Number.isFinite(i)?Math.min(r,Math.max(e,Math.round(i))):n}function on(t){return fo.includes(t)?t:"bottom-right"}function po(t){return{corner:on(t?.corner),width:Se(t?.width,200,1280,420),volume:Se(t?.volume,0,100,0),seconds:Se(t?.seconds,0,300,10)}}function Vt(t,e){return String(t??"").replace(/\s+/g," ").trim().slice(0,e)}function ho(t,e,r,n){let i=Ee(r);if(!i)return!1;let o=(0,d.join)(x(e),i);return(0,f.existsSync)(o)?Br(o,po(n)):!1}function mo(t,e,r,n){return g.BrowserWindow.getFocusedWindow()||Lt()?!1:Zr(Vt(e,60),Vt(r,90),on(n))}function vo(t){ae()}var go=200;function yo(t){return Array.isArray(t)?t.map(Number).filter(e=>Number.isFinite(e)&&e>=0).slice(0,go):[]}function wo(t){return{width:Se(t?.width,360,1600,720),volume:Se(t?.volume,0,100,0)}}function bo(t,e,r,n,i){let o=Ee(r);if(!o)return!1;let s=(0,d.join)(x(e),o);return(0,f.existsSync)(s)?Xr({name:o,path:s,markers:yo(n)},wo(i)):!1}function xo(t){$e()}function So(t){return Lt()}function Eo(t,e=3e4){return Yr(Se(e,1e3,12e4,3e4))}function ko(t){qr()}function To(t,e,r,n){Jr({ok:!!e,message:Vt(r,120),close:!!n})}function Io(t){let e=g.BrowserWindow.fromWebContents(t.sender);!e||e.isDestroyed()||(e.isMinimized()&&e.restore(),e.show(),e.focus())}var Ge="kebab1337420/vencord-clipper",Ao=`VencordClipper (+https://github.com/${Ge})`,Ro=["patcher.js","patcher.js.LEGAL.txt","preload.js","renderer.css","renderer.js","renderer.js.LEGAL.txt","vencordDesktopMain.js","vencordDesktopMain.js.LEGAL.txt","vencordDesktopPreload.js","vencordDesktopRenderer.css","vencordDesktopRenderer.js","vencordDesktopRenderer.js.LEGAL.txt"];function ot(t,e=0){return new Promise((r,n)=>{let i=(0,en.get)(t,{headers:{"User-Agent":Ao,Accept:"*/*"}},o=>{let s=o.statusCode??0,{location:a}=o.headers;if(s>=300&&s<400&&a){o.resume(),e>=5?n(new Error(`Too many redirects for ${t}`)):r(ot(new URL(a,t).toString(),e+1));return}let c=[];o.on("data",p=>c.push(p)),o.on("end",()=>r({status:s,body:Buffer.concat(c)})),o.on("error",n)});i.setTimeout(6e4,()=>i.destroy(new Error(`${t} timed out`))),i.on("error",n)})}async function Co(t){let{status:e,body:r}=await ot(t);if(e!==200)throw new Error(`${t} answered ${e}`);return r}function sn(){return __dirname}function an(t){return(0,f.existsSync)((0,d.join)(t,"patcher.js"))&&(0,f.existsSync)((0,d.join)(t,"renderer.js"))}function cn(t){try{return(0,f.accessSync)(t,f.constants.W_OK),!0}catch{return!1}}function Do(t,e){let r=o=>o.replace(/^v/i,"").split(/[.\-+]/).map(s=>Number(s)||0),n=r(t),i=r(e);for(let o=0;o<3;o++)if((n[o]??0)!==(i[o]??0))return(n[o]??0)>(i[o]??0);return!1}async function Po(t,e){let r=await Co(`https://api.github.com/repos/${Ge}/releases/latest`),n=JSON.parse(r.toString("utf8")),i=String(n.tag_name??""),o=i.replace(/^v/i,""),s=sn();return{version:o,tag:i,available:!!o&&Do(o,e),notes:String(n.body??"").trim().slice(0,1200),url:String(n.html_url??`https://github.com/${Ge}/releases`),directory:s,writable:an(s)&&cn(s)}}async function Mo(t){let{status:e,body:r}=await ot(`https://raw.githubusercontent.com/${Ge}/${t}/prebuilt/build-info.json`);if(e!==200)return null;try{let{files:n}=JSON.parse(r.toString("utf8"));return n&&typeof n=="object"?n:null}catch{return null}}async function _o(t,e){if(!/^[\w.-]{1,40}$/.test(e))throw new Error(`Refusing to fetch a release named ${e}`);let r=sn();if(!an(r))throw new Error(`No installed bundle at ${r}`);if(!cn(r))throw new Error(`${r} is read-only`);let n=await Mo(e),i=n?Object.keys(n):Ro,o=(0,d.join)(r,".clipper-update");(0,f.rmSync)(o,{recursive:!0,force:!0}),(0,f.mkdirSync)(o,{recursive:!0});try{let s=[];for(let a of i){if(a!==(0,d.basename)(a)||a.startsWith("."))throw new Error(`Refusing a release file named ${a}`);let{status:c,body:p}=await ot(`https://raw.githubusercontent.com/${Ge}/${e}/prebuilt/dist/${a}`);if(c===404&&!n)continue;if(c!==200)throw new Error(`${a} answered ${c}`);if(p.length===0)throw new Error(`${a} came back empty`);let h=n?.[a];if(h?.size!==void 0&&p.length!==h.size)throw new Error(`${a} is ${p.length} bytes, the release says ${h.size}`);if(h?.sha256&&(0,Qr.createHash)("sha256").update(p).digest("hex").toLowerCase()!==h.sha256.toLowerCase())throw new Error(`${a} does not match its hash`);(0,f.writeFileSync)((0,d.join)(o,a),p),s.push(a)}if(s.length===0)throw new Error(`There is no bundle published under ${e}`);for(let a of["renderer.js","patcher.js"])if(!s.includes(a))throw new Error(`The release carries no ${a}`);if(!(0,f.readFileSync)((0,d.join)(o,"renderer.js")).includes("Clipper"))throw new Error("There is no Clipper in that release's renderer");for(let a of s)(0,f.renameSync)((0,d.join)(o,a),(0,d.join)(r,a));return s}finally{(0,f.rmSync)(o,{recursive:!0,force:!0})}}function Oo(t){g.app.relaunch(),g.app.quit(),setTimeout(()=>g.app.exit(0),3e3)}var ln={AppleMusicRichPresence:xt,ConsoleShortcuts:St,FixSpotifyEmbeds:Mr,FixYoutubeEmbeds:Or,OpenInApp:Rt,Translate:Ct,VoiceMessages:Dt,XSOverlay:Pt,YoutubeAdblock:$r,Clipper:Gt};var un={};for(let[t,e]of Object.entries(ln)){let r=Object.entries(e);if(!r.length)continue;let n=un[t]={};for(let[i,o]of r){let s=`VencordPluginNative_${t}_${i}`;jt.ipcMain.handle(s,o),n[i]=s}}jt.ipcMain.on("VencordGetPluginIpcMethodMap",t=>{t.returnValue=un});l();function Bt(t,e=300){let r;return function(...n){clearTimeout(r),r=setTimeout(()=>{t(...n)},e)}}ve();var w=require("electron");l();var fn="PCFkb2N0eXBlIGh0bWw+PGh0bWwgbGFuZz0iZW4iPjxoZWFkPjxtZXRhIGNoYXJzZXQ9InV0Zi04Ij48dGl0bGU+VmVuY29yZCBRdWlja0NTUyBFZGl0b3I8L3RpdGxlPjxsaW5rIHJlbD0ic3R5bGVzaGVldCIgaHJlZj0iaHR0cHM6Ly9jZG4uanNkZWxpdnIubmV0L25wbS9tb25hY28tZWRpdG9yQDAuNTAuMC9taW4vdnMvZWRpdG9yL2VkaXRvci5tYWluLmNzcyIgaW50ZWdyaXR5PSJzaGEyNTYtdGlKUFEyTzA0ei9wWi9Bd2R5SWdock9NemV3ZitQSXZFbDFZS2JRdnNaaz0iIGNyb3Nzb3JpZ2luPSJhbm9ueW1vdXMiIHJlZmVycmVycG9saWN5PSJuby1yZWZlcnJlciI+PHN0eWxlPiNjb250YWluZXIsYm9keSxodG1se3Bvc2l0aW9uOmFic29sdXRlO2xlZnQ6MDt0b3A6MDt3aWR0aDoxMDAlO2hlaWdodDoxMDAlO21hcmdpbjowO3BhZGRpbmc6MDtvdmVyZmxvdzpoaWRkZW59PC9zdHlsZT48L2hlYWQ+PGJvZHk+PGRpdiBpZD0iY29udGFpbmVyIj48L2Rpdj48c2NyaXB0IHNyYz0iaHR0cHM6Ly9jZG4uanNkZWxpdnIubmV0L25wbS9tb25hY28tZWRpdG9yQDAuNTAuMC9taW4vdnMvbG9hZGVyLmpzIiBpbnRlZ3JpdHk9InNoYTI1Ni1LY1U0OFRHcjg0cjd1bkY3SjVJZ0JvOTVhZVZyRWJyR2UwNFM3VGNGVWpzPSIgY3Jvc3NvcmlnaW49ImFub255bW91cyIgcmVmZXJyZXJwb2xpY3k9Im5vLXJlZmVycmVyIj48L3NjcmlwdD48c2NyaXB0PnJlcXVpcmUuY29uZmlnKHtwYXRoczp7dnM6Imh0dHBzOi8vY2RuLmpzZGVsaXZyLm5ldC9ucG0vbW9uYWNvLWVkaXRvckAwLjUwLjAvbWluL3ZzIn19KSxyZXF1aXJlKFsidnMvZWRpdG9yL2VkaXRvci5tYWluIl0sKCgpPT57Z2V0Q3VycmVudENzcygpLnRoZW4oKGU9Pnt2YXIgdD1tb25hY28uZWRpdG9yLmNyZWF0ZShkb2N1bWVudC5nZXRFbGVtZW50QnlJZCgiY29udGFpbmVyIikse3ZhbHVlOmUsbGFuZ3VhZ2U6ImNzcyIsdGhlbWU6Z2V0VGhlbWUoKX0pO3Qub25EaWRDaGFuZ2VNb2RlbENvbnRlbnQoKCgpPT5zZXRDc3ModC5nZXRWYWx1ZSgpKSkpLHdpbmRvdy5hZGRFdmVudExpc3RlbmVyKCJyZXNpemUiLCgoKT0+e3QubGF5b3V0KCl9KSl9KSl9KSk8L3NjcmlwdD48L2JvZHk+PC9odG1sPg==";var ce=require("fs"),Q=require("fs/promises"),xn=require("os"),Jt=require("path");l();ve();var Te=require("electron");l();var Zt=require("electron"),N=["connect-src"],M=[...N,"img-src"],hn=["style-src","font-src"],pn=[...M,"media-src"],S=[...M,...hn],dn=[...S,"script-src","worker-src"],Kt={"http://localhost:*":S,"http://127.0.0.1:*":S,"localhost:*":S,"127.0.0.1:*":S,"*.github.io":S,"github.com":S,"raw.githubusercontent.com":S,"*.gitlab.io":S,"gitlab.com":S,"*.codeberg.page":S,"codeberg.org":S,"*.githack.com":S,"jsdelivr.net":S,"fonts.googleapis.com":hn,"i.imgur.com":M,"i.ibb.co":M,"i.pinimg.com":M,"files.catbox.moe":S,"cdn.discordapp.com":S,"media.discordapp.net":M,"cdnjs.cloudflare.com":dn,"cdn.jsdelivr.net":dn,"api.github.com":N,"ws.audioscrobbler.com":N,"musicbrainz.org":N,"*.listenbrainz.org":N,"coverartarchive.org":N,"archive.org":N,"*.archive.org":N,"translate-pa.googleapis.com":N,"*.vencord.dev":M,"manti.vendicated.dev":M,"decor.fieryflames.dev":N,"ugc.decor.fieryflames.dev":M,"sponsor.ajay.app":N,"dearrow-thumb.ajay.app":M,"usrbg.is-hardly.online":M,"icons.duckduckgo.com":M,"*.tenor.com":pn,"*.tenor.co":pn},Ht=(t,e)=>Object.keys(t).find(r=>r.toLowerCase()===e),Lo=t=>{let e={};return t.split(";").forEach(r=>{let[n,...i]=r.trim().split(/\s+/g);n&&!Object.prototype.hasOwnProperty.call(e,n)&&(e[n]=i)}),e},No=t=>Object.entries(t).filter(([,e])=>e?.length).map(e=>e.flat().join(" ")).join("; "),Uo=t=>{let e=Ht(t,"content-security-policy-report-only");e&&delete t[e];let r=Ht(t,"content-security-policy");if(r){let n=Lo(t[r][0]),i=(o,...s)=>{n[o]??=[...n["default-src"]??[]],n[o].push(...s)};i("style-src","'unsafe-inline'"),i("script-src","'unsafe-inline'","'unsafe-eval'");for(let o of["style-src","connect-src","img-src","font-src","media-src","worker-src"])i(o,"blob:","data:","vencord:","vesktop:");for(let[o,s]of Object.entries(F.store.customCspRules))for(let a of s)i(a,o);for(let[o,s]of Object.entries(Kt))for(let a of s)i(a,o);t[r]=[No(n)]}};function mn(){Zt.session.defaultSession.webRequest.onHeadersReceived(({responseHeaders:t,resourceType:e},r)=>{if(t&&(e==="mainFrame"&&Uo(t),e==="stylesheet")){let n=Ht(t,"content-type");n&&(t[n]=["text/css"])}r({cancel:!1,responseHeaders:t})}),Zt.session.defaultSession.webRequest.onHeadersReceived=()=>{}}function vn(){Te.ipcMain.handle("VencordCspRemoveOverride",zo),Te.ipcMain.handle("VencordCspRequestAddOverride",$o),Te.ipcMain.handle("VencordCspIsDomainAllowed",Wo)}function Fo(t,e){try{let{host:r}=new URL(t);if(/[;'"\\]/.test(r))return!1}catch{return!1}return!(e.length===0||e.some(r=>!S.includes(r)))}function Vo(t,e,r){let n=new URL(t).host,i=`${r} wants to allow connections to ${n}`,o=`Unless you recognise and fully trust ${n}, you should cancel this request!
+</html>`}function ei(t,e){if(!Ft())return!1;ut(),ye(),Ve();let n=Math.max(360,Math.round(e.width)),r=Math.round(n*9/16)+la,{x:i,y:o}=ua(n,r),a=lt("studio-preload.js",da),s=lt("studio.html",pa(t,e)),l=new H.BrowserWindow({width:n,height:r,x:i,y:o,frame:!1,transparent:!0,backgroundColor:"#00000000",resizable:!1,movable:!1,minimizable:!1,maximizable:!1,fullscreenable:!1,skipTaskbar:!0,hasShadow:!1,alwaysOnTop:!0,show:!1,webPreferences:{preload:a,nodeIntegration:!1,contextIsolation:!0,sandbox:!0,backgroundThrottling:!1}});return R=l,l.setAlwaysOnTop(!0,"screen-saver"),l.setVisibleOnAllWorkspaces(!0,{visibleOnFullScreen:!0}),l.on("closed",()=>{R===l&&(R=null)}),l.loadFile(s).then(()=>{l.isDestroyed()||(l.show(),l.focus())}).catch(()=>{l.isDestroyed()||l.destroy()}),!0}H.app.on("will-quit",()=>ut());c();function dt(t){return`${t.replace(/\.(webm|mp4)$/i,"")}.thumb.jpg`}c();var ci=require("child_process"),ui=require("electron"),Tn=require("fs"),gt=require("path");c();var fa=`
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
 
-You will have to fully close and restart Vesktop for the changes to take effect.`;if(e.length===1&&e[0]==="connect-src")return{message:i,detail:o};let s=e.filter(a=>a!=="connect-src").map(a=>{switch(a){case"img-src":return"Images";case"style-src":return"CSS & Themes";case"font-src":return"Fonts";default:throw new Error(`Illegal CSP directive: ${a}`)}}).sort().join(", ");return o=`The following types of content will be allowed to load from ${n}:
-${s}
+namespace Clipper
+{
+    public static class Bridge
+    {
+        [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Ansi)]
+        private static extern IntPtr LoadLibrary(string path);
 
-${o}`,{message:i,detail:o}}async function $o(t,e,r,n){if(!Fo(e,r))return"invalid";let i=new URL(e).host;if(i in F.store.customCspRules)return"conflict";let{checkboxChecked:o,response:s}=await Te.dialog.showMessageBox({...Vo(e,r,n),type:n?"info":"warning",title:"Vencord Host Permissions",buttons:["Cancel","Allow"],defaultId:0,cancelId:0,checkboxLabel:`I fully trust ${i} and understand the risks of allowing connections to it.`,checkboxChecked:!1});return s!==1?"cancelled":o?(F.store.customCspRules[i]=r,"ok"):"unchecked"}function zo(t,e){return e in F.store.customCspRules?(delete F.store.customCspRules[e],!0):!1}function Wo(t,e,r){try{let n=new URL(e).host,i=Kt[n]??F.store.customCspRules[n];return i?r.every(o=>i.includes(o)):!1}catch{return!1}}l();var Go=/[^\S\r\n]*?\r?(?:\r\n|\n)[^\S\r\n]*?\*[^\S\r\n]?/,jo=/^\\@/;function Yt(t,e={}){return{fileName:t,name:e.name??t.replace(/\.css$/i,""),author:e.author??"Unknown Author",description:e.description??"A Discord Theme.",version:e.version,license:e.license,source:e.source,website:e.website,invite:e.invite}}function gn(t){return t.charCodeAt(0)===65279&&(t=t.slice(1)),t}function yn(t,e){if(!t)return Yt(e);let r=t.split("/**",2)?.[1]?.split("*/",1)?.[0];if(!r)return Yt(e);let n={},i="",o="";for(let s of r.split(Go))if(s.length!==0)if(s.charAt(0)==="@"&&s.charAt(1)!==" "){n[i]=o.trim();let a=s.indexOf(" ");i=s.substring(1,a),o=s.substring(a+1)}else o+=" "+s.replace("\\n",`
-`).replace(jo,"@");return n[i]=o.trim(),delete n[""],Yt(e,n)}l();var Ie=require("path");function X(t,e){let r=(0,Ie.normalize)(t+"/"),n=(0,Ie.join)(t,e),i=(0,Ie.normalize)(n);return i===(0,Ie.normalize)(t)||i.startsWith(r)?i:null}l();var wn=require("electron");function bn(t){t.webContents.setWindowOpenHandler(({url:e})=>{switch(e){case"about:blank":case"https://discord.com/popout":case"https://ptb.discord.com/popout":case"https://canary.discord.com/popout":return{action:"allow"}}try{var{protocol:r}=new URL(e)}catch{return{action:"deny"}}switch(r){case"http:":case"https:":case"mailto:":case"steam:":case"spotify:":wn.shell.openExternal(e)}return{action:"deny"}})}var Bo=(0,Jt.join)(__dirname,"vencordDesktopRenderer.css");(0,ce.mkdirSync)(Y,{recursive:!0});vn();function Sn(){return(0,Q.readFile)(ye,"utf-8").catch(()=>"")}async function Zo(){let t=await(0,Q.readdir)(Y).catch(()=>[]),e=[];for(let r of t){if(!r.endsWith(".css"))continue;let n=await En(r).then(gn).catch(()=>null);n!=null&&e.push(yn(n,r))}return e}function En(t){t=t.replace(/\?v=\d+$/,"");let e=X(Y,t);return e?(0,Q.readFile)(e,"utf-8"):Promise.reject(`Unsafe path ${t}`)}w.ipcMain.handle("VencordOpenQuickCss",()=>w.shell.openPath(ye));w.ipcMain.handle("VencordOpenExternal",(t,e)=>{try{var{protocol:r}=new URL(e)}catch{throw"Malformed URL"}if(!Rr.includes(r))throw"Disallowed protocol.";w.shell.openExternal(e).catch(n=>console.error("[Vencord] Failed to open external link",e,n))});w.ipcMain.handle("VencordGetQuickCss",()=>Sn());w.ipcMain.handle("VencordSetQuickCss",(t,e)=>(0,ce.writeFileSync)(ye,e));w.ipcMain.handle("VencordGetThemesList",()=>Zo());w.ipcMain.handle("VencordGetThemeData",(t,e)=>En(e));w.ipcMain.handle("VencordGetThemeSystemValues",()=>{let t=w.systemPreferences.getAccentColor?.()??"";return t.length&&t[0]!=="#"&&(t=`#${t}`),{"os-accent-color":t}});w.ipcMain.handle("VencordOpenThemesFolder",()=>w.shell.openPath(Y));w.ipcMain.handle("VencordOpenSettingsFolder",()=>w.shell.openPath(re));var qt=[];w.ipcMain.handle("VencordInitFileWatchers",({sender:t})=>{qt.forEach(i=>i.close());let e,r;(0,Q.open)(ye,"a+").then(i=>{i.close(),e=(0,ce.watch)(ye,{persistent:!1},Bt(async()=>{t.postMessage("VencordQuickCssUpdate",await Sn())},50))}).catch(()=>{});let n=(0,ce.watch)(Y,{persistent:!1},Bt(()=>{t.postMessage("VencordThemeUpdate",void 0)}));qt=[e,n,r].filter(Boolean),t.once("destroyed",()=>{e?.close(),n.close(),r?.close(),qt=[]})});w.ipcMain.on("VencordGetMonacoTheme",t=>{t.returnValue=w.nativeTheme.shouldUseDarkColors?"vs-dark":"vs-light"});w.ipcMain.handle("VencordOpenMonacoEditor",async()=>{let t="Vencord QuickCSS Editor",e=w.BrowserWindow.getAllWindows().find(n=>n.title===t);if(e&&!e.isDestroyed()){e.focus();return}let r=new w.BrowserWindow({title:t,autoHideMenuBar:!0,darkTheme:!0,backgroundColor:w.nativeTheme.shouldUseDarkColors?"#1e1e1e":"white",webPreferences:{preload:(0,Jt.join)(__dirname,"vencordDesktopPreload.js"),contextIsolation:!0,nodeIntegration:!1,sandbox:!1}});bn(r),await r.loadURL(`data:text/html;base64,${fn}`)});w.ipcMain.handle("VencordGetRendererCss",()=>(0,Q.readFile)(Bo,"utf-8"));w.ipcMain.on("VencordSupportsWindowsMaterial",t=>{t.returnValue=Number((0,xn.release)().split(".")[2])>=22621});var ue=require("electron"),Bn=require("path"),sr=require("url");l();var pt=require("electron");l();var In=require("module"),Ho=(0,In.createRequire)("/"),Ae,at,Qt,Ko=";var __w=require('worker_threads');__w.parentPort.on('message',function(m){onmessage({data:m})}),postMessage=function(m,t){__w.parentPort.postMessage(m,t)},close=process.exit;self=global";try{Ae=Ho("worker_threads"),at=Ae.Worker,Qt=Ae.isMarkedAsUntransferable}catch{}var Yo=at?function(t,e,r,n,i){var o=!1,s=new at(t+Ko,{eval:!0}).on("error",function(a){return i(a,null)}).on("message",function(a){return i(null,a)}).on("exit",function(a){a&&!o&&i(new Error("exited with code "+a),null)});return Qt&&(n=n.filter(function(a){return!Qt(a)})),s.postMessage(r,n),s.terminate=function(){return o=!0,at.prototype.terminate.call(s)},s}:function(t,e,r,n,i){setImmediate(function(){return i(new Error("async operations unsupported - update to Node 12+ (or Node 10-11 with the --experimental-worker CLI flag)"),null)});var o=function(){};return{terminate:o,postMessage:o}},I=Uint8Array,le=Uint16Array,An=Int32Array,tr=new I([0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0,0,0,0]),rr=new I([0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,0,0]),Rn=new I([16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15]),Cn=function(t,e){for(var r=new le(31),n=0;n<31;++n)r[n]=e+=1<<t[n-1];for(var i=new An(r[30]),n=1;n<30;++n)for(var o=r[n];o<r[n+1];++o)i[o]=o-r[n]<<5|n;return{b:r,r:i}},Ae=Cn(tr,2),nr=Ae.b,qo=Ae.r;nr[28]=258,qo[258]=28;var Dn=Cn(rr,0),Pn=Dn.b,ic=Dn.r,ut=new le(32768);for(y=0;y<32768;++y)B=(y&43690)>>1|(y&21845)<<1,B=(B&52428)>>2|(B&13107)<<2,B=(B&61680)>>4|(B&3855)<<4,ut[y]=((B&65280)>>8|(B&255)<<8)>>1;var B,y,Re=(function(t,e,r){for(var n=t.length,i=0,o=new le(e);i<n;++i)t[i]&&++o[t[i]-1];var s=new le(e);for(i=1;i<e;++i)s[i]=s[i-1]+o[i-1]<<1;var a;if(r){a=new le(1<<e);var c=15-e;for(i=0;i<n;++i)if(t[i])for(var p=i<<4|t[i],h=e-t[i],u=s[t[i]-1]++<<h,b=u|(1<<h)-1;u<=b;++u)a[ut[u]>>c]=p}else for(a=new le(n),i=0;i<n;++i)t[i]&&(a[i]=ut[s[t[i]-1]++]>>15-t[i]);return a}),je=new I(288);for(y=0;y<144;++y)je[y]=8;var y;for(y=144;y<256;++y)je[y]=9;var y;for(y=256;y<280;++y)je[y]=7;var y;for(y=280;y<288;++y)je[y]=8;var y,Mn=new I(32);for(y=0;y<32;++y)Mn[y]=5;var y;var _n=Re(je,9,1);var On=Re(Mn,5,1),ct=function(t){for(var e=t[0],r=1;r<t.length;++r)t[r]>e&&(e=t[r]);return e},_=function(t,e,r){var n=e/8|0;return(t[n]|t[n+1]<<8)>>(e&7)&r},lt=function(t,e){var r=e/8|0;return(t[r]|t[r+1]<<8|t[r+2]<<16)>>(e&7)},Ln=function(t){return(t+7)/8|0},ft=function(t,e,r){return(e==null||e<0)&&(e=0),(r==null||r>t.length)&&(r=t.length),new I(t.subarray(e,r))};var Nn=["unexpected EOF","invalid block type","invalid length/literal","invalid distance","stream finished","no stream handler",,"no callback","invalid UTF-8 data","extra field too long","date not in range 1980-2099","filename too long","stream finishing","invalid zip data"],k=function(t,e,r){var n=new Error(e||Nn[t]);if(n.code=t,Error.captureStackTrace&&Error.captureStackTrace(n,k),!r)throw n;return n},Un=function(t,e,r,n){var i=t.length,o=n?n.length:0;if(!i||e.f&&!e.l)return r||new I(0);var s=!r,a=s||e.i!=2,c=e.i;s&&(r=new I(i*3));var p=function(pr){var dr=r.length;if(pr>dr){var hr=new I(Math.max(dr*2,pr));hr.set(r),r=hr}},h=e.f||0,u=e.p||0,b=e.b||0,U=e.l,fe=e.d,G=e.m,C=e.n,D=i*8;do{if(!U){h=_(t,u,1);var Z=_(t,u+1,3);if(u+=3,Z)if(Z==1)U=_n,fe=On,G=9,C=5;else if(Z==2){var Ce=_(t,u,31)+257,Be=_(t,u+10,15)+4,ee=Ce+_(t,u+5,31)+1;u+=14;for(var P=new I(ee),de=new I(19),E=0;E<Be;++E)de[Rn[E]]=_(t,u+E*3,7);u+=Be*3;for(var De=ct(de),Zn=(1<<De)-1,Hn=Re(de,De,1),E=0;E<ee;){var ar=Hn[_(t,u,Zn)];u+=ar&15;var T=ar>>4;if(T<16)P[E++]=T;else{var he=0,Ze=0;for(T==16?(Ze=3+_(t,u,3),u+=2,he=P[E-1]):T==17?(Ze=3+_(t,u,7),u+=3):T==18&&(Ze=11+_(t,u,127),u+=7);Ze--;)P[E++]=he}}var cr=P.subarray(0,Ce),H=P.subarray(Ce);G=ct(cr),C=ct(H),U=Re(cr,G,1),fe=Re(H,C,1)}else k(1);else{var T=Ln(u)+4,j=t[T-4]|t[T-3]<<8,pe=T+j;if(pe>i){c&&k(0);break}a&&p(b+j),r.set(t.subarray(T,pe),b),e.b=b+=j,e.p=u=pe*8,e.f=h;continue}if(u>D){c&&k(0);break}}a&&p(b+131072);for(var Kn=(1<<G)-1,Yn=(1<<C)-1,dt=u;;dt=u){var he=U[lt(t,u)&Kn],me=he>>4;if(u+=he&15,u>D){c&&k(0);break}if(he||k(2),me<256)r[b++]=me;else if(me==256){dt=u,U=null;break}else{var lr=me-254;if(me>264){var E=me-257,Pe=tr[E];lr=_(t,u,(1<<Pe)-1)+nr[E],u+=Pe}var ht=fe[lt(t,u)&Yn],mt=ht>>4;ht||k(3),u+=ht&15;var H=Pn[mt];if(mt>3){var Pe=rr[mt];H+=lt(t,u)&(1<<Pe)-1,u+=Pe}if(u>D){c&&k(0);break}a&&p(b+131072);var ur=b+lr;if(b<H){var fr=o-H,qn=Math.min(H,ur);for(fr+b<0&&k(3);b<qn;++b)r[b]=n[fr+b]}for(;b<ur;++b)r[b]=r[b-H]}}e.l=U,e.p=dt,e.b=b,e.f=h,U&&(h=1,e.m=G,e.d=fe,e.n=C)}while(!h);return b!=r.length&&s?ft(r,0,b):r.subarray(0,b)};var Jo=new I(0);var Xo=function(t,e){var r={};for(var n in t)r[n]=t[n];for(var n in e)r[n]=e[n];return r},kn=function(t,e,r){for(var n=t(),i=t.toString(),o=i.slice(i.indexOf("[")+1,i.lastIndexOf("]")).replace(/\s+/g,"").split(","),s=0;s<n.length;++s){var a=n[s],c=o[s];if(typeof a=="function"){e+=";"+c+"=";var p=a.toString();if(a.prototype)if(p.indexOf("[native code]")!=-1){var h=p.indexOf(" ",8)+1;e+=p.slice(h,p.indexOf("(",h))}else{e+=p;for(var u in a.prototype)e+=";"+c+".prototype."+u+"="+a.prototype[u].toString()}else e+=p}else r[c]=a}return e},st=[],Qo=function(t){var e=[];for(var r in t)t[r].buffer&&e.push((t[r]=new t[r].constructor(t[r])).buffer);return e},es=function(t,e,r,n){if(!st[r]){for(var i="",o={},s=t.length-1,a=0;a<s;++a)i=kn(t[a],i,o);st[r]={c:kn(t[s],i,o),e:o}}var c=Xo({},st[r].e);return Yo(st[r].c+";onmessage=function(e){for(var k in e.data)self[k]=e.data[k];onmessage="+e.toString()+"}",r,c,Qo(c),n)},ts=function(){return[I,le,An,tr,rr,Rn,nr,Pn,_n,On,ut,Nn,Re,ct,_,lt,Ln,ft,k,Un,ir,Fn,Vn]};var Fn=function(t){return postMessage(t,[t.buffer])},Vn=function(t){return t&&{out:t.size&&new I(t.size),dictionary:t.dictionary}},rs=function(t,e,r,n,i,o){var s=es(r,n,i,function(a,c){s.terminate(),o(a,c)});return s.postMessage([t,e],e.consume?[t.buffer]:[]),function(){s.terminate()}};var z=function(t,e){return t[e]|t[e+1]<<8},O=function(t,e){return(t[e]|t[e+1]<<8|t[e+2]<<16|t[e+3]<<24)>>>0},Xt=function(t,e){return O(t,e)+O(t,e+4)*4294967296};function ns(t,e,r){return r||(r=e,e={}),typeof r!="function"&&k(7),rs(t,e,[ts],function(n){return Fn(ir(n.data[0],Vn(n.data[1])))},1,r)}function ir(t,e){return Un(t,{i:2},e&&e.out,e&&e.dictionary)}var er=typeof TextDecoder<"u"&&new TextDecoder,is=0;try{er.decode(Jo,{stream:!0}),is=1}catch{}var os=function(t){for(var e="",r=0;;){var n=t[r++],i=(n>127)+(n>223)+(n>239);if(r+i>t.length)return{s:e,r:ft(t,r-1)};i?i==3?(n=((n&15)<<18|(t[r++]&63)<<12|(t[r++]&63)<<6|t[r++]&63)-65536,e+=String.fromCharCode(55296|n>>10,56320|n&1023)):i&1?e+=String.fromCharCode((n&31)<<6|t[r++]&63):e+=String.fromCharCode((n&15)<<12|(t[r++]&63)<<6|t[r++]&63):e+=String.fromCharCode(n)}};function ss(t,e){if(e){for(var r="",n=0;n<t.length;n+=16384)r+=String.fromCharCode.apply(null,t.subarray(n,n+16384));return r}else{if(er)return er.decode(t);var i=os(t),o=i.s,r=i.r;return r.length&&k(8),o}}var as=function(t,e){return e+30+z(t,e+26)+z(t,e+28)},cs=function(t,e,r){var n=z(t,e+28),i=z(t,e+30),o=ss(t.subarray(e+46,e+46+n),!(z(t,e+8)&2048)),s=e+46+n,a=ls(t,s,i,r,O(t,e+20),O(t,e+24),O(t,e+42)),c=a[0],p=a[1],h=a[2];return[z(t,e+10),c,p,o,s+i+z(t,e+32),h]},ls=function(t,e,r,n,i,o,s){var a=i==4294967295,c=o==4294967295,p=s==4294967295,h=e+r,u=a+c+p;if(n&&u){for(;e+4<h;e+=4+z(t,e+2))if(z(t,e)==1)return[a?Xt(t,e+4+8*c):i,c?Xt(t,e+4):o,p?Xt(t,e+4+8*(c+a)):s,1];n<2&&k(13)}return[i,o,s,0]};var Tn=typeof queueMicrotask=="function"?queueMicrotask:typeof setTimeout=="function"?setTimeout:function(t){t()};function $n(t,e,r){r||(r=e,e={}),typeof r!="function"&&k(7);var n=[],i=function(){for(var C=0;C<n.length;++C)n[C]()},o={},s=function(C,D){Tn(function(){r(C,D)})};Tn(function(){s=r});for(var a=t.length-22;O(t,a)!=101010256;--a)if(!a||t.length-a>65558)return s(k(13,0,1),null),i;var c=z(t,a+8);if(c){var p=c,h=O(t,a+16),u=O(t,a-20)==117853008;if(u){var b=O(t,a-12);u=O(t,b)==101075792,u&&(p=c=O(t,b+32),h=O(t,b+48))}for(var U=e&&e.filter,fe=function(C){var D=cs(t,h,u),Z=D[0],T=D[1],j=D[2],pe=D[3],Ce=D[4],Be=D[5],ee=as(t,Be);h=Ce;var P=function(E,De){E?(i(),s(E,null)):(De&&(o[pe]=De),--c||s(null,o))};if(!U||U({name:pe,size:T,originalSize:j,compression:Z}))if(!Z)P(null,ft(t,ee,ee+T));else if(Z==8){var de=t.subarray(ee,ee+T);if(j<524288||T>.8*j)try{P(null,ir(de,{out:new I(j)}))}catch(E){P(E,null)}else n.push(ns(de,{size:j},P))}else P(k(14,"unknown compression type "+Z,1),null);else P(null,null)},G=0;G<p;++G)fe(G)}else s(null,{});return i}var Gn=require("fs"),W=require("fs/promises"),or=require("path");l();function zn(t){function e(s,a,c,p){let h=0;return h+=s<<0,h+=a<<8,h+=c<<16,h+=p<<24>>>0,h}if(t[0]===80&&t[1]===75&&t[2]===3&&t[3]===4)return t;if(t[0]!==67||t[1]!==114||t[2]!==50||t[3]!==52)throw new Error("Invalid header: Does not start with Cr24");let r=t[4]===3,n=t[4]===2;if(!n&&!r||t[5]||t[6]||t[7])throw new Error("Unexpected crx format version number.");if(n){let s=e(t[8],t[9],t[10],t[11]),a=e(t[12],t[13],t[14],t[15]),c=16+s+a;return t.subarray(c,t.length)}let o=12+e(t[8],t[9],t[10],t[11]);return t.subarray(o,t.length)}l();var us=require("original-fs");async function fs(t,e){try{var r=await fetch(t,e)}catch(i){throw i instanceof Error&&i.cause&&(i=i.cause),new Error(`${e?.method??"GET"} ${t} failed: ${i}`)}if(r.ok)return r;let n=`${e?.method??"GET"} ${t}: ${r.status} ${r.statusText}`;try{let i=await r.text();n+=`
-${i}`}catch{}throw new Error(n)}async function Wn(t,e){let n=await(await fs(t,e)).arrayBuffer();return Buffer.from(n)}var ps=(0,or.join)(Ye,"ExtensionCache");async function ds(t,e){return await(0,W.mkdir)(e,{recursive:!0}),new Promise((r,n)=>{$n(t,(i,o)=>{if(i)return void n(i);Promise.all(Object.keys(o).map(async s=>{if(s.startsWith("_metadata/"))return;if(s.includes("\0"))throw new Error(`Invalid filename: "${s}"`);if(s.endsWith("/")){let u=X(e,s);if(!u)throw new Error(`Path traversal detected: "${s}"`);return void await(0,W.mkdir)(u,{recursive:!0})}let c=s.split("/").slice(0,-1).join("/"),p=X(e,c);if(!p)throw new Error(`Path traversal detected: "${s}"`);let h=X(e,s);if(!h)throw new Error(`Path traversal detected: "${s}"`);c&&await(0,W.mkdir)(p,{recursive:!0}),await(0,W.writeFile)(h,o[s])})).then(()=>r()).catch(s=>{(0,W.rm)(e,{recursive:!0,force:!0}),n(s)})})})}async function jn(t){let e=(0,or.join)(ps,t);try{await(0,W.access)(e,Gn.constants.F_OK)}catch{let n=`https://clients2.google.com/service/update2/crx?response=redirect&acceptformat=crx2,crx3&x=id%3D${t}%26uc&prodversion=${process.versions.chrome}`,i=await Wn(n,{headers:{"User-Agent":`Electron ${process.versions.electron} ~ Vencord (https://github.com/Vendicated/Vencord)`}});await ds(zn(i),e).catch(o=>console.error(`Failed to extract extension ${t}`,o))}pt.session.defaultSession.extensions?pt.session.defaultSession.extensions.loadExtension(e):pt.session.defaultSession.loadExtension(e)}ue.app.whenReady().then(()=>{ue.protocol.handle("vencord",({url:t})=>{let e=decodeURI(t).slice(10).replace(/\?v=\d+$/,"");if(e.endsWith("/")&&(e=e.slice(0,-1)),e.startsWith("/themes/")){let r=e.slice(8),n=X(Y,r);return n?ue.net.fetch((0,sr.pathToFileURL)(n).toString()):new Response(null,{status:404})}switch(e){case"renderer.js.map":case"vencordDesktopRenderer.js.map":case"preload.js.map":case"vencordDesktopPreload.js.map":case"patcher.js.map":case"vencordDesktopMain.js.map":return ue.net.fetch((0,sr.pathToFileURL)((0,Bn.join)(__dirname,e)).toString());default:return new Response(null,{status:404})}});try{A.store.enableReactDevtools&&jn("fmkadmapgofadopljbjfkapdkoienihi").then(()=>console.info("[Vencord] Installed React Developer Tools")).catch(t=>console.error("[Vencord] Failed to install React Developer Tools",t))}catch{}mn()});
+        [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Ansi)]
+        private static extern IntPtr GetProcAddress(IntPtr module, string name);
+
+        [DllImport("kernel32", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool FreeLibrary(IntPtr module);
+
+        // The six flat exports. Everything else lives behind GetGenericInterface.
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate IntPtr InitInternal(ref int error, int applicationType);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void ShutdownInternal();
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate IntPtr GetGenericInterface([MarshalAs(UnmanagedType.LPStr)] string version, ref int error);
+
+        // IVRSystem
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate void GetPoses(int origin, float secondsAhead, IntPtr poses, uint count);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate uint IndexForRole(int role);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate IntPtr RuntimeVersion();
+
+        // IVRInput
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate int SetManifest([MarshalAs(UnmanagedType.LPStr)] string path);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate int GetHandle([MarshalAs(UnmanagedType.LPStr)] string name, out ulong handle);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate int UpdateState([In] ActiveActionSet[] sets, uint sizeOfOne, uint count);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate int DigitalData(ulong action, ref DigitalActionData data, uint size, ulong restrictTo);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate int BindingUI([MarshalAs(UnmanagedType.LPStr)] string appKey, ulong actionSet, ulong device, [MarshalAs(UnmanagedType.I1)] bool onDesktop);
+
+        // IVROverlay
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int MakeOverlay([MarshalAs(UnmanagedType.LPStr)] string key, [MarshalAs(UnmanagedType.LPStr)] string name, ref ulong handle);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int DropOverlay(ulong overlay);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate IntPtr OverlayErrorName(int error);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int OverlayWidth(ulong overlay, float metres);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int OverlayFollow(ulong overlay, uint device, ref Matrix34 place);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int OverlayPixels(ulong overlay, IntPtr buffer, uint width, uint height, uint bytesPerPixel);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int OverlayShow(ulong overlay);
+
+        // IVRApplications
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate int AddManifest([MarshalAs(UnmanagedType.LPStr)] string path, [MarshalAs(UnmanagedType.I1)] bool temporary);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate int Identify(uint pid, [MarshalAs(UnmanagedType.LPStr)] string appKey);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ActiveActionSet
+        {
+            public ulong ActionSet;
+            public ulong RestrictedToDevice;
+            public ulong SecondaryActionSet;
+            public uint Padding;
+            public int Priority;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct DigitalActionData
+        {
+            [MarshalAs(UnmanagedType.I1)] public bool Active;
+            public ulong ActiveOrigin;
+            [MarshalAs(UnmanagedType.I1)] public bool State;
+            [MarshalAs(UnmanagedType.I1)] public bool Changed;
+            public float UpdateTime;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct DevicePose
+        {
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 12)] public float[] DeviceToAbsolute;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 3)] public float[] Velocity;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 3)] public float[] AngularVelocity;
+            public int TrackingResult;
+            [MarshalAs(UnmanagedType.I1)] public bool PoseIsValid;
+            [MarshalAs(UnmanagedType.I1)] public bool DeviceIsConnected;
+        }
+
+        /*
+         * HmdMatrix34_t: three rows of four, laid out one after another.
+         *
+         * Written as twelve fields rather than as an array, because a struct
+         * holding a managed array has to be told how to marshal it and gets it
+         * wrong quietly if the attribute is missed. Twelve plain floats can
+         * only be laid out one way, and its size is checked at startup with
+         * the three below it.
+         */
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Matrix34
+        {
+            public float M00, M01, M02, M03;
+            public float M10, M11, M12, M13;
+            public float M20, M21, M22, M23;
+        }
+
+        private const int ApplicationBackground = 3;
+        private const int UniverseStanding = 1;
+        private const int MaxDevices = 64;
+        private const int RoleLeftHand = 1;
+        private const int RoleRightHand = 2;
+
+        /*
+         * How long to leave SteamVR alone between attempts to attach, and how
+         * many failed updates in a row mean it has gone away underneath us.
+         *
+         * Five seconds rather than the fifteen the supervisor used to wait,
+         * because an attempt now costs one failed function call instead of a
+         * process and a C# compile. Fifty ticks is one second of the loop
+         * below: long enough that a hiccup is not mistaken for a shutdown.
+         */
+        private const int RetrySeconds = 5;
+        private const int LostLimit = 50;
+
+        /*
+         * Where the panel hangs, relative to the headset.
+         *
+         * A metre out and thirty centimetres down, which in a headset is below
+         * whatever the player is actually looking at and well inside the field
+         * of view - the same place a car puts its instruments, and for the same
+         * reason. Tilted back fifteen degrees so it faces the eyes rather than
+         * the floor.
+         *
+         * Attached to the headset rather than left in the room, because this is
+         * a notice that somebody has a second or two to read: a panel left
+         * hanging where the player was looking a minute ago is a panel nobody
+         * ever sees.
+         */
+        private const float PanelForward = -1.0f;
+        private const float PanelDown = -0.30f;
+        private const float PanelTilt = 0.26f;
+        private const float PanelMetres = 0.55f;
+
+        /** The largest picture the plugin may hand over, in pixels either way. */
+        private const int PanelLimit = 2048;
+
+        private static readonly object Gate = new object();
+        private static readonly Queue<string> _commands = new Queue<string>();
+        private static bool _stopped;
+
+        private static T Entry<T>(IntPtr table, int index)
+        {
+            IntPtr fn = Marshal.ReadIntPtr(table, index * IntPtr.Size);
+            if (fn == IntPtr.Zero) throw new EntryPointNotFoundException("Nothing at index " + index + " of an OpenVR function table");
+
+            return (T) (object) Marshal.GetDelegateForFunctionPointer(fn, typeof(T));
+        }
+
+        /*
+         * One string, made safe to sit inside the JSON written by hand above.
+         *
+         * The control characters are replaced rather than escaped, because
+         * every message that comes through here is a sentence meant for a
+         * person and none of them mean anything as a tab or a newline. What
+         * matters is that none of them survive: a raw control character inside
+         * a JSON string makes the whole line unparseable, and an unparseable
+         * line is dropped in silence at the other end. For an error line that
+         * means a bridge which gave its reason and had it thrown away, leaving
+         * the plugin to work out three bridges later that something is wrong.
+         */
+        private static string Esc(string text)
+        {
+            if (text == null) return "";
+
+            StringBuilder built = new StringBuilder(text.Length);
+
+            foreach (char c in text)
+            {
+                if (c == '\\\\') built.Append("\\\\\\\\");
+                else if (c == '"') built.Append("\\\\\\"");
+                else if (c < ' ' || c == (char) 127) built.Append(' ');
+                else built.Append(c);
+            }
+
+            return built.ToString();
+        }
+
+        private static void Say(string line)
+        {
+            Console.Out.WriteLine(line);
+            Console.Out.Flush();
+        }
+
+        /*
+         * Something went wrong that no amount of retrying fixes: a SteamVR too
+         * old for the interfaces, a manifest it will not take, a bridge that
+         * will not compile at all. The plugin keeps it, repeats it in the
+         * toolbox, and stops starting new bridges.
+         *
+         * That is the whole of what an error line means here, and it is why
+         * there is no flag on it saying so. Anything that is only true for now -
+         * SteamVR off, the headset on the desk - is a waiting line instead and
+         * never comes through here.
+         */
+        private static void Fail(string message)
+        {
+            Say("{\\"t\\":\\"error\\",\\"message\\":\\"" + Esc(message) + "\\"}");
+        }
+
+        /*
+         * Something is wrong with a session that is otherwise working.
+         *
+         * Deliberately not an error: an error is a thing the plugin stops
+         * starting bridges over, and this session is up and delivering presses.
+         * The one that goes through here is a set SteamVR knows with actions in
+         * it that it does not, which leaves buttons that can never be bound and
+         * nothing anywhere saying why - worth saying, not worth giving up over,
+         * and above all not worth refusing to start the next bridge over after
+         * a crash that had nothing to do with it.
+         */
+        private static void Warn(string message)
+        {
+            Say("{\\"t\\":\\"warning\\",\\"message\\":\\"" + Esc(message) + "\\"}");
+        }
+
+        /*
+         * Why there is no session, in words somebody can act on.
+         *
+         * The headset codes say nothing about whether SteamVR is running, and an
+         * earlier version of this said they did. The presence check happens
+         * before the server is ever contacted, so 126 comes back on a machine
+         * with SteamVR shut down and no headset plugged in - which is most
+         * machines, most of the time, and was being told SteamVR was running.
+         */
+        private static string Explain(int error)
+        {
+            if (error == 108 || error == 125 || error == 126) return "No headset is connected";
+            if (error == 109 || error == 119 || error == 121) return "SteamVR is not running";
+            if (error >= 100 && error <= 103) return "SteamVR is installed but not working (error " + error + ")";
+            if (error == 115 || error == 117) return "SteamVR is still starting up";
+
+            return "SteamVR is not ready (error " + error + ")";
+        }
+
+        /*
+         * The same thing for an error that will not come right.
+         *
+         * Explain() is for things somebody can wait out, and its wording says
+         * so. "Not ready" reads as "give it a minute" for a refusal that will
+         * still be a refusal tomorrow, which is worse than saying nothing.
+         */
+        private static string Refused(int error)
+        {
+            string what;
+
+            if (error == 123) what = "SteamVR has decided this is a utility application, and does not give those a session";
+            else if (error == 130) what = "SteamVR does not accept the kind of application the bridge asks to be";
+            else what = "SteamVR refused the connection outright";
+
+            return what + " (error " + error + "), and waiting will not change that";
+        }
+
+        /*
+         * Whether an init error can ever come right on its own.
+         *
+         * Almost none of them are worth giving up over: a headset gets plugged
+         * in, SteamVR gets started, and the same call succeeds a moment later.
+         * The three here are ways of asking for something this application is
+         * not, which no amount of waiting changes.
+         */
+        private static bool Fatal(int error)
+        {
+            return error == 123 || error == 130 || error == 131;
+        }
+
+        private static string Num(double value)
+        {
+            return value.ToString("0.###", CultureInfo.InvariantCulture);
+        }
+
+        private static double Magnitude(float[] v)
+        {
+            if (v == null || v.Length < 3) return 0;
+            return Math.Sqrt((double) v[0] * v[0] + (double) v[1] * v[1] + (double) v[2] * v[2]);
+        }
+
+        // Takes the next thing the plugin asked for, or null if it has not asked.
+        private static string TakeCommand()
+        {
+            lock (Gate)
+            {
+                return _commands.Count == 0 ? null : _commands.Dequeue();
+            }
+        }
+
+        /*
+         * Throws away anything asked for while there was nothing to ask.
+         *
+         * A request for the binding panel is only worth acting on while somebody
+         * is still looking at the button they clicked it with. Left in the queue,
+         * it opened SteamVR's binding panel over whatever they were playing the
+         * next time a headset went on, which could be hours later.
+         */
+        private static void Drain()
+        {
+            lock (Gate) { _commands.Clear(); }
+        }
+
+        /** Whether the plugin has asked to stop, or has gone away. */
+        private static bool Stopping()
+        {
+            lock (Gate) { return _stopped; }
+        }
+
+        /*
+         * Sleeps, but notices a stop while it does.
+         *
+         * A plain Sleep would leave a bridge asked to shut down sitting there
+         * for the rest of its wait, and the plugin kills it after two seconds -
+         * which loses the tidy SteamVR shutdown the pipe closing is for.
+         */
+        private static void Wait(int seconds)
+        {
+            for (int i = 0; i < seconds * 10 && !Stopping(); i++) Thread.Sleep(100);
+        }
+
+        private static void ReadCommands()
+        {
+            while (true)
+            {
+                string line = Console.In.ReadLine();
+
+                // The plugin closed the pipe: it is gone, and so are we. Without
+                // this a bridge outlives a client that crashed, holding a
+                // SteamVR application registration nothing will ever clear.
+                if (line == null) { lock (Gate) { _stopped = true; } return; }
+
+                line = line.Trim();
+                if (line.Length == 0) continue;
+
+                if (line == "stop") { lock (Gate) { _stopped = true; } return; }
+
+                // Queued rather than held in one slot: a stop arriving straight
+                // after a request for the binding panel used to overwrite it, so
+                // the panel never opened. Bounded, because a plugin that asks
+                // faster than this can act is a bug, not a backlog to keep.
+                lock (Gate) { if (_commands.Count < 8) _commands.Enqueue(line); }
+            }
+        }
+
+        /*
+         * One process for as long as the setting is on, whether SteamVR is there
+         * or not.
+         *
+         * The plugin used to start one of these every fifteen seconds while it
+         * waited, and every start recompiled the C# above - a full csc run, a
+         * little over a second of it, all day, on a machine that is also running
+         * a game. So the waiting happens in here now, where it costs a sleeping
+         * thread, and the supervisor on the other end only has to restart this
+         * if it actually dies.
+         */
+        public static void Run(string apiPath, string actionsPath, string manifestPath, string appKey, string actionList)
+        {
+            IntPtr library = LoadLibrary(apiPath);
+            if (library == IntPtr.Zero) { Fail("openvr_api.dll could not be loaded from " + apiPath); return; }
+
+            try
+            {
+                IntPtr initAddress = GetProcAddress(library, "VR_InitInternal");
+                IntPtr shutdownAddress = GetProcAddress(library, "VR_ShutdownInternal");
+                IntPtr interfaceAddress = GetProcAddress(library, "VR_GetGenericInterface");
+
+                if (initAddress == IntPtr.Zero || shutdownAddress == IntPtr.Zero || interfaceAddress == IntPtr.Zero)
+                {
+                    Fail("openvr_api.dll is not the library it claims to be: the entry points are missing");
+                    return;
+                }
+
+                /*
+                 * The sizes the header says these are, checked rather than
+                 * trusted. A struct laid out differently than OpenVR expects
+                 * does not crash: it reads neighbouring bytes as floats, and the
+                 * motion detector acts on the result. Wrong numbers that look
+                 * like numbers are the worst outcome available here.
+                 */
+                if (Marshal.SizeOf(typeof(ActiveActionSet)) != 32
+                    || Marshal.SizeOf(typeof(DigitalActionData)) != 24
+                    || Marshal.SizeOf(typeof(DevicePose)) != 80
+                    || Marshal.SizeOf(typeof(Matrix34)) != 48)
+                {
+                    Fail("The OpenVR structures are not the size they are supposed to be, refusing to call into them");
+                    return;
+                }
+
+                InitInternal init = (InitInternal) Marshal.GetDelegateForFunctionPointer(initAddress, typeof(InitInternal));
+                ShutdownInternal shutdown = (ShutdownInternal) Marshal.GetDelegateForFunctionPointer(shutdownAddress, typeof(ShutdownInternal));
+                GetGenericInterface get = (GetGenericInterface) Marshal.GetDelegateForFunctionPointer(interfaceAddress, typeof(GetGenericInterface));
+
+                Thread reader = new Thread(ReadCommands);
+                reader.IsBackground = true;
+                reader.Start();
+
+                // What was last said about not being attached, so the same line
+                // is not printed twelve times a minute at a plugin that already
+                // knows. Cleared on every attach, so taking a headset off and
+                // putting it back on says both things again.
+                string said = "";
+
+                while (!Stopping())
+                {
+                    // Before the attempt, so that neither a wait nor a session
+                    // starts holding something asked for a long time ago.
+                    Drain();
+
+                    int error = 0;
+
+                    /*
+                     * Background, not Overlay. An overlay application starts
+                     * SteamVR if it is not already running, and Discord
+                     * launching SteamVR because a setting is on would be
+                     * indefensible. Background attaches to a session that
+                     * exists and fails cleanly when there is none.
+                     */
+                    init(ref error, ApplicationBackground);
+
+                    if (error != 0)
+                    {
+                        // Called even though the init failed: OpenVR keeps state
+                        // per process from a half-finished attempt, and the next
+                        // attempt would inherit it.
+                        shutdown();
+
+                        if (Fatal(error)) { Fail(Refused(error)); return; }
+
+                        string reason = Explain(error);
+                        if (reason != said)
+                        {
+                            Say("{\\"t\\":\\"waiting\\",\\"reason\\":\\"" + Esc(reason) + "\\"}");
+                            said = reason;
+                        }
+
+                        Wait(RetrySeconds);
+                        continue;
+                    }
+
+                    said = "";
+
+                    bool again = Session(get, appKey, actionsPath, manifestPath, actionList);
+                    shutdown();
+
+                    if (!again) return;
+                }
+            }
+            finally
+            {
+                FreeLibrary(library);
+            }
+        }
+
+        /*
+         * One attached session, from the interfaces to SteamVR going away again.
+         *
+         * Returns true if it is worth waiting for SteamVR to come back, false if
+         * the bridge is done - asked to stop, or stopped by something no retry
+         * fixes.
+         */
+        private static bool Session(GetGenericInterface get, string appKey, string actionsPath, string manifestPath, string actionList)
+        {
+            int error = 0;
+
+            IntPtr system = get("FnTable:IVRSystem_026", ref error);
+            if (system == IntPtr.Zero) { Fail("This SteamVR is too old: it has no IVRSystem_026"); return false; }
+
+            IntPtr input = get("FnTable:IVRInput_011", ref error);
+            if (input == IntPtr.Zero) { Fail("This SteamVR is too old: it has no IVRInput_011"); return false; }
+
+            IntPtr apps = get("FnTable:IVRApplications_008", ref error);
+            if (apps == IntPtr.Zero) { Fail("This SteamVR is too old: it has no IVRApplications_008"); return false; }
+
+            /*
+             * The overlay is the one interface allowed to be absent.
+             *
+             * Everything above this is what the binds are made of, and a
+             * SteamVR without it is a SteamVR the plugin cannot work on at all.
+             * The panel is a nicety on top: a runtime too old to draw it should
+             * cost the player the picture and nothing else, so a missing
+             * interface here warns and carries on with a zero handle, which
+             * every panel command below checks for.
+             */
+            IntPtr overlay = get("FnTable:IVROverlay_028", ref error);
+            ulong panel = 0;
+
+            if (overlay == IntPtr.Zero) Warn("This SteamVR has no IVROverlay_028, so the binds will work but nothing will be drawn in the headset");
+            else if (!MakePanel(overlay, appKey, ref panel)) overlay = IntPtr.Zero;
+
+            // IVRSystem index 49, GetRuntimeVersion, the last entry but one.
+            // Reached correctly only if every index before it was counted
+            // right, which is the whole point of asking.
+            IntPtr versionPtr = Entry<RuntimeVersion>(system, 49)();
+            string version = versionPtr == IntPtr.Zero ? "" : Marshal.PtrToStringAnsi(versionPtr);
+
+            if (string.IsNullOrEmpty(version) || version.Length > 64)
+            {
+                Fail("The OpenVR function tables are not laid out as expected, refusing to call into them");
+                return false;
+            }
+
+            // IVRApplications index 0, AddApplicationManifest. Temporary, so
+            // nothing is left in SteamVR's application list afterwards.
+            Entry<AddManifest>(apps, 0)(manifestPath, true);
+
+            // IVRApplications index 11, IdentifyApplication. This is what
+            // makes the binding panel say Clipper rather than powershell.
+            Entry<Identify>(apps, 11)((uint) System.Diagnostics.Process.GetCurrentProcess().Id, appKey);
+
+            // IVRInput index 0, SetActionManifestPath.
+            int failed = Entry<SetManifest>(input, 0)(actionsPath);
+            if (failed != 0) { Fail("SteamVR rejected the action manifest (error " + failed + ")"); return false; }
+
+            // IVRInput index 1, GetActionSetHandle; index 2, GetActionHandle.
+            GetHandle setHandles = Entry<GetHandle>(input, 1);
+            GetHandle actionHandles = Entry<GetHandle>(input, 2);
+
+            // The set, then every action in it, separated by pipes: one
+            // argument rather than a variable number of them.
+            string[] parts = actionList.Split('|');
+
+            ulong setHandle = 0;
+            failed = setHandles(parts[0], out setHandle);
+            if (failed != 0) { Fail("SteamVR does not know the action set (error " + failed + ")"); return false; }
+
+            string[] names = new string[parts.Length - 1];
+            ulong[] actions = new ulong[parts.Length - 1];
+            string missing = "";
+            int usable = 0;
+
+            for (int i = 1; i < parts.Length; i++)
+            {
+                ulong handle = 0;
+
+                // Checked, not assumed. An action SteamVR does not recognise
+                // comes back as a zero handle and is skipped in the loop below,
+                // which used to mean a button that quietly did nothing for ever
+                // with nothing anywhere saying why.
+                if (actionHandles(parts[0] + "/in/" + parts[i], out handle) != 0 || handle == 0)
+                {
+                    missing = missing.Length == 0 ? parts[i] : missing + ", " + parts[i];
+                    handle = 0;
+                }
+                else usable++;
+
+                names[i - 1] = parts[i];
+                actions[i - 1] = handle;
+            }
+
+            if (usable == 0)
+            {
+                Fail("SteamVR did not recognise any of the plugin's actions, so no controller button can reach it");
+                return false;
+            }
+
+            ActiveActionSet[] active = new ActiveActionSet[1];
+            active[0].ActionSet = setHandle;
+
+            UpdateState update = Entry<UpdateState>(input, 4);
+            DigitalData digital = Entry<DigitalData>(input, 5);
+            BindingUI openBindings = Entry<BindingUI>(input, 32);
+            GetPoses poses = Entry<GetPoses>(system, 12);
+            IndexForRole role = Entry<IndexForRole>(system, 18);
+
+            uint setSize = (uint) Marshal.SizeOf(typeof(ActiveActionSet));
+            uint dataSize = (uint) Marshal.SizeOf(typeof(DigitalActionData));
+            int stride = Marshal.SizeOf(typeof(DevicePose));
+            IntPtr buffer = Marshal.AllocHGlobal(stride * MaxDevices);
+
+            Say("{\\"t\\":\\"ready\\",\\"runtime\\":\\"" + Esc(version) + "\\"}");
+
+            // After the ready line rather than before it, because the plugin
+            // clears the last problem when a bridge attaches - and this one is
+            // still true of the bridge that just did. Said again after every
+            // re-attach, for the same reason.
+            if (missing.Length > 0) Warn("SteamVR did not recognise these actions, and nothing can be bound to them: " + missing);
+
+            try
+            {
+                int tick = 0;
+                int lost = 0;
+                DateTime until = DateTime.MinValue;
+
+                while (!Stopping())
+                {
+                    string command = TakeCommand();
+
+                    // IVRInput index 32, OpenBindingUI: SteamVR's own binding
+                    // panel, opened on our action set. Shown on the desktop as
+                    // well as in the headset, because the person who just
+                    // clicked the button in Discord is looking at a monitor.
+                    if (command == "bindings") openBindings(appKey, setHandle, 0, true);
+
+                    // A picture to put in front of the player's eyes, painted
+                    // in the browser and left in a file because a few hundred
+                    // kilobytes of pixels do not belong on a line-by-line pipe.
+                    else if (command.StartsWith("panel ")) until = ShowPanel(overlay, panel, command);
+                    else if (command == "panelhide") { HidePanel(overlay, panel); until = DateTime.MinValue; }
+
+                    /*
+                     * The countdown is kept here rather than in the plugin.
+                     *
+                     * Whatever asked for the panel is a renderer that can be
+                     * busy, reloaded or closed in the seconds between showing
+                     * it and taking it away, and none of those should be able
+                     * to leave a picture nailed across somebody's view of the
+                     * game. The side that draws it is the side that can always
+                     * be counted on to hide it.
+                     */
+                    if (until != DateTime.MinValue && DateTime.UtcNow >= until)
+                    {
+                        HidePanel(overlay, panel);
+                        until = DateTime.MinValue;
+                    }
+
+                    /*
+                     * The return value is the only warning that SteamVR has
+                     * gone: it does not kill this process, the calls simply
+                     * start failing. A second of them in a row is treated as a
+                     * shutdown and sends the outer loop back to waiting, so
+                     * taking a headset off and putting it on again costs
+                     * nothing and starts nothing.
+                     */
+                    if (update(active, setSize, 1) != 0)
+                    {
+                        if (++lost >= LostLimit) return true;
+
+                        Thread.Sleep(20);
+                        continue;
+                    }
+
+                    lost = 0;
+
+                    for (int i = 0; i < actions.Length; i++)
+                    {
+                        if (actions[i] == 0) continue;
+
+                        DigitalActionData data = new DigitalActionData();
+                        if (digital(actions[i], ref data, dataSize, 0) != 0) continue;
+
+                        // Changed as well as State: held down is one press,
+                        // not fifty a second.
+                        if (data.Active && data.State && data.Changed)
+                        {
+                            Say("{\\"t\\":\\"action\\",\\"name\\":\\"" + Esc(names[i]) + "\\"}");
+                        }
+                    }
+
+                    // Poses ten times a second rather than fifty. Hands do not
+                    // change direction meaningfully faster than that, and the
+                    // line is being parsed by a browser.
+                    if (++tick >= 5)
+                    {
+                        tick = 0;
+                        poses(UniverseStanding, 0f, buffer, MaxDevices);
+
+                        DevicePose head = (DevicePose) Marshal.PtrToStructure(buffer, typeof(DevicePose));
+                        double hands = 0;
+
+                        uint left = role(RoleLeftHand);
+                        uint right = role(RoleRightHand);
+
+                        if (left < MaxDevices) hands = Math.Max(hands, HandSpeed(buffer, stride, left));
+                        if (right < MaxDevices) hands = Math.Max(hands, HandSpeed(buffer, stride, right));
+
+                        double turn = head.PoseIsValid ? Magnitude(head.AngularVelocity) : 0;
+
+                        Say("{\\"t\\":\\"motion\\",\\"hands\\":" + Num(hands) + ",\\"head\\":" + Num(turn) + "}");
+                    }
+
+                    Thread.Sleep(20);
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+
+                // IVROverlay index 3, DestroyOverlay. SteamVR would drop it
+                // when the process goes, but this process is meant to outlive
+                // several SteamVR sessions: leaving them behind would put one
+                // more dead overlay in the compositor on every re-attach.
+                if (overlay != IntPtr.Zero && panel != 0) Entry<DropOverlay>(overlay, 3)(panel);
+            }
+
+            return false;
+        }
+
+        /**
+         * Makes the panel, and puts it where the player can read it.
+         *
+         * The canary first: index 8 turns an error number back into its own
+         * name, so calling it with zero and getting "VROverlayError_None" says
+         * that this table is laid out where the header says it is - before
+         * anything is created, and without a single call that could be a
+         * different function taking different arguments.
+         */
+        private static bool MakePanel(IntPtr overlay, string appKey, ref ulong panel)
+        {
+            IntPtr namePtr;
+
+            try { namePtr = Entry<OverlayErrorName>(overlay, 8)(0); }
+            catch { namePtr = IntPtr.Zero; }
+
+            string none = namePtr == IntPtr.Zero ? "" : Marshal.PtrToStringAnsi(namePtr);
+
+            if (none != "VROverlayError_None")
+            {
+                Warn("The IVROverlay function table is not laid out as expected, so nothing will be drawn in the headset");
+                return false;
+            }
+
+            // IVROverlay index 1, CreateOverlay. The key is what SteamVR
+            // identifies it by and has to be unique across everything running;
+            // the name is what a person sees in the compositor's own lists.
+            int failed = Entry<MakeOverlay>(overlay, 1)(appKey + ".panel", "Clipper", ref panel);
+
+            if (failed != 0 || panel == 0)
+            {
+                Warn("SteamVR refused to make the overlay (error " + failed + "), so nothing will be drawn in the headset");
+                return false;
+            }
+
+            // IVROverlay index 22, SetOverlayWidthInMeters. Height follows from
+            // the picture's own shape, so only the width is ever set.
+            Entry<OverlayWidth>(overlay, 22)(panel, PanelMetres);
+
+            /*
+             * A rotation about x, then the offset, in the headset's own frame.
+             *
+             * Row-major three by four: the left three columns turn, the last
+             * one moves. Negative z is forward in OpenVR, so the panel sits a
+             * metre in front and a little below, pitched up towards the eyes by
+             * the same angle it was put down by.
+             */
+            double c = Math.Cos(PanelTilt);
+            double s = Math.Sin(PanelTilt);
+
+            Matrix34 place = new Matrix34();
+            place.M00 = 1f; place.M03 = 0f;
+            place.M11 = (float) c; place.M12 = (float) -s; place.M13 = PanelDown;
+            place.M21 = (float) s; place.M22 = (float) c; place.M23 = PanelForward;
+
+            // IVROverlay index 35, SetOverlayTransformTrackedDeviceRelative,
+            // on device 0 - the headset, which OpenVR reserves that index for.
+            Entry<OverlayFollow>(overlay, 35)(panel, 0, ref place);
+
+            return true;
+        }
+
+        /**
+         * Draws one picture and shows it, returning when it should go away.
+         *
+         * The command is: panel, then width, height, milliseconds and the path,
+         * in that order. The numbers come first so that the path can be the
+         * whole of the rest of the line: it is a Windows path out of a folder
+         * under the user's profile, and those have spaces in them often
+         * enough to be worth never thinking about.
+         */
+        private static DateTime ShowPanel(IntPtr overlay, ulong panel, string command)
+        {
+            if (overlay == IntPtr.Zero || panel == 0) return DateTime.MinValue;
+
+            string[] parts = command.Split(new char[] { ' ' }, 5);
+            if (parts.Length < 5) return DateTime.MinValue;
+
+            int width, height, ms;
+
+            if (!int.TryParse(parts[1], out width) || !int.TryParse(parts[2], out height) || !int.TryParse(parts[3], out ms)) return DateTime.MinValue;
+            if (width <= 0 || height <= 0 || width > PanelLimit || height > PanelLimit || ms <= 0) return DateTime.MinValue;
+
+            byte[] pixels;
+
+            /*
+             * Read once, then delete, whatever happened next.
+             *
+             * The file is this side's to dispose of: the plugin writes it into
+             * the temporary directory and forgets it, because the moment it has
+             * handed the path over it has no way of knowing when the picture
+             * has been read and the file is safe to remove.
+             */
+            try { pixels = File.ReadAllBytes(parts[4]); }
+            catch { return DateTime.MinValue; }
+            finally { try { File.Delete(parts[4]); } catch { } }
+
+            // Four bytes to the pixel, and exactly as many as were promised: a
+            // buffer shorter than its stated size is read past the end of by
+            // the compositor rather than refused.
+            if (pixels.Length != width * height * 4) return DateTime.MinValue;
+
+            GCHandle pinned = GCHandle.Alloc(pixels, GCHandleType.Pinned);
+
+            try
+            {
+                // IVROverlay index 62, SetOverlayRaw. Plain RGBA out of main
+                // memory, which is why none of this needs a graphics device.
+                if (Entry<OverlayPixels>(overlay, 62)(panel, pinned.AddrOfPinnedObject(), (uint) width, (uint) height, 4) != 0) return DateTime.MinValue;
+            }
+            finally
+            {
+                pinned.Free();
+            }
+
+            // IVROverlay index 43, ShowOverlay.
+            Entry<OverlayShow>(overlay, 43)(panel);
+
+            return DateTime.UtcNow.AddMilliseconds(ms);
+        }
+
+        /** IVROverlay index 44, HideOverlay. Harmless on one already hidden. */
+        private static void HidePanel(IntPtr overlay, ulong panel)
+        {
+            if (overlay == IntPtr.Zero || panel == 0) return;
+
+            Entry<OverlayShow>(overlay, 44)(panel);
+        }
+
+        private static double HandSpeed(IntPtr buffer, int stride, uint index)
+        {
+            DevicePose pose = (DevicePose) Marshal.PtrToStructure(new IntPtr(buffer.ToInt64() + (long) stride * index), typeof(DevicePose));
+            return pose.PoseIsValid ? Magnitude(pose.Velocity) : 0;
+        }
+    }
+}
+`,ti=`# Vencord Clipper - SteamVR bridge. Generated; edits are overwritten.
+param(
+    [Parameter(Mandatory = $true)][string] $Api,
+    [Parameter(Mandatory = $true)][string] $Actions,
+    [Parameter(Mandatory = $true)][string] $Manifest,
+    [Parameter(Mandatory = $true)][string] $AppKey,
+    [Parameter(Mandatory = $true)][string] $ActionList
+)
+
+$ErrorActionPreference = "Stop"
+
+$source = @'
+${fa}
+'@
+
+try {
+    Add-Type -TypeDefinition $source -Language CSharp
+} catch {
+    Write-Output ('{"t":"error","message":"The bridge could not be compiled: ' + ($_.Exception.Message -replace '["\\\\]', ' ' -replace '\\s+', ' ') + '"}')
+    exit 1
+}
+
+# Wrapped, because nothing else catches this. An exception on the way out of Run
+# - a function table slot that is not where the header says it is, a pointer that
+# is not what it claims - would otherwise reach PowerShell, be printed to standard
+# error, and leave the plugin holding a dead bridge it thinks is worth starting
+# again every fifteen seconds, compiling all of the above each time.
+try {
+    [Clipper.Bridge]::Run($Api, $Actions, $Manifest, $AppKey, $ActionList)
+} catch {
+    Write-Output ('{"t":"error","message":"The bridge stopped: ' + ($_.Exception.Message -replace '["\\\\]', ' ' -replace '\\s+', ' ') + '"}')
+    exit 1
+}
+`;c();var ri=require("electron"),F=require("fs"),V=require("path"),Nt="vencord.clipper",oe="/actions/clipper",pt=["save","mark","toggle","pov"],ha=["save","mark"],ma={save:"Save a clip",mark:"Drop a marker",toggle:"Start / stop the clip buffer",pov:"Ask the call for their angle"};function xn(){let t=(0,V.join)(ri.app.getPath("userData"),"clipper-vr");return(0,F.mkdirSync)(t,{recursive:!0}),t}function ga(){let t=(0,V.join)(process.env.LOCALAPPDATA??"","openvr","openvrpaths.vrpath");try{let n=JSON.parse((0,F.readFileSync)(t,"utf8")).runtime;if(Array.isArray(n)){for(let r of n)if(typeof r=="string"&&(0,F.existsSync)((0,V.join)(r,"bin","win64","openvr_api.dll")))return r}}catch{}let e=(0,V.join)(process.env["ProgramFiles(x86)"]??"C:\\Program Files (x86)","Steam","steamapps","common","SteamVR");return(0,F.existsSync)((0,V.join)(e,"bin","win64","openvr_api.dll"))?e:null}function ii(){let t=ga();return t&&(0,V.join)(t,"bin","win64","openvr_api.dll")}var va=.4,ya={save:"double",mark:"long"};function wa(t,e,n){return{path:t,mode:"button",inputs:{[e]:{output:`${oe}/in/${n}`}},parameters:e==="long"?{long_press_delay:va}:{}}}function ni(t,e){return{app_key:Nt,controller_type:t,description:"Where Clipper's two default binds start out. Change them here, and add the rest.",name:"Clipper defaults",action_manifest_version:0,bindings:{[oe]:{sources:ha.map(n=>wa(e[n],ya[n],n))}}}}function oi(){let t=xn(),e={language_tag:"en_US",[oe]:"Clipper"};for(let o of pt)e[`${oe}/in/${o}`]=ma[o];let n={default_bindings:[{controller_type:"knuckles",binding_url:"bindings_knuckles.json"},{controller_type:"oculus_touch",binding_url:"bindings_oculus_touch.json"}],action_sets:[{name:oe,usage:"leftright"}],actions:pt.map(o=>({name:`${oe}/in/${o}`,type:"boolean",requirement:"optional"})),localization:[e]},r={save:"/user/hand/right/input/b",mark:"/user/hand/right/input/a"};(0,F.writeFileSync)((0,V.join)(t,"bindings_knuckles.json"),JSON.stringify(ni("knuckles",r),null,4),"utf8"),(0,F.writeFileSync)((0,V.join)(t,"bindings_oculus_touch.json"),JSON.stringify(ni("oculus_touch",r),null,4),"utf8");let i=(0,V.join)(t,"actions.json");return(0,F.writeFileSync)(i,JSON.stringify(n,null,4),"utf8"),i}function ai(t){let e={source:"builtin",applications:[{app_key:Nt,launch_type:"binary",binary_path_windows:t,is_dashboard_overlay:!1,strings:{en_us:{name:"Clipper",description:"Clip what just happened, from the controller."}}}]},n=(0,V.join)(xn(),"clipper.vrmanifest");return(0,F.writeFileSync)(n,JSON.stringify(e,null,4),"utf8"),n}function kn(){return(0,V.join)(xn(),"bridge.ps1")}var ba=15e3,Sa=45e3,si=3,xa=3,ka=2e3,_=null,mt=!1,J="",M="",we="",be=!1,In=0,di=0,Ne=null,ft=[],ht=null,ae=[],Ut=Promise.resolve();function li(t){let e=ae.shift();if(e){e(t);return}if(t.kind==="motion"){ht=t;return}ft.push(t.action),ft.length>8&&ft.shift()}function Ea(t){let e=t.trim();if(!e.startsWith("{"))return!1;let n;try{n=JSON.parse(e)}catch{return!1}if(n.t==="ready")return J=String(n.runtime??""),M="",we="",be=!1,!0;if(n.t==="waiting")return J="",M="",we=String(n.reason??""),!0;if(n.t==="warning")return M=String(n.message??"The SteamVR bridge reported something wrong without saying what"),!0;if(n.t==="error")return M=String(n.message??"The SteamVR bridge failed for a reason it did not give"),be=!J||++di>=xa,!0;if(n.t==="action"){let r=pt.find(i=>i===n.name);return r&&li({kind:"action",action:r}),!1}return n.t==="motion"&&li({kind:"motion",hands:Number(n.hands)||0,head:Number(n.head)||0}),!1}function En(){Ne||!mt||be||(Ne=setTimeout(()=>{Ne=null,mt&&pi()},ba))}function pi(){if(_)return Promise.resolve();let t=ii();if(!t)return En(),Promise.resolve();let e;try{let n=kn();(0,Tn.writeFileSync)(n,ti,"utf8");let r=(0,gt.join)(process.env.SystemRoot??"C:\\Windows","System32","WindowsPowerShell","v1.0","powershell.exe");e=(0,ci.spawn)(r,["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",n,"-Api",t,"-Actions",oi(),"-Manifest",ai(r),"-AppKey",Nt,"-ActionList",[oe,...pt].join("|")],{windowsHide:!0,stdio:["pipe","pipe","pipe"]})}catch(n){return M=`The SteamVR bridge could not be started (${n.message}).`,En(),Promise.resolve()}return _=e,J="",we="",be=!1,new Promise(n=>{let r=!1,i=()=>{r||(r=!0,clearTimeout(o),n())},o=setTimeout(()=>{M="The SteamVR bridge did not come up. Compiling it may have failed; nothing else is affected.",i()},Sa),a="";e.stdout?.on("data",s=>{a+=s.toString("utf8");let l=a.split(`
+`);a=l.pop()??"";for(let h of l)Ea(h)&&i()}),e.stderr?.on("data",s=>{M||(M=s.toString("utf8").trim().slice(0,300))}),e.on("error",s=>{M=`The SteamVR bridge could not be started (${s.message}).`,i()}),e.on("exit",()=>{_===e&&(!J&&!we&&!be?++In>=si&&(be=!0,M||(M=`The SteamVR bridge stopped ${si} times without saying why. Switch the VR controls off and on again to try it once more.`)):In=0,_=null,J="",we="");let s=ae;ae=[];for(let l of s)l(null);i(),En()})})}function fi(){Ne&&(clearTimeout(Ne),Ne=null);let t=_;_=null,J="",we="",be=!1,In=0,di=0,ft=[],ht=null;let e=ae;ae=[];for(let r of e)r(null);if(!t)return;try{t.stdin?.end()}catch{}let n=setTimeout(()=>{try{t.kill()}catch{}},ka);t.on("exit",()=>clearTimeout(n))}function hi(t){let e=Ut.then(async()=>(mt=t,t?(await pi(),Gt()):(fi(),M="",Gt())));return Ut=e.catch(()=>{}),e}function Pn(){let t=Ut.then(()=>{mt=!1,fi()});return Ut=t.catch(()=>{}),t}function Gt(){return{running:_!==null&&J!=="",wanted:mt,runtime:J,problem:M,waiting:we}}function mi(){if(!_?.stdin?.writable)return!1;try{return _.stdin.write(`bindings
+`),!0}catch{return!1}}var Ia=0;function gi(t,e,n,r){if(!_?.stdin?.writable||e<=0||n<=0||t.length!==e*n*4)return!1;let i=(0,gt.join)((0,gt.dirname)(kn()),`panel-${Ia++%8}.rgba`);try{return(0,Tn.writeFileSync)(i,t),_.stdin.write(`panel ${e} ${n} ${Math.round(r)} ${i}
+`),!0}catch{return!1}}function vi(){if(!_?.stdin?.writable)return!1;try{return _.stdin.write(`panelhide
+`),!0}catch{return!1}}function yi(t=3e4){let e=ft.shift();if(e)return Promise.resolve({kind:"action",action:e});if(ht){let n=ht;return ht=null,Promise.resolve(n)}return new Promise(n=>{let r=!1,i=a=>{r||(r=!0,clearTimeout(o),n(a))},o=setTimeout(()=>{ae=ae.filter(a=>a!==i),i(null)},t);ae.push(i)})}ui.app.on("will-quit",()=>{Pn()});var Si=!0,_n=!1,xi=/vesktop|equibop/i.test(v.app.getName());function x(t){let e=t?.trim();return e&&(0,f.isAbsolute)(e)?e:(0,f.join)(v.app.getPath("videos"),"DiscordClips")}function $e(t){let n=(0,f.basename)(String(t??"").replace(/[\\/]/g,"_")).trim().replace(/[<>:"|?*\x00-\x1f]/g,"_").replace(/^\.+/,""),r=/^([\w.\-+ ()[\]]{1,120})\.(webm|mp4|png|jpg|gif)$/i.exec(n);return r?`${r[1]}.${r[2].toLowerCase()}`:null}function ze(t){return $e(t)??`clip-${Date.now()}.webm`}function Dn(t,e){let n=(0,f.extname)(e),r=e.slice(0,e.length-n.length),i=(0,f.join)(t,e);for(let o=2;(0,p.existsSync)(i)&&o<1e3;o++)i=(0,f.join)(t,`${r} (${o})${n}`);return i}function Ta(t,e,n,r,i=!1){let o=x(e);(0,p.mkdirSync)(o,{recursive:!0});let a=ze(n),s=i?Dn(o,a):(0,f.join)(o,a);return(0,p.writeFileSync)(s,Buffer.from(r)),s}function Pa(t,e,n){let r=x(e);return(0,p.mkdirSync)(r,{recursive:!0}),Dn(r,ze(n))}var $t="voices";function Aa(t,e){let n=$e(t);return!n||!/^\d{1,25}$/.test(String(e??""))?null:`${n.slice(0,n.length-(0,f.extname)(n).length)}.${e}.webm`}function Ca(t,e){let n=$e(e);if(!n)return[];let r=(0,f.join)(x(t),$t);if(!(0,p.existsSync)(r))return[];let i=`${n.slice(0,n.length-(0,f.extname)(n).length)}.`,o=[];for(let a of(0,p.readdirSync)(r,{withFileTypes:!0})){if(!a.isFile()||!a.name.startsWith(i)||!a.name.toLowerCase().endsWith(".webm"))continue;let s=a.name.slice(i.length,a.name.length-5);/^\d{1,25}$/.test(s)&&o.push({userId:s,file:a.name})}return o}function Ra(t,e,n,r,i){let o=Aa(n,r);if(!o)return null;let a=(0,f.join)(x(e),$t);(0,p.mkdirSync)(a,{recursive:!0});let s=(0,f.join)(a,o);return(0,p.writeFileSync)(s,Buffer.from(i)),s}function Ma(t,e,n){let r=(0,f.basename)(String(n??"").replace(/[\\/]/g,"_"));if(!r.toLowerCase().endsWith(".webm")||r.includes(".."))throw new Error("not a voice track");return new Uint8Array((0,p.readFileSync)((0,f.join)(x(e),$t,r)))}function _a(t,e){let n=(0,f.join)(x(t),$t);for(let{file:r}of Ca(t,e))try{(0,p.unlinkSync)((0,f.join)(n,r))}catch{}}function Da(t,e){let n=x(e);if(!(0,p.existsSync)(n))return[];let r=[],i=new Set,o=(0,p.readdirSync)(n,{withFileTypes:!0});for(let a of o)a.isFile()&&i.add(a.name);for(let a of o){if(!a.isFile()||!/\.(webm|mp4)$/i.test(a.name))continue;let s=(0,f.join)(n,a.name);try{let l=(0,p.statSync)(s),h=dt(a.name);r.push({name:a.name,path:s,size:l.size,modified:l.mtimeMs,...i.has(h)?{thumb:h}:{}})}catch{}}return r.sort((a,s)=>s.modified-a.modified)}function La(t,e,n){let r=(0,f.join)(x(e),ze(n));return new Uint8Array((0,p.readFileSync)(r))}async function Oa(t,e,n){let r=x(e),i=ze(n),o=(0,f.join)(r,i);try{await v.shell.trashItem(o)}catch{(0,p.unlinkSync)(o)}_a(e,i);let a=(0,f.join)(r,dt(i));if((0,p.existsSync)(a))try{await v.shell.trashItem(a)}catch{try{(0,p.unlinkSync)(a)}catch{}}}function Va(t,e,n,r){let i=x(e),o=ze(n),a=(0,f.join)(i,o),s=(0,f.extname)(o),l=$e(r.toLowerCase().endsWith(s)?r:r+s);if(!l)throw new Error("That name cannot be used. Keep it under 120 characters, with letters, digits, spaces or - _ . + ( ) [ ]");if(l===o)return o;let d=l.toLowerCase()===o.toLowerCase()?(0,f.join)(i,l):Dn(i,l);(0,p.renameSync)(a,d);let u=(0,f.join)(i,dt(o));if((0,p.existsSync)(u))try{(0,p.renameSync)(u,(0,f.join)(i,dt((0,f.basename)(d))))}catch{}return(0,f.basename)(d)}var ki="clipper-library.json";function Fa(t,e){let n=(0,f.join)(x(e),ki);if(!(0,p.existsSync)(n))return"";try{return(0,p.readFileSync)(n,"utf8")}catch{return""}}function Na(t,e,n){let r=x(e);(0,p.mkdirSync)(r,{recursive:!0});let i=(0,f.join)(r,ki),o=`${i}.tmp`;(0,p.writeFileSync)(o,String(n??""),"utf8"),(0,p.renameSync)(o,i)}async function Ua(t){let e=await v.dialog.showOpenDialog({title:"Add videos to the timeline",properties:["openFile","multiSelections"],filters:[{name:"Video",extensions:["mp4","webm","mkv","mov","m4v"]}]});return e.canceled?[]:e.filePaths}var Ga=512*1024*1024;function $a(t,e){if(!(0,f.isAbsolute)(e)||!/\.(mp4|webm|mkv|mov|m4v)$/i.test(e))throw new Error("Not a video file");let n=(0,p.statSync)(e);if(n.size>Ga){let r=Math.round(n.size/1048576);throw new Error(`That video is ${r} MB; imports are capped at 512 MB. Trim it or lower its bitrate first.`)}return new Uint8Array((0,p.readFileSync)(e))}async function za(t){let e=await v.dialog.showOpenDialog({title:"Add sounds to the timeline",properties:["openFile","multiSelections"],filters:[{name:"Audio",extensions:["mp3","wav","ogg","opus","m4a","aac","flac","webm"]}]});return e.canceled?[]:e.filePaths}var Wa=64*1024*1024;function ja(t,e){if(!(0,f.isAbsolute)(e)||!/\.(mp3|wav|ogg|opus|m4a|aac|flac|webm)$/i.test(e))throw new Error("Not an audio file");let n=(0,p.statSync)(e);if(n.size>Wa){let r=Math.round(n.size/1048576);throw new Error(`That sound is ${r} MB; the timeline caps them at 64 MB.`)}return new Uint8Array((0,p.readFileSync)(e))}async function Ba(t){let e=await v.dialog.showOpenDialog({title:"Add pictures and clips to the montage",properties:["openFile","multiSelections"],filters:[{name:"Pictures and clips",extensions:["png","jpg","jpeg","webp","gif","avif","bmp","mp4","webm"]},{name:"Pictures",extensions:["png","jpg","jpeg","webp","gif","avif","bmp"]},{name:"Clips",extensions:["mp4","webm"]}]});return e.canceled?[]:e.filePaths}var Ha=24*1024*1024,Ka=64*1024*1024;function Za(t,e){if(!(0,f.isAbsolute)(e)||!/\.(png|jpe?g|webp|gif|avif|bmp|mp4|webm)$/i.test(e))throw new Error("Not a picture or a clip");let n=/\.(mp4|webm)$/i.test(e),r=n?Ka:Ha,i=(0,p.statSync)(e);if(i.size>r){let o=Math.round(i.size/1048576),a=Math.round(r/(1024*1024));throw new Error(`That ${n?"clip":"picture"} is ${o} MB; the montage caps them at ${a} MB.`)}return new Uint8Array((0,p.readFileSync)(e))}function qa(t,e,n){v.shell.showItemInFolder((0,f.join)(x(e),ze(n)))}function Ya(t,e){return x(e)}async function Ja(t,e){let n=await v.dialog.showOpenDialog({title:"Where should clips be saved?",defaultPath:x(e),properties:["openDirectory","createDirectory"]});return n.canceled?"":n.filePaths[0]??""}function Xa(t,e){let n=x(e);(0,p.mkdirSync)(n,{recursive:!0}),v.shell.openPath(n)}function Qa(t){return{platform:"win32",wayland:_n,vesktop:xi,overlay:Ft()}}var se=new Set;async function es(t,e=!0){if(_n)return[];let n=await v.desktopCapturer.getSources({types:["screen","window"],thumbnailSize:e?{width:320,height:180}:{width:0,height:0},fetchWindowIcons:!1});if(se.size){let i=new Set(n.map(o=>o.id));for(let o of se)i.has(o)||se.delete(o)}let r=[];for(let i of n){let o=i.id.startsWith("screen:");if(!e){if(!o&&se.has(i.id))continue;r.push({id:i.id,name:i.name,thumbnail:""});continue}let a=i.thumbnail.isEmpty();if(Si&&!o&&a){se.add(i.id);continue}se.delete(i.id),r.push({id:i.id,name:i.name,thumbnail:a?"":i.thumbnail.toDataURL(),capturable:!0})}return r}async function ts(t){try{return v.app.getAppMetrics().map(e=>({type:e.serviceName||e.type,mb:Math.round((e.memory?.workingSetSize??0)/1024)})).filter(e=>e.mb>0).sort((e,n)=>n.mb-e.mb)}catch{return[]}}async function ns(t){if(_n)return"";let e=await v.desktopCapturer.getSources({types:["screen"],thumbnailSize:{width:0,height:0}});if(!e.length)return"";try{let n=v.screen.getDisplayNearestPoint(v.screen.getCursorScreenPoint()),r=e.find(i=>i.display_id===String(n.id));if(r)return r.id}catch{}return e[0].id}var An="",Cn=!1;function rs(t,e,n=!0){return!n||xi?!1:(An=e??"",Cn=!0,v.session.defaultSession.setDisplayMediaRequestHandler(async(r,i)=>{let o=await v.desktopCapturer.getSources({types:["screen","window"],thumbnailSize:{width:0,height:0}}),a=o.find(h=>h.id===An),l=(a&&!se.has(a.id)?a:void 0)??o.find(h=>h.id.startsWith("screen:"))??o.find(h=>!se.has(h.id));if(!l){i({});return}i(Si&&l.id.startsWith("screen:")?{video:l,audio:"loopback"}:{video:l})},{useSystemPicker:!1}),!0)}function is(t){An="",Cn&&(Cn=!1,v.session.defaultSession.setDisplayMediaRequestHandler(null))}var Rn=new Map,Ue=[],vt=[];function os(t){let e=Ue.shift();if(e){e(t);return}vt.push(t),vt.length>8&&vt.shift()}function as(t,e){Ln();let n=[];for(let[r,i]of Object.entries(e)){if(!i)continue;let o=!1;try{o=v.globalShortcut.register(i,()=>os(r))}catch{o=!1}o?Rn.set(r,i):n.push(i)}return n}function Ln(t){for(let n of Rn.values())try{v.globalShortcut.unregister(n)}catch{}Rn.clear(),vt=[];let e=Ue;Ue=[];for(let n of e)n(null)}function ss(t,e=3e4){let n=vt.shift();return n?Promise.resolve(n):new Promise(r=>{let i=!1,o=s=>{i||(i=!0,clearTimeout(a),r(s))},a=setTimeout(()=>{Ue=Ue.filter(s=>s!==o),o(null)},e);Ue.push(o)})}v.app.on("will-quit",()=>Ln());function ls(t,e){return Gr(e)}function cs(t){return yn()}function us(t){return Dt()}function ds(t,e=3e4){return zr(e)}function ps(t,e){return hi(e)}function fs(t){return Pn()}function hs(t){return Gt()}function ms(t){return mi()}function gs(t,e,n,r,i){return gi(new Uint8Array(e),n,r,i)}function vs(t){return vi()}function ys(t,e=3e4){return yi(e)}v.app.on("will-quit",()=>{yn()});var ws=["top-left","top-right","bottom-left","bottom-right"];function Ge(t,e,n,r){let i=Number(t);return Number.isFinite(i)?Math.min(n,Math.max(e,Math.round(i))):r}function Ei(t){return ws.includes(t)?t:"bottom-right"}function bs(t){return{corner:Ei(t?.corner),width:Ge(t?.width,200,1280,420),volume:Ge(t?.volume,0,100,0),seconds:Ge(t?.seconds,0,300,10)}}function Mn(t,e){return String(t??"").replace(/\s+/g," ").trim().slice(0,e)}function Ss(t,e,n,r){let i=$e(n);if(!i)return!1;let o=(0,f.join)(x(e),i);return(0,p.existsSync)(o)?Kr(o,bs(r)):!1}function xs(t,e,n,r){return v.BrowserWindow.getFocusedWindow()||Sn()?!1:Zr(Mn(e,60),Mn(n,90),Ei(r))}function ks(t){ye()}var Es=200;function Is(t){return Array.isArray(t)?t.map(Number).filter(e=>Number.isFinite(e)&&e>=0).slice(0,Es):[]}function Ts(t){return{width:Ge(t?.width,360,1600,720),volume:Ge(t?.volume,0,100,0)}}function Ps(t,e,n,r,i){let o=$e(n);if(!o)return!1;let a=(0,f.join)(x(e),o);return(0,p.existsSync)(a)?ei({name:o,path:a,markers:Is(r)},Ts(i)):!1}function As(t){ut()}function Cs(t){return Sn()}function Rs(t,e=3e4){return Jr(Ge(e,1e3,12e4,3e4))}function Ms(t){Xr()}function _s(t,e,n,r){Qr({ok:!!e,message:Mn(n,120),close:!!r})}function Ds(t){let e=v.BrowserWindow.fromWebContents(t.sender);!e||e.isDestroyed()||(e.isMinimized()&&e.restore(),e.show(),e.focus())}var yt="kebab1337420/vencord-clipper",Ls=`VencordClipper (+https://github.com/${yt})`,Os=["patcher.js","patcher.js.LEGAL.txt","preload.js","renderer.css","renderer.js","renderer.js.LEGAL.txt","vencordDesktopMain.js","vencordDesktopMain.js.LEGAL.txt","vencordDesktopPreload.js","vencordDesktopRenderer.css","vencordDesktopRenderer.js","vencordDesktopRenderer.js.LEGAL.txt"];function zt(t,e=0){return new Promise((n,r)=>{let i=(0,bi.get)(t,{headers:{"User-Agent":Ls,Accept:"*/*"}},o=>{let a=o.statusCode??0,{location:s}=o.headers;if(a>=300&&a<400&&s){o.resume(),e>=5?r(new Error(`Too many redirects for ${t}`)):n(zt(new URL(s,t).toString(),e+1));return}let l=[];o.on("data",h=>l.push(h)),o.on("end",()=>n({status:a,body:Buffer.concat(l)})),o.on("error",r)});i.setTimeout(6e4,()=>i.destroy(new Error(`${t} timed out`))),i.on("error",r)})}async function Vs(t){let{status:e,body:n}=await zt(t);if(e!==200)throw new Error(`${t} answered ${e}`);return n}function Ii(){return __dirname}function Ti(t){return(0,p.existsSync)((0,f.join)(t,"patcher.js"))&&(0,p.existsSync)((0,f.join)(t,"renderer.js"))}function Pi(t){try{return(0,p.accessSync)(t,p.constants.W_OK),!0}catch{return!1}}function Fs(t,e){let n=o=>o.replace(/^v/i,"").split(/[.\-+]/).map(a=>Number(a)||0),r=n(t),i=n(e);for(let o=0;o<3;o++)if((r[o]??0)!==(i[o]??0))return(r[o]??0)>(i[o]??0);return!1}async function Ns(t,e){let n=await Vs(`https://api.github.com/repos/${yt}/releases/latest`),r=JSON.parse(n.toString("utf8")),i=String(r.tag_name??""),o=i.replace(/^v/i,""),a=Ii();return{version:o,tag:i,available:!!o&&Fs(o,e),notes:String(r.body??"").trim().slice(0,1200),url:String(r.html_url??`https://github.com/${yt}/releases`),directory:a,writable:Ti(a)&&Pi(a)}}async function Us(t){let{status:e,body:n}=await zt(`https://raw.githubusercontent.com/${yt}/${t}/prebuilt/build-info.json`);if(e===404)return null;if(e!==200)throw new Error(`The release's file list answered ${e}, so there is nothing to check the bundle against`);let r;try{({files:r}=JSON.parse(n.toString("utf8")))}catch{throw new Error("The release's file list could not be read, so there is nothing to check the bundle against")}if(!r||typeof r!="object")throw new Error("The release's file list names no files");return r}async function Gs(t,e){if(!/^[\w.-]{1,40}$/.test(e))throw new Error(`Refusing to fetch a release named ${e}`);let n=Ii();if(!Ti(n))throw new Error(`No installed bundle at ${n}`);if(!Pi(n))throw new Error(`${n} is read-only`);let r=await Us(e),i=r?Object.keys(r):Os,o=(0,f.join)(n,".clipper-update");(0,p.rmSync)(o,{recursive:!0,force:!0}),(0,p.mkdirSync)(o,{recursive:!0});try{let a=[];for(let d of i){if(d!==(0,f.basename)(d)||d.startsWith("."))throw new Error(`Refusing a release file named ${d}`);let{status:u,body:y}=await zt(`https://raw.githubusercontent.com/${yt}/${e}/prebuilt/dist/${d}`);if(u===404&&!r)continue;if(u!==200)throw new Error(`${d} answered ${u}`);if(y.length===0)throw new Error(`${d} came back empty`);let I=r?.[d];if(I?.size!==void 0&&y.length!==I.size)throw new Error(`${d} is ${y.length} bytes, the release says ${I.size}`);if(I?.sha256&&(0,wi.createHash)("sha256").update(y).digest("hex").toLowerCase()!==I.sha256.toLowerCase())throw new Error(`${d} does not match its hash`);(0,p.writeFileSync)((0,f.join)(o,d),y),a.push(d)}if(a.length===0)throw new Error(`There is no bundle published under ${e}`);for(let d of["renderer.js","patcher.js"])if(!a.includes(d))throw new Error(`The release carries no ${d}`);if(!(0,p.readFileSync)((0,f.join)(o,"renderer.js")).includes("Clipper"))throw new Error("There is no Clipper in that release's renderer");let s=(0,f.join)(o,".previous");(0,p.mkdirSync)(s,{recursive:!0});let l=[],h=[];try{for(let d of a){let u=(0,f.join)(n,d);(0,p.existsSync)(u)&&((0,p.renameSync)(u,(0,f.join)(s,d)),l.push(d)),(0,p.renameSync)((0,f.join)(o,d),u),h.push(d)}}catch(d){for(let u of h)try{(0,p.unlinkSync)((0,f.join)(n,u))}catch{}for(let u of l)try{(0,p.renameSync)((0,f.join)(s,u),(0,f.join)(n,u))}catch{}throw new Error(`The update could not be put in place (${d.message}). The bundle that was there has been put back.`)}return a}finally{(0,p.rmSync)(o,{recursive:!0,force:!0})}}function $s(t){v.app.relaunch(),v.app.quit(),setTimeout(()=>v.app.exit(0),3e3)}var Ai={AppleMusicRichPresence:on,ConsoleShortcuts:an,FixSpotifyEmbeds:Er,FixYoutubeEmbeds:Tr,OpenInApp:pn,Translate:fn,VoiceMessages:hn,XSOverlay:mn,YoutubeAdblock:_r,Clipper:On};var Ci={};for(let[t,e]of Object.entries(Ai)){let n=Object.entries(e);if(!n.length)continue;let r=Ci[t]={};for(let[i,o]of n){let a=`VencordPluginNative_${t}_${i}`;Vn.ipcMain.handle(a,o),r[i]=a}}Vn.ipcMain.on("VencordGetPluginIpcMethodMap",t=>{t.returnValue=Ci});c();function Fn(t,e=300){let n;return function(...r){clearTimeout(n),n=setTimeout(()=>{t(...r)},e)}}Ae();var b=require("electron");c();var Ri="PCFkb2N0eXBlIGh0bWw+PGh0bWwgbGFuZz0iZW4iPjxoZWFkPjxtZXRhIGNoYXJzZXQ9InV0Zi04Ij48dGl0bGU+VmVuY29yZCBRdWlja0NTUyBFZGl0b3I8L3RpdGxlPjxsaW5rIHJlbD0ic3R5bGVzaGVldCIgaHJlZj0iaHR0cHM6Ly9jZG4uanNkZWxpdnIubmV0L25wbS9tb25hY28tZWRpdG9yQDAuNTAuMC9taW4vdnMvZWRpdG9yL2VkaXRvci5tYWluLmNzcyIgaW50ZWdyaXR5PSJzaGEyNTYtdGlKUFEyTzA0ei9wWi9Bd2R5SWdock9NemV3ZitQSXZFbDFZS2JRdnNaaz0iIGNyb3Nzb3JpZ2luPSJhbm9ueW1vdXMiIHJlZmVycmVycG9saWN5PSJuby1yZWZlcnJlciI+PHN0eWxlPiNjb250YWluZXIsYm9keSxodG1se3Bvc2l0aW9uOmFic29sdXRlO2xlZnQ6MDt0b3A6MDt3aWR0aDoxMDAlO2hlaWdodDoxMDAlO21hcmdpbjowO3BhZGRpbmc6MDtvdmVyZmxvdzpoaWRkZW59PC9zdHlsZT48L2hlYWQ+PGJvZHk+PGRpdiBpZD0iY29udGFpbmVyIj48L2Rpdj48c2NyaXB0IHNyYz0iaHR0cHM6Ly9jZG4uanNkZWxpdnIubmV0L25wbS9tb25hY28tZWRpdG9yQDAuNTAuMC9taW4vdnMvbG9hZGVyLmpzIiBpbnRlZ3JpdHk9InNoYTI1Ni1LY1U0OFRHcjg0cjd1bkY3SjVJZ0JvOTVhZVZyRWJyR2UwNFM3VGNGVWpzPSIgY3Jvc3NvcmlnaW49ImFub255bW91cyIgcmVmZXJyZXJwb2xpY3k9Im5vLXJlZmVycmVyIj48L3NjcmlwdD48c2NyaXB0PnJlcXVpcmUuY29uZmlnKHtwYXRoczp7dnM6Imh0dHBzOi8vY2RuLmpzZGVsaXZyLm5ldC9ucG0vbW9uYWNvLWVkaXRvckAwLjUwLjAvbWluL3ZzIn19KSxyZXF1aXJlKFsidnMvZWRpdG9yL2VkaXRvci5tYWluIl0sKCgpPT57Z2V0Q3VycmVudENzcygpLnRoZW4oKGU9Pnt2YXIgdD1tb25hY28uZWRpdG9yLmNyZWF0ZShkb2N1bWVudC5nZXRFbGVtZW50QnlJZCgiY29udGFpbmVyIikse3ZhbHVlOmUsbGFuZ3VhZ2U6ImNzcyIsdGhlbWU6Z2V0VGhlbWUoKX0pO3Qub25EaWRDaGFuZ2VNb2RlbENvbnRlbnQoKCgpPT5zZXRDc3ModC5nZXRWYWx1ZSgpKSkpLHdpbmRvdy5hZGRFdmVudExpc3RlbmVyKCJyZXNpemUiLCgoKT0+e3QubGF5b3V0KCl9KSl9KSl9KSk8L3NjcmlwdD48L2JvZHk+PC9odG1sPg==";var Se=require("fs"),ce=require("fs/promises"),Gi=require("os"),Wn=require("path");c();Ae();var We=require("electron");c();var Nn=require("electron"),W=["connect-src"],N=[...W,"img-src"],Di=["style-src","font-src"],Mi=[...N,"media-src"],k=[...N,...Di],_i=[...k,"script-src","worker-src"],Gn={"http://localhost:*":k,"http://127.0.0.1:*":k,"localhost:*":k,"127.0.0.1:*":k,"*.github.io":k,"github.com":k,"raw.githubusercontent.com":k,"*.gitlab.io":k,"gitlab.com":k,"*.codeberg.page":k,"codeberg.org":k,"*.githack.com":k,"jsdelivr.net":k,"fonts.googleapis.com":Di,"i.imgur.com":N,"i.ibb.co":N,"i.pinimg.com":N,"files.catbox.moe":k,"cdn.discordapp.com":k,"media.discordapp.net":N,"cdnjs.cloudflare.com":_i,"cdn.jsdelivr.net":_i,"api.github.com":W,"ws.audioscrobbler.com":W,"musicbrainz.org":W,"*.listenbrainz.org":W,"coverartarchive.org":W,"archive.org":W,"*.archive.org":W,"translate-pa.googleapis.com":W,"*.vencord.dev":N,"manti.vendicated.dev":N,"decor.fieryflames.dev":W,"ugc.decor.fieryflames.dev":N,"sponsor.ajay.app":W,"dearrow-thumb.ajay.app":N,"usrbg.is-hardly.online":N,"icons.duckduckgo.com":N,"*.tenor.com":Mi,"*.tenor.co":Mi},Un=(t,e)=>Object.keys(t).find(n=>n.toLowerCase()===e),zs=t=>{let e={};return t.split(";").forEach(n=>{let[r,...i]=n.trim().split(/\s+/g);r&&!Object.prototype.hasOwnProperty.call(e,r)&&(e[r]=i)}),e},Ws=t=>Object.entries(t).filter(([,e])=>e?.length).map(e=>e.flat().join(" ")).join("; "),js=t=>{let e=Un(t,"content-security-policy-report-only");e&&delete t[e];let n=Un(t,"content-security-policy");if(n){let r=zs(t[n][0]),i=(o,...a)=>{r[o]??=[...r["default-src"]??[]],r[o].push(...a)};i("style-src","'unsafe-inline'"),i("script-src","'unsafe-inline'","'unsafe-eval'");for(let o of["style-src","connect-src","img-src","font-src","media-src","worker-src"])i(o,"blob:","data:","vencord:","vesktop:");for(let[o,a]of Object.entries(j.store.customCspRules))for(let s of a)i(s,o);for(let[o,a]of Object.entries(Gn))for(let s of a)i(s,o);t[n]=[Ws(r)]}};function Li(){Nn.session.defaultSession.webRequest.onHeadersReceived(({responseHeaders:t,resourceType:e},n)=>{if(t&&(e==="mainFrame"&&js(t),e==="stylesheet")){let r=Un(t,"content-type");r&&(t[r]=["text/css"])}n({cancel:!1,responseHeaders:t})}),Nn.session.defaultSession.webRequest.onHeadersReceived=()=>{}}function Oi(){We.ipcMain.handle("VencordCspRemoveOverride",Zs),We.ipcMain.handle("VencordCspRequestAddOverride",Ks),We.ipcMain.handle("VencordCspIsDomainAllowed",qs)}function Bs(t,e){try{let{host:n}=new URL(t);if(/[;'"\\]/.test(n))return!1}catch{return!1}return!(e.length===0||e.some(n=>!k.includes(n)))}function Hs(t,e,n){let r=new URL(t).host,i=`${n} wants to allow connections to ${r}`,o=`Unless you recognise and fully trust ${r}, you should cancel this request!
+
+You will have to fully close and restart Vesktop for the changes to take effect.`;if(e.length===1&&e[0]==="connect-src")return{message:i,detail:o};let a=e.filter(s=>s!=="connect-src").map(s=>{switch(s){case"img-src":return"Images";case"style-src":return"CSS & Themes";case"font-src":return"Fonts";default:throw new Error(`Illegal CSP directive: ${s}`)}}).sort().join(", ");return o=`The following types of content will be allowed to load from ${r}:
+${a}
+
+${o}`,{message:i,detail:o}}async function Ks(t,e,n,r){if(!Bs(e,n))return"invalid";let i=new URL(e).host;if(i in j.store.customCspRules)return"conflict";let{checkboxChecked:o,response:a}=await We.dialog.showMessageBox({...Hs(e,n,r),type:r?"info":"warning",title:"Vencord Host Permissions",buttons:["Cancel","Allow"],defaultId:0,cancelId:0,checkboxLabel:`I fully trust ${i} and understand the risks of allowing connections to it.`,checkboxChecked:!1});return a!==1?"cancelled":o?(j.store.customCspRules[i]=n,"ok"):"unchecked"}function Zs(t,e){return e in j.store.customCspRules?(delete j.store.customCspRules[e],!0):!1}function qs(t,e,n){try{let r=new URL(e).host,i=Gn[r]??j.store.customCspRules[r];return i?n.every(o=>i.includes(o)):!1}catch{return!1}}c();var Ys=/[^\S\r\n]*?\r?(?:\r\n|\n)[^\S\r\n]*?\*[^\S\r\n]?/,Js=/^\\@/;function $n(t,e={}){return{fileName:t,name:e.name??t.replace(/\.css$/i,""),author:e.author??"Unknown Author",description:e.description??"A Discord Theme.",version:e.version,license:e.license,source:e.source,website:e.website,invite:e.invite}}function Vi(t){return t.charCodeAt(0)===65279&&(t=t.slice(1)),t}function Fi(t,e){if(!t)return $n(e);let n=t.split("/**",2)?.[1]?.split("*/",1)?.[0];if(!n)return $n(e);let r={},i="",o="";for(let a of n.split(Ys))if(a.length!==0)if(a.charAt(0)==="@"&&a.charAt(1)!==" "){r[i]=o.trim();let s=a.indexOf(" ");i=a.substring(1,s),o=a.substring(s+1)}else o+=" "+a.replace("\\n",`
+`).replace(Js,"@");return r[i]=o.trim(),delete r[""],$n(e,r)}c();var je=require("path");function le(t,e){let n=(0,je.normalize)(t+"/"),r=(0,je.join)(t,e),i=(0,je.normalize)(r);return i===(0,je.normalize)(t)||i.startsWith(n)?i:null}c();var Ni=require("electron");function Ui(t){t.webContents.setWindowOpenHandler(({url:e})=>{switch(e){case"about:blank":case"https://discord.com/popout":case"https://ptb.discord.com/popout":case"https://canary.discord.com/popout":return{action:"allow"}}try{var{protocol:n}=new URL(e)}catch{return{action:"deny"}}switch(n){case"http:":case"https:":case"mailto:":case"steam:":case"spotify:":Ni.shell.openExternal(e)}return{action:"deny"}})}var Xs=(0,Wn.join)(__dirname,"vencordDesktopRenderer.css");(0,Se.mkdirSync)(ne,{recursive:!0});Oi();function $i(){return(0,ce.readFile)(Re,"utf-8").catch(()=>"")}async function Qs(){let t=await(0,ce.readdir)(ne).catch(()=>[]),e=[];for(let n of t){if(!n.endsWith(".css"))continue;let r=await zi(n).then(Vi).catch(()=>null);r!=null&&e.push(Fi(r,n))}return e}function zi(t){t=t.replace(/\?v=\d+$/,"");let e=le(ne,t);return e?(0,ce.readFile)(e,"utf-8"):Promise.reject(`Unsafe path ${t}`)}b.ipcMain.handle("VencordOpenQuickCss",()=>b.shell.openPath(Re));b.ipcMain.handle("VencordOpenExternal",(t,e)=>{try{var{protocol:n}=new URL(e)}catch{throw"Malformed URL"}if(!br.includes(n))throw"Disallowed protocol.";b.shell.openExternal(e).catch(r=>console.error("[Vencord] Failed to open external link",e,r))});b.ipcMain.handle("VencordGetQuickCss",()=>$i());b.ipcMain.handle("VencordSetQuickCss",(t,e)=>(0,Se.writeFileSync)(Re,e));b.ipcMain.handle("VencordGetThemesList",()=>Qs());b.ipcMain.handle("VencordGetThemeData",(t,e)=>zi(e));b.ipcMain.handle("VencordGetThemeSystemValues",()=>{let t=b.systemPreferences.getAccentColor?.()??"";return t.length&&t[0]!=="#"&&(t=`#${t}`),{"os-accent-color":t}});b.ipcMain.handle("VencordOpenThemesFolder",()=>b.shell.openPath(ne));b.ipcMain.handle("VencordOpenSettingsFolder",()=>b.shell.openPath(fe));var zn=[];b.ipcMain.handle("VencordInitFileWatchers",({sender:t})=>{zn.forEach(i=>i.close());let e,n;(0,ce.open)(Re,"a+").then(i=>{i.close(),e=(0,Se.watch)(Re,{persistent:!1},Fn(async()=>{t.postMessage("VencordQuickCssUpdate",await $i())},50))}).catch(()=>{});let r=(0,Se.watch)(ne,{persistent:!1},Fn(()=>{t.postMessage("VencordThemeUpdate",void 0)}));zn=[e,r,n].filter(Boolean),t.once("destroyed",()=>{e?.close(),r.close(),n?.close(),zn=[]})});b.ipcMain.on("VencordGetMonacoTheme",t=>{t.returnValue=b.nativeTheme.shouldUseDarkColors?"vs-dark":"vs-light"});b.ipcMain.handle("VencordOpenMonacoEditor",async()=>{let t="Vencord QuickCSS Editor",e=b.BrowserWindow.getAllWindows().find(r=>r.title===t);if(e&&!e.isDestroyed()){e.focus();return}let n=new b.BrowserWindow({title:t,autoHideMenuBar:!0,darkTheme:!0,backgroundColor:b.nativeTheme.shouldUseDarkColors?"#1e1e1e":"white",webPreferences:{preload:(0,Wn.join)(__dirname,"vencordDesktopPreload.js"),contextIsolation:!0,nodeIntegration:!1,sandbox:!1}});Ui(n),await n.loadURL(`data:text/html;base64,${Ri}`)});b.ipcMain.handle("VencordGetRendererCss",()=>(0,ce.readFile)(Xs,"utf-8"));b.ipcMain.on("VencordSupportsWindowsMaterial",t=>{t.returnValue=Number((0,Gi.release)().split(".")[2])>=22621});var ke=require("electron"),uo=require("path"),Xn=require("url");c();var qt=require("electron");c();var Bi=require("module"),el=(0,Bi.createRequire)("/"),Be,jt,Bn,tl=";var __w=require('worker_threads');__w.parentPort.on('message',function(m){onmessage({data:m})}),postMessage=function(m,t){__w.parentPort.postMessage(m,t)},close=process.exit;self=global";try{Be=el("worker_threads"),jt=Be.Worker,Bn=Be.isMarkedAsUntransferable}catch{}var nl=jt?function(t,e,n,r,i){var o=!1,a=new jt(t+tl,{eval:!0}).on("error",function(s){return i(s,null)}).on("message",function(s){return i(null,s)}).on("exit",function(s){s&&!o&&i(new Error("exited with code "+s),null)});return Bn&&(r=r.filter(function(s){return!Bn(s)})),a.postMessage(n,r),a.terminate=function(){return o=!0,jt.prototype.terminate.call(a)},a}:function(t,e,n,r,i){setImmediate(function(){return i(new Error("async operations unsupported - update to Node 12+ (or Node 10-11 with the --experimental-worker CLI flag)"),null)});var o=function(){};return{terminate:o,postMessage:o}},A=Uint8Array,xe=Uint16Array,Hi=Int32Array,Kn=new A([0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0,0,0,0]),Zn=new A([0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,0,0]),Ki=new A([16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15]),Zi=function(t,e){for(var n=new xe(31),r=0;r<31;++r)n[r]=e+=1<<t[r-1];for(var i=new Hi(n[30]),r=1;r<30;++r)for(var o=n[r];o<n[r+1];++o)i[o]=o-n[r]<<5|r;return{b:n,r:i}},Be=Zi(Kn,2),qn=Be.b,rl=Be.r;qn[28]=258,rl[258]=28;var qi=Zi(Zn,0),Yi=qi.b,ku=qi.r,Kt=new xe(32768);for(w=0;w<32768;++w)X=(w&43690)>>1|(w&21845)<<1,X=(X&52428)>>2|(X&13107)<<2,X=(X&61680)>>4|(X&3855)<<4,Kt[w]=((X&65280)>>8|(X&255)<<8)>>1;var X,w,He=(function(t,e,n){for(var r=t.length,i=0,o=new xe(e);i<r;++i)t[i]&&++o[t[i]-1];var a=new xe(e);for(i=1;i<e;++i)a[i]=a[i-1]+o[i-1]<<1;var s;if(n){s=new xe(1<<e);var l=15-e;for(i=0;i<r;++i)if(t[i])for(var h=i<<4|t[i],d=e-t[i],u=a[t[i]-1]++<<d,y=u|(1<<d)-1;u<=y;++u)s[Kt[u]>>l]=h}else for(s=new xe(r),i=0;i<r;++i)t[i]&&(s[i]=Kt[a[t[i]-1]++]>>15-t[i]);return s}),wt=new A(288);for(w=0;w<144;++w)wt[w]=8;var w;for(w=144;w<256;++w)wt[w]=9;var w;for(w=256;w<280;++w)wt[w]=7;var w;for(w=280;w<288;++w)wt[w]=8;var w,Ji=new A(32);for(w=0;w<32;++w)Ji[w]=5;var w;var Xi=He(wt,9,1);var Qi=He(Ji,5,1),Bt=function(t){for(var e=t[0],n=1;n<t.length;++n)t[n]>e&&(e=t[n]);return e},U=function(t,e,n){var r=e/8|0;return(t[r]|t[r+1]<<8)>>(e&7)&n},Ht=function(t,e){var n=e/8|0;return(t[n]|t[n+1]<<8|t[n+2]<<16)>>(e&7)},eo=function(t){return(t+7)/8|0},Zt=function(t,e,n){return(e==null||e<0)&&(e=0),(n==null||n>t.length)&&(n=t.length),new A(t.subarray(e,n))};var to=["unexpected EOF","invalid block type","invalid length/literal","invalid distance","stream finished","no stream handler",,"no callback","invalid UTF-8 data","extra field too long","date not in range 1980-2099","filename too long","stream finishing","invalid zip data"],T=function(t,e,n){var r=new Error(e||to[t]);if(r.code=t,Error.captureStackTrace&&Error.captureStackTrace(r,T),!n)throw r;return r},no=function(t,e,n,r){var i=t.length,o=r?r.length:0;if(!i||e.f&&!e.l)return n||new A(0);var a=!n,s=a||e.i!=2,l=e.i;a&&(n=new A(i*3));var h=function(ir){var or=n.length;if(ir>or){var ar=new A(Math.max(or*2,ir));ar.set(n),n=ar}},d=e.f||0,u=e.p||0,y=e.b||0,I=e.l,ue=e.d,q=e.m,D=e.n,L=i*8;do{if(!I){d=U(t,u,1);var Q=U(t,u+1,3);if(u+=3,Q)if(Q==1)I=Xi,ue=Qi,q=9,D=5;else if(Q==2){var Ke=U(t,u,31)+257,bt=U(t,u+10,15)+4,de=Ke+U(t,u+5,31)+1;u+=14;for(var O=new A(de),Ie=new A(19),E=0;E<bt;++E)Ie[Ki[E]]=U(t,u+E*3,7);u+=bt*3;for(var Ze=Bt(Ie),po=(1<<Ze)-1,fo=He(Ie,Ze,1),E=0;E<de;){var Qn=fo[U(t,u,po)];u+=Qn&15;var P=Qn>>4;if(P<16)O[E++]=P;else{var Te=0,St=0;for(P==16?(St=3+U(t,u,3),u+=2,Te=O[E-1]):P==17?(St=3+U(t,u,7),u+=3):P==18&&(St=11+U(t,u,127),u+=7);St--;)O[E++]=Te}}var er=O.subarray(0,Ke),ee=O.subarray(Ke);q=Bt(er),D=Bt(ee),I=He(er,q,1),ue=He(ee,D,1)}else T(1);else{var P=eo(u)+4,Y=t[P-4]|t[P-3]<<8,Ee=P+Y;if(Ee>i){l&&T(0);break}s&&h(y+Y),n.set(t.subarray(P,Ee),y),e.b=y+=Y,e.p=u=Ee*8,e.f=d;continue}if(u>L){l&&T(0);break}}s&&h(y+131072);for(var ho=(1<<q)-1,mo=(1<<D)-1,Yt=u;;Yt=u){var Te=I[Ht(t,u)&ho],Pe=Te>>4;if(u+=Te&15,u>L){l&&T(0);break}if(Te||T(2),Pe<256)n[y++]=Pe;else if(Pe==256){Yt=u,I=null;break}else{var tr=Pe-254;if(Pe>264){var E=Pe-257,qe=Kn[E];tr=U(t,u,(1<<qe)-1)+qn[E],u+=qe}var Jt=ue[Ht(t,u)&mo],Xt=Jt>>4;Jt||T(3),u+=Jt&15;var ee=Yi[Xt];if(Xt>3){var qe=Zn[Xt];ee+=Ht(t,u)&(1<<qe)-1,u+=qe}if(u>L){l&&T(0);break}s&&h(y+131072);var nr=y+tr;if(y<ee){var rr=o-ee,go=Math.min(ee,nr);for(rr+y<0&&T(3);y<go;++y)n[y]=r[rr+y]}for(;y<nr;++y)n[y]=n[y-ee]}}e.l=I,e.p=Yt,e.b=y,e.f=d,I&&(d=1,e.m=q,e.d=ue,e.n=D)}while(!d);return y!=n.length&&a?Zt(n,0,y):n.subarray(0,y)};var il=new A(0);var ol=function(t,e){var n={};for(var r in t)n[r]=t[r];for(var r in e)n[r]=e[r];return n},Wi=function(t,e,n){for(var r=t(),i=t.toString(),o=i.slice(i.indexOf("[")+1,i.lastIndexOf("]")).replace(/\s+/g,"").split(","),a=0;a<r.length;++a){var s=r[a],l=o[a];if(typeof s=="function"){e+=";"+l+"=";var h=s.toString();if(s.prototype)if(h.indexOf("[native code]")!=-1){var d=h.indexOf(" ",8)+1;e+=h.slice(d,h.indexOf("(",d))}else{e+=h;for(var u in s.prototype)e+=";"+l+".prototype."+u+"="+s.prototype[u].toString()}else e+=h}else n[l]=s}return e},Wt=[],al=function(t){var e=[];for(var n in t)t[n].buffer&&e.push((t[n]=new t[n].constructor(t[n])).buffer);return e},sl=function(t,e,n,r){if(!Wt[n]){for(var i="",o={},a=t.length-1,s=0;s<a;++s)i=Wi(t[s],i,o);Wt[n]={c:Wi(t[a],i,o),e:o}}var l=ol({},Wt[n].e);return nl(Wt[n].c+";onmessage=function(e){for(var k in e.data)self[k]=e.data[k];onmessage="+e.toString()+"}",n,l,al(l),r)},ll=function(){return[A,xe,Hi,Kn,Zn,Ki,qn,Yi,Xi,Qi,Kt,to,He,Bt,U,Ht,eo,Zt,T,no,Yn,ro,io]};var ro=function(t){return postMessage(t,[t.buffer])},io=function(t){return t&&{out:t.size&&new A(t.size),dictionary:t.dictionary}},cl=function(t,e,n,r,i,o){var a=sl(n,r,i,function(s,l){a.terminate(),o(s,l)});return a.postMessage([t,e],e.consume?[t.buffer]:[]),function(){a.terminate()}};var K=function(t,e){return t[e]|t[e+1]<<8},G=function(t,e){return(t[e]|t[e+1]<<8|t[e+2]<<16|t[e+3]<<24)>>>0},jn=function(t,e){return G(t,e)+G(t,e+4)*4294967296};function ul(t,e,n){return n||(n=e,e={}),typeof n!="function"&&T(7),cl(t,e,[ll],function(r){return ro(Yn(r.data[0],io(r.data[1])))},1,n)}function Yn(t,e){return no(t,{i:2},e&&e.out,e&&e.dictionary)}var Hn=typeof TextDecoder<"u"&&new TextDecoder,dl=0;try{Hn.decode(il,{stream:!0}),dl=1}catch{}var pl=function(t){for(var e="",n=0;;){var r=t[n++],i=(r>127)+(r>223)+(r>239);if(n+i>t.length)return{s:e,r:Zt(t,n-1)};i?i==3?(r=((r&15)<<18|(t[n++]&63)<<12|(t[n++]&63)<<6|t[n++]&63)-65536,e+=String.fromCharCode(55296|r>>10,56320|r&1023)):i&1?e+=String.fromCharCode((r&31)<<6|t[n++]&63):e+=String.fromCharCode((r&15)<<12|(t[n++]&63)<<6|t[n++]&63):e+=String.fromCharCode(r)}};function fl(t,e){if(e){for(var n="",r=0;r<t.length;r+=16384)n+=String.fromCharCode.apply(null,t.subarray(r,r+16384));return n}else{if(Hn)return Hn.decode(t);var i=pl(t),o=i.s,n=i.r;return n.length&&T(8),o}}var hl=function(t,e){return e+30+K(t,e+26)+K(t,e+28)},ml=function(t,e,n){var r=K(t,e+28),i=K(t,e+30),o=fl(t.subarray(e+46,e+46+r),!(K(t,e+8)&2048)),a=e+46+r,s=gl(t,a,i,n,G(t,e+20),G(t,e+24),G(t,e+42)),l=s[0],h=s[1],d=s[2];return[K(t,e+10),l,h,o,a+i+K(t,e+32),d]},gl=function(t,e,n,r,i,o,a){var s=i==4294967295,l=o==4294967295,h=a==4294967295,d=e+n,u=s+l+h;if(r&&u){for(;e+4<d;e+=4+K(t,e+2))if(K(t,e)==1)return[s?jn(t,e+4+8*l):i,l?jn(t,e+4):o,h?jn(t,e+4+8*(l+s)):a,1];r<2&&T(13)}return[i,o,a,0]};var ji=typeof queueMicrotask=="function"?queueMicrotask:typeof setTimeout=="function"?setTimeout:function(t){t()};function oo(t,e,n){n||(n=e,e={}),typeof n!="function"&&T(7);var r=[],i=function(){for(var D=0;D<r.length;++D)r[D]()},o={},a=function(D,L){ji(function(){n(D,L)})};ji(function(){a=n});for(var s=t.length-22;G(t,s)!=101010256;--s)if(!s||t.length-s>65558)return a(T(13,0,1),null),i;var l=K(t,s+8);if(l){var h=l,d=G(t,s+16),u=G(t,s-20)==117853008;if(u){var y=G(t,s-12);u=G(t,y)==101075792,u&&(h=l=G(t,y+32),d=G(t,y+48))}for(var I=e&&e.filter,ue=function(D){var L=ml(t,d,u),Q=L[0],P=L[1],Y=L[2],Ee=L[3],Ke=L[4],bt=L[5],de=hl(t,bt);d=Ke;var O=function(E,Ze){E?(i(),a(E,null)):(Ze&&(o[Ee]=Ze),--l||a(null,o))};if(!I||I({name:Ee,size:P,originalSize:Y,compression:Q}))if(!Q)O(null,Zt(t,de,de+P));else if(Q==8){var Ie=t.subarray(de,de+P);if(Y<524288||P>.8*Y)try{O(null,Yn(Ie,{out:new A(Y)}))}catch(E){O(E,null)}else r.push(ul(Ie,{size:Y},O))}else O(T(14,"unknown compression type "+Q,1),null);else O(null,null)},q=0;q<h;++q)ue(q)}else a(null,{});return i}var lo=require("fs"),Z=require("fs/promises"),Jn=require("path");c();function ao(t){function e(a,s,l,h){let d=0;return d+=a<<0,d+=s<<8,d+=l<<16,d+=h<<24>>>0,d}if(t[0]===80&&t[1]===75&&t[2]===3&&t[3]===4)return t;if(t[0]!==67||t[1]!==114||t[2]!==50||t[3]!==52)throw new Error("Invalid header: Does not start with Cr24");let n=t[4]===3,r=t[4]===2;if(!r&&!n||t[5]||t[6]||t[7])throw new Error("Unexpected crx format version number.");if(r){let a=e(t[8],t[9],t[10],t[11]),s=e(t[12],t[13],t[14],t[15]),l=16+a+s;return t.subarray(l,t.length)}let o=12+e(t[8],t[9],t[10],t[11]);return t.subarray(o,t.length)}c();var vl=require("original-fs");async function yl(t,e){try{var n=await fetch(t,e)}catch(i){throw i instanceof Error&&i.cause&&(i=i.cause),new Error(`${e?.method??"GET"} ${t} failed: ${i}`)}if(n.ok)return n;let r=`${e?.method??"GET"} ${t}: ${n.status} ${n.statusText}`;try{let i=await n.text();r+=`
+${i}`}catch{}throw new Error(r)}async function so(t,e){let r=await(await yl(t,e)).arrayBuffer();return Buffer.from(r)}var wl=(0,Jn.join)(Et,"ExtensionCache");async function bl(t,e){return await(0,Z.mkdir)(e,{recursive:!0}),new Promise((n,r)=>{oo(t,(i,o)=>{if(i)return void r(i);Promise.all(Object.keys(o).map(async a=>{if(a.startsWith("_metadata/"))return;if(a.includes("\0"))throw new Error(`Invalid filename: "${a}"`);if(a.endsWith("/")){let u=le(e,a);if(!u)throw new Error(`Path traversal detected: "${a}"`);return void await(0,Z.mkdir)(u,{recursive:!0})}let l=a.split("/").slice(0,-1).join("/"),h=le(e,l);if(!h)throw new Error(`Path traversal detected: "${a}"`);let d=le(e,a);if(!d)throw new Error(`Path traversal detected: "${a}"`);l&&await(0,Z.mkdir)(h,{recursive:!0}),await(0,Z.writeFile)(d,o[a])})).then(()=>n()).catch(a=>{(0,Z.rm)(e,{recursive:!0,force:!0}),r(a)})})})}async function co(t){let e=(0,Jn.join)(wl,t);try{await(0,Z.access)(e,lo.constants.F_OK)}catch{let r=`https://clients2.google.com/service/update2/crx?response=redirect&acceptformat=crx2,crx3&x=id%3D${t}%26uc&prodversion=${process.versions.chrome}`,i=await so(r,{headers:{"User-Agent":`Electron ${process.versions.electron} ~ Vencord (https://github.com/Vendicated/Vencord)`}});await bl(ao(i),e).catch(o=>console.error(`Failed to extract extension ${t}`,o))}qt.session.defaultSession.extensions?qt.session.defaultSession.extensions.loadExtension(e):qt.session.defaultSession.loadExtension(e)}ke.app.whenReady().then(()=>{ke.protocol.handle("vencord",({url:t})=>{let e=decodeURI(t).slice(10).replace(/\?v=\d+$/,"");if(e.endsWith("/")&&(e=e.slice(0,-1)),e.startsWith("/themes/")){let n=e.slice(8),r=le(ne,n);return r?ke.net.fetch((0,Xn.pathToFileURL)(r).toString()):new Response(null,{status:404})}switch(e){case"renderer.js.map":case"vencordDesktopRenderer.js.map":case"preload.js.map":case"vencordDesktopPreload.js.map":case"patcher.js.map":case"vencordDesktopMain.js.map":return ke.net.fetch((0,Xn.pathToFileURL)((0,uo.join)(__dirname,e)).toString());default:return new Response(null,{status:404})}});try{C.store.enableReactDevtools&&co("fmkadmapgofadopljbjfkapdkoienihi").then(()=>console.info("[Vencord] Installed React Developer Tools")).catch(t=>console.error("[Vencord] Failed to install React Developer Tools",t))}catch{}Li()});
 //# sourceURL=file:///VencordDesktopMain
 //# sourceMappingURL=vencord://vencordDesktopMain.js.map
 /*! For license information please see vencordDesktopMain.js.LEGAL.txt */

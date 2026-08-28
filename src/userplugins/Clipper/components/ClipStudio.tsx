@@ -733,6 +733,18 @@ export const STUDIO_CSS = `
     left: auto;
     right: 0;
 }
+/* The markers, on the montage's own clock. Amber rather than the playhead's
+   white: a tick is a place worth cutting near, not the place being watched. */
+.vc-clipper-ruler-tick {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--yellow-330, #f0b232);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, .35);
+    pointer-events: none;
+}
 .vc-clipper-ruler-head {
     position: absolute;
     top: 0;
@@ -1930,6 +1942,33 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
 
     /** Source name per segment id, for the blocks on the cut ruler. */
     const rulerNames = new Map(project.segments.map(s => [s.id, byId.get(s.sourceId)?.name ?? "?"]));
+
+    /**
+     * Every marker of every segment, moved onto the montage's clock.
+     *
+     * A marker is stored against the source file, so it is placed by where its
+     * segment starts and stretched by that segment's speed: one inside a 2x
+     * segment is half as far along the montage as it is along the file. A
+     * marker a trim left outside its segment is not on the montage at all, and
+     * is not drawn.
+     */
+    const rulerMarkers = (() => {
+        const out: number[] = [];
+        let elapsed = 0;
+
+        for (const s of project.segments) {
+            const span = Math.max(0.001, s.to - s.from);
+            const scale = segmentLength(s) / span;
+
+            for (const at of meta[byId.get(s.sourceId)?.name ?? ""]?.markers ?? []) {
+                if (at >= s.from && at <= s.to) out.push(elapsed + (at - s.from) * scale);
+            }
+
+            elapsed += segmentLength(s);
+        }
+
+        return out;
+    })();
 
     /** Every category present in the folder, for the filter dropdown. */
     const categories = categoriesOf((clips ?? []).map(c => c.name), meta);
@@ -4731,6 +4770,7 @@ export function ClipStudio({ onClose, initial }: { onClose(): void; initial?: st
                                     <CutRuler
                                         segments={project.segments}
                                         names={rulerNames}
+                                        markers={rulerMarkers}
                                         length={total}
                                         playhead={projectAt}
                                         mark={mark}

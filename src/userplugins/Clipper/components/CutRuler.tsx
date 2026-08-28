@@ -17,6 +17,11 @@
  * splitting twice by eye and deleting what fell between, with nothing on screen
  * saying where the two seams were. Here the range is the thing being dragged and
  * the cut is one button.
+ *
+ * The markers are drawn on it for the same reason. They were only ever a row of
+ * timestamps in the segment panel, which says a marker exists but not where it
+ * falls against the rest of the montage - and the whole use of a marker is to
+ * cut around it.
  */
 
 import { useRef, useState } from "@webpack/common";
@@ -45,6 +50,8 @@ interface Props {
     segments: Segment[];
     /** Source name per segment id, for the tooltip on each block. */
     names: Map<string, string>;
+    /** Every marker on the montage's clock, in seconds. */
+    markers: number[];
     /** Length of the montage, in seconds. */
     length: number;
     /** Playhead in project time. */
@@ -57,7 +64,7 @@ interface Props {
     onSelect(id: string): void;
 }
 
-export function CutRuler({ segments, names, length, playhead, mark, selected, disabled, onMark, onSeek, onSelect }: Props) {
+export function CutRuler({ segments, names, markers, length, playhead, mark, selected, disabled, onMark, onSeek, onSelect }: Props) {
     const laneRef = useRef<HTMLDivElement>(null);
     const [drag, setDrag] = useState<Drag | null>(null);
 
@@ -151,6 +158,16 @@ export function CutRuler({ segments, names, length, playhead, mark, selected, di
                             // being taken out of.
                             if (!disabled) onSelect(segment.id);
                         }}
+                    />
+                ))}
+
+                {/* Under the range and the playhead, both of which are being
+                    moved and have to stay readable over a tick. */}
+                {markers.map((at, i) => (
+                    <div
+                        key={`${at}-${i}`}
+                        className="vc-clipper-ruler-tick"
+                        style={{ left: `${(Math.max(0, Math.min(span, at)) / span) * 100}%` }}
                     />
                 ))}
 

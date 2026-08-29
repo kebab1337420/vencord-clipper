@@ -15,6 +15,7 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import definePlugin from "@utils/types";
 import { createRoot, Toasts } from "@webpack/common";
 
+import { attachMenuPatch } from "./attachMenu";
 import { ClipperChatButton, ClipperIcon } from "./components/ClipperChatButton";
 import { ClipperOverlay } from "./components/ClipperOverlay";
 import { encoderSummary, probeEncoders } from "./encoders";
@@ -190,6 +191,11 @@ export default definePlugin({
     chatBarButton: {
         icon: ClipperIcon,
         render: ClipperChatButton
+    },
+
+    // The + on the message box, one entry under uploading a file.
+    contextMenus: {
+        "channel-attach": attachMenuPatch
     },
 
     toolboxActions: {

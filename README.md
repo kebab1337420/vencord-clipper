@@ -206,44 +206,6 @@ obviously can't really make every single feature possible because it isn't a ded
 - Clips written straight to disk on the desktop app (configurable folder,
   defaults to `<Videos>/DiscordClips`), browser download as fallback
 
-## What it looks like
-
-The button sits above the account panel — left click opens the source picker,
-right click opens the actions menu.
-
-<p align="center">
-  <img src="docs/images/overlay-button.png" alt="The Clipper button next to the mute, deafen and settings buttons of the account panel" width="384">
-</p>
-
-A second one lives in the chat bar, next to the gift and GIF buttons — left
-click saves, right click starts or stops the buffer.
-
-<p align="center">
-  <img src="docs/images/chat-bar-button.png" alt="The Clipper button in the chat bar, among the gift, GIF and emoji buttons" width="384">
-</p>
-
-The picker lists screens and windows with a live preview, and carries the
-capture settings that are worth changing often: frame rate, resolution,
-encoding, quality and buffer length.
-
-![The source picker, listing screens and windows with their previews](docs/images/source-picker.png)
-
-The clip studio is the clip folder and the editor in one window: library on the
-left, preview and timeline in the middle, the picked segment's trim, speed,
-volume and effects on the right.
-
-![The clip studio, a Counter-Strike clip on the timeline with the segment panel open](docs/images/clip-studio.png)
-
-The right panel's other tabs cover the rest of a montage — captions, the sound
-of the people in the call plus the mixer, images laid over the frame, and the
-render settings.
-
-| Captions | Audio |
-| --- | --- |
-| ![The Captions tab and its caption style controls](docs/images/studio-captions.png) | ![The Audio tab, with the people recorded in the montage and the sound mixer](docs/images/studio-audio.png) |
-| **Images** | **Output** |
-| ![The Images tab, placing a picture at the playhead](docs/images/studio-images.png) | ![The Output tab: size, frame rate and audio for the render](docs/images/studio-output.png) |
-
 ## Install
 
 Windows, no toolchain: close Discord (and Vesktop), then run

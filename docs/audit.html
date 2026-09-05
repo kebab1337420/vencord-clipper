@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Audit Clipper</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #111318;
+            --panel: #1b1e26;
+            --border: #303542;
+            --text: #f1f3f7;
+            --muted: #a7adbb;
+            --accent: #f0b132;
+            --critical: #ed6a5a;
+            --fixed: #56c596;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            background: radial-gradient(circle at top right, #282117, var(--bg) 42%);
+            color: var(--text);
+            font: 16px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        main { max-width: 980px; margin: 0 auto; padding: 56px 24px 72px; }
+        header { margin-bottom: 32px; }
+        .eyebrow { color: var(--accent); font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+        h1 { margin: 8px 0; font-size: clamp(32px, 6vw, 58px); line-height: 1.05; }
+        h2 { margin: 0 0 12px; font-size: 21px; }
+        p { margin: 0; color: var(--muted); }
+        .summary { max-width: 720px; font-size: 18px; }
+        .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 28px 0; }
+        .card, .finding { background: color-mix(in srgb, var(--panel) 94%, transparent); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+        .metric { color: var(--accent); font-size: 30px; font-weight: 750; }
+        .label { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
+        .finding { margin-top: 16px; border-left: 4px solid var(--critical); }
+        .finding.fixed { border-left-color: var(--fixed); }
+        .finding h3 { margin: 0 0 6px; font-size: 18px; }
+        .tag { display: inline-block; margin-bottom: 10px; border-radius: 999px; padding: 2px 10px; background: #3d2927; color: #ff9a8e; font-size: 12px; font-weight: 700; }
+        .fixed .tag { background: #19352d; color: #86e0b8; }
+        code { color: #ffd783; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .92em; }
+        ul { margin: 10px 0 0; padding-left: 22px; color: var(--muted); }
+        footer { margin-top: 30px; color: var(--muted); font-size: 13px; }
+        @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } main { padding-top: 32px; } }
+    </style>
+</head>
+<body>
+    <main>
+        <header>
+            <div class="eyebrow">Vencord Clipper</div>
+            <h1>Rapport d'audit</h1>
+            <p class="summary">Analyse du cycle de vie de l'enregistreur et du moteur natif de capture. L'objectif est d'expliquer les rechargements de Discord observes toutes les deux a trois heures.</p>
+        </header>
+
+        <section class="grid" aria-label="Synthese">
+            <div class="card"><div class="metric">1</div><div class="label">probleme critique identifie</div></div>
+            <div class="card"><div class="metric">30 min</div><div class="label">intervalle de recyclage</div></div>
+            <div class="card"><div class="metric">OK</div><div class="label">verification TypeScript</div></div>
+        </section>
+
+        <section aria-labelledby="findings">
+            <h2 id="findings">Constats et mesures</h2>
+
+            <article class="finding">
+                <span class="tag">Cause</span>
+                <h3>Ressources natives conservees trop longtemps</h3>
+                <p>Le moteur de clips natif conserve ses surfaces de capture, son encodeur GPU et ses buffers audio hors du tas JavaScript pendant toute la duree du buffer. Cette memoire augmente jusqu'au rechargement du renderer Discord.</p>
+                <ul>
+                    <li>Fichier concerne : <code>src/userplugins/Clipper/recorder.ts</code></li>
+                    <li>Symptomes : hausse de la memoire native, watchdog vocal, puis rechargement de Discord.</li>
+                </ul>
+            </article>
+
+            <article class="finding fixed">
+                <span class="tag">Corrige</span>
+                <h3>Recyclage controle du moteur natif</h3>
+                <p>Le moteur est desarme puis rearme toutes les 30 minutes. Le buffer JavaScript reste actif et sert de repli pendant la courte phase de reconstruction.</p>
+                <ul>
+                    <li>Les timers sont annules lors de chaque arret ou redemarrage.</li>
+                    <li>Un jeton d'invalidation empeche un armement asynchrone obsolete de relancer le moteur.</li>
+                    <li>Le nettoyage libere aussi les arrets en cours avant de fermer les pistes audio.</li>
+                </ul>
+            </article>
+        </section>
+
+        <footer>Derniere mise a jour : 5 septembre 2026 &middot; Audit technique du projet Clipper</footer>
+    </main>
+</body>
+</html>

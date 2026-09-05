@@ -105,6 +105,13 @@ const AUTO_SAVE_MS = 120_000;
 /** How much of the buffer an automatic save keeps, in seconds. */
 const AUTO_SAVE_SECONDS = 30;
 
+/**
+ * The native clip engine keeps capture surfaces and encoder state outside the
+ * JS heap. Recycle it before that native allocation can grow until Discord
+ * reloads the renderer.
+ */
+const NATIVE_RESET_MS = 30 * 60_000;
+
 type Listener = (state: RecorderState) => void;
 
 /**
@@ -302,6 +309,11 @@ class ClipRecorder {
     private consentBound = false;
     /** Poll that writes down what the client is holding. See `watchMemory`. */
     private memoryTicker: ReturnType<typeof setInterval> | null = null;
+    private nativeResetTicker: ReturnType<typeof setInterval> | null = null;
+    private nativeResetTimeout: ReturnType<typeof setTimeout> | null = null;
+    /** Invalidates an async native arm when the buffer is stopped or restarted. */
+    private nativeArmToken = 0;
+    private nativeArmInFlight = false;
     private stream: MediaStream | null = null;
     /** Discord's microphone, gated the way Discord gates it. See ./micInput. */
     private mic: MicInput | null = null;
@@ -1486,7 +1498,13 @@ class ClipRecorder {
             this.consentBound = false;
         }
 
-        if (this.native) {
+        if (this.nativeResetTicker) clearInterval(this.nativeResetTicker);
+        this.nativeResetTicker = null;
+        if (this.nativeResetTimeout) clearTimeout(this.nativeResetTimeout);
+        this.nativeResetTimeout = null;
+        this.nativeArmToken++;
+
+        if (this.native || this.nativeArmInFlight) {
             disarm();
             this.native = false;
         }
@@ -1912,6 +1930,9 @@ class ClipRecorder {
      */
     private async armNative(): Promise<void> {
         if (!settings.store.nativeEngine) return;
+        if (this.state !== "recording") return;
+
+        const token = ++this.nativeArmToken;
 
         const { clipLength, resolution, fps } = settings.store;
 
@@ -1952,14 +1973,19 @@ class ClipRecorder {
         // reports itself ready from inside the call that arms it, and a watch
         // opened afterwards has already missed it.
         const watch = watchRecording();
+        this.nativeArmInFlight = true;
 
         if (!arm({ sourceId, seconds: clipLength, resolution, frameRate: fps, applicationName: sourceName || "Clipper" })) {
+            this.nativeArmInFlight = false;
             watch.stop();
             toast("Recording mixed sound: the clip engine would not take this source", Toasts.Type.MESSAGE);
             return;
         }
 
         const verdict = await watch.settled;
+        this.nativeArmInFlight = false;
+        if (token !== this.nativeArmToken || this.state !== "recording") return;
+
         if (!verdict.recording) {
             logger.warn(`The native clip engine would not start: ${verdict.reason}`);
             toast(`Recording mixed sound: ${verdict.reason}`, Toasts.Type.MESSAGE);
@@ -1996,6 +2022,8 @@ class ClipRecorder {
         this.native = true;
         this.nativeSaveWarned = false;
         this.nativeFailures = 0;
+        if (this.nativeResetTicker) clearInterval(this.nativeResetTicker);
+        this.nativeResetTicker = setInterval(() => this.resetNative(), NATIVE_RESET_MS);
 
         /*
          * The same message either way, because the difference does not concern
@@ -2012,6 +2040,24 @@ class ClipRecorder {
          */
         logger.info(`The native clip engine is recording alongside the plugin's buffer (${verdict.confirmed ? "confirmed by the engine" : "no ready event, which is normal on this path"}).`);
         toast("Native engine on - one sound track per person in the call", Toasts.Type.SUCCESS);
+    }
+
+    /**
+     * Rebuild the native capture periodically. The JS buffer stays alive, so a
+     * save during the one-second native teardown still has a mixed fallback.
+     */
+    private resetNative(): void {
+        if (this.state !== "recording" || !this.native) return;
+
+        const token = ++this.nativeArmToken;
+        disarm();
+        this.native = false;
+
+        this.nativeResetTimeout = setTimeout(() => {
+            this.nativeResetTimeout = null;
+            if (token !== this.nativeArmToken || this.state !== "recording") return;
+            void this.armNative();
+        }, 1000);
     }
 
     /** Lets the native engine record anybody in the call it has not been told about yet. */

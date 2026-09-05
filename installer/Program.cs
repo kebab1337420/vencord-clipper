@@ -77,23 +77,48 @@ internal static class Program
             install.Enabled = false;
             steamVr.Enabled = false;
 
-            string? temporary = null;
+            string? zipPath = null;
+            string? temporaryExtractDir = null;
             try
             {
-                temporary = Path.Combine(Path.GetTempPath(), "clipper-installer-" + Guid.NewGuid().ToString("N"));
-                Directory.CreateDirectory(temporary);
-                var archive = Path.Combine(temporary, "clipper.zip");
+                string exeDir = Path.GetDirectoryName(Environment.GetCommandLineArgs()[0]);
+                string cachePath = Path.Combine(exeDir, "clipper-v5.2.0.zip");
+                bool useCache = false;
+                if (File.Exists(cachePath))
+                {
+                    var fileInfo = new FileInfo(cachePath);
+                    if ((DateTime.Now - fileInfo.LastWriteTime).TotalHours < 24)
+                    {
+                        useCache = true;
+                        zipPath = cachePath;
+                    }
+                }
 
-                status.Text = "Downloading Clipper 5.2...";
-                using var client = new HttpClient();
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("ClipperInstaller/5.2");
-                await using (var input = await client.GetStreamAsync(ReleaseArchive))
-                await using (var output = File.Create(archive))
-                    await input.CopyToAsync(output);
+                if (!useCache)
+                {
+                    // Download to a temporary zip file
+                    string tempZip = Path.Combine(Path.GetTempPath(), "clipper-installer-" + Guid.NewGuid().ToString("N") + ".zip");
+                    using var client = new HttpClient();
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("ClipperInstaller/5.2");
+                    status.Text = "Downloading Clipper 5.2...";
+                    await using (var input = await client.GetStreamAsync(ReleaseArchive))
+                    await using (var output = File.Create(tempZip))
+                        await input.CopyToAsync(output);
+                    // Copy to cache for future use
+                    File.Copy(tempZip, cachePath, true);
+                    zipPath = tempZip;
+                }
+                else
+                {
+                    status.Text = "Using cached installer data...";
+                }
 
+                // Extract the zip to a temporary directory
+                temporaryExtractDir = Path.Combine(Path.GetTempPath(), "clipper-installer-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(temporaryExtractDir);
                 status.Text = "Preparing the installer...";
-                ZipFile.ExtractToDirectory(archive, temporary);
-                var root = Directory.GetDirectories(temporary)
+                ZipFile.ExtractToDirectory(zipPath, temporaryExtractDir);
+                var root = Directory.GetDirectories(temporaryExtractDir)
                     .FirstOrDefault(path => File.Exists(Path.Combine(path, "install.bat")));
                 if (root is null) throw new InvalidOperationException("The release archive is missing install.bat.");
 
@@ -119,11 +144,13 @@ internal static class Program
             {
                 install.Enabled = true;
                 steamVr.Enabled = true;
-                if (temporary is not null)
+                // Clean up temporary extraction directory
+                if (temporaryExtractDir is not null && Directory.Exists(temporaryExtractDir))
                 {
-                    try { Directory.Delete(temporary, recursive: true); }
-                    catch { /* The installer completed; locked files can be removed later. */ }
+                    try { Directory.Delete(temporaryExtractDir, recursive: true); }
+                    catch { /* Ignore errors on cleanup */ }
                 }
+                // Note: we do not delete the cached zip file here; it persists for future runs.
             }
         }
 

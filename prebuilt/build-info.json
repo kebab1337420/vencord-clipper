@@ -2,9 +2,9 @@
   "vencordVersion": "1.15.2",
   "vencordCommit": "ef29bbe",
   "plugin": "Clipper",
-  "clipperVersion": "5.5.0",
-  "clipperCommit": "1d0f0ca",
-  "builtAt": "2026-09-14T17:40:39",
+  "clipperVersion": "5.5.1",
+  "clipperCommit": "2446ee4",
+  "builtAt": "2026-09-14T18:01:49",
   "files": {
     "patcher.js": {
       "size": 134340,
@@ -24,7 +24,7 @@
     },
     "renderer.js": {
       "size": 1082494,
-      "sha256": "bf710010d33319efcb1c48cbf429a73bb367e2cd82f50eb74bdcb5ace6c03fe8"
+      "sha256": "dd5570315e9010841a9189f732acc25e608b556074b4861a530dd689b795d313"
     },
     "renderer.js.LEGAL.txt": {
       "size": 1880,
@@ -48,7 +48,7 @@
     },
     "vencordDesktopRenderer.js": {
       "size": 1090055,
-      "sha256": "a1ff851e7be5971c0372629440dd6ff5859a4658f36340e8fc96336412a8cca7"
+      "sha256": "77c2d77ca3569de809d58bbd40e2ff914b281cb9f545dfba53d68ea9764fa15d"
     },
     "vencordDesktopRenderer.js.LEGAL.txt": {
       "size": 1880,

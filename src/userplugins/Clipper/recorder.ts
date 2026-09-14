@@ -2032,7 +2032,16 @@ class ClipRecorder {
         const availability = nativeAvailability();
         if (!availability.available) {
             logger.info(`Not using the native clip engine: ${availability.reason}`);
-            toast(`Recording mixed sound: ${availability.reason}`, Toasts.Type.MESSAGE);
+            /*
+             * "Not on this account" is permanent for the user - they will never
+             * get the Clips experiment on that account, and hearing it on every
+             * buffer start is just noise. The other reasons are transient and
+             * worth surfacing: an engine the machine can reach but can't arm
+             * right now is a limitation the user might act on.
+             */
+            if (availability.reason !== "This client's voice module was built without the clip engine - the Clips experiment is not on this account.") {
+                toast(`Recording mixed sound: ${availability.reason}`, Toasts.Type.MESSAGE);
+            }
             return;
         }
         if (!canRecord(sourceId)) {

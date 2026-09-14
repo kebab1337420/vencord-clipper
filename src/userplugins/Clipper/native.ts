@@ -13,6 +13,7 @@
 
 import { createHash } from "crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
+import type { Writable } from "stream";
 import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, type IpcMainInvokeEvent, screen, session, shell } from "electron";
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { get as httpsGet } from "https";
@@ -90,7 +91,7 @@ function voiceBinaryPath(): string | null {
 }
 
 let voiceProc: ChildProcessWithoutNullStreams | null = null;
-let voiceStdin: NodeJS.WriteStream | null = null;
+let voiceStdin: Writable | null = null;
 
 /**
  * Captures the Discord user token the first time a Discord API request goes
